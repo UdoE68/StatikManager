@@ -1245,16 +1245,19 @@ namespace StatikManager.Modules.Dokumente
 
         private void DateiListe_ContextMenuOpening(object sender, ContextMenuEventArgs e)
         {
-            string? pfad = (DateiListe.SelectedItem as DateiEintrag)?.VollerPfad;
+            var pfade = DateiListe.SelectedItems
+                .OfType<DateiEintrag>()
+                .Select(d => d.VollerPfad)
+                .ToList();
 
             var menu = new ContextMenu();
 
-            var itemLöschen = new MenuItem
-            {
-                Header    = "🗑 Datei löschen",
-                IsEnabled = pfad != null
-            };
-            itemLöschen.Click += (s, ev) => DateiLöschen(pfad);
+            string löschLabel = pfade.Count == 1 ? "🗑 Datei löschen"
+                              : pfade.Count  > 1 ? $"🗑 {pfade.Count} Dateien löschen"
+                              :                    "🗑 Datei löschen";
+
+            var itemLöschen = new MenuItem { Header = löschLabel, IsEnabled = pfade.Count > 0 };
+            itemLöschen.Click += (s, ev) => DateienLöschen(pfade);
             menu.Items.Add(itemLöschen);
 
             if (_projektPfad != null)
@@ -1291,40 +1294,84 @@ namespace StatikManager.Modules.Dokumente
 
         // ── Datei löschen ─────────────────────────────────────────────────────
 
+        // Einzelauftrag (Rechtsklick im Baum) → leitet an Batch-Methode weiter
         private void DateiLöschen(string? pfad)
         {
             if (pfad == null) return;
+            DateienLöschen(new List<string> { pfad });
+        }
 
-            var name = Path.GetFileName(pfad);
+        // Mülleimer-Button in jeder selektierten Zeile → löscht immer die gesamte Auswahl
+        private void BtnZeileLöschen_Click(object sender, RoutedEventArgs e)
+        {
+            var pfade = DateiListe.SelectedItems
+                .OfType<DateiEintrag>()
+                .Select(d => d.VollerPfad)
+                .ToList();
+
+            // Fallback: DataContext der geklickten Zeile, falls Selektion leer
+            if (pfade.Count == 0 && sender is Button btn && btn.DataContext is DateiEintrag eintrag)
+                pfade.Add(eintrag.VollerPfad);
+
+            DateienLöschen(pfade);
+        }
+
+        // Kernmethode: Batch-Löschung mit Bestätigungsdialog und Fehlersammlung
+        private void DateienLöschen(IList<string> pfade)
+        {
+            if (pfade == null || pfade.Count == 0) return;
+
+            // Bestätigungsdialog — Default-Fokus: Nein
+            string frage = pfade.Count == 1
+                ? $"Datei wirklich löschen?\n\n{Path.GetFileName(pfade[0])}"
+                : $"{pfade.Count} Dateien wirklich löschen?";
+
             var antwort = MessageBox.Show(
-                $"Datei wirklich unwiderruflich löschen?\n\n{name}",
-                "Datei löschen",
+                frage, "Löschen bestätigen",
                 MessageBoxButton.YesNo,
-                MessageBoxImage.Warning);
+                MessageBoxImage.Warning,
+                MessageBoxResult.No);
             if (antwort != MessageBoxResult.Yes) return;
 
-            try
-            {
-                File.Delete(pfad);
+            var fehler = new List<string>();
+            bool vorschauBetroffen = false;
 
-                // Vorschau zurücksetzen wenn die gelöschte Datei gerade angezeigt wurde
-                if (string.Equals(_aktiverDateipfad, pfad, StringComparison.OrdinalIgnoreCase))
+            foreach (var pfad in pfade)
+            {
+                try
                 {
-                    _aktiverDateipfad = null;
-                    _dokumentGeladen  = false;
-                    DateiAusgewählt?.Invoke(null);
-                    ZeigeBrowser(mitAbdeckung: false);
-                    WordVorschau.Navigate("about:blank");
-                }
+                    if (File.Exists(pfad))
+                        File.Delete(pfad);
 
-                if (_projektPfad != null) AktualisiereDokumentListe();
-                AppZustand.Instanz.SetzeStatus($"Gelöscht: {name}");
+                    if (string.Equals(_aktiverDateipfad, pfad, StringComparison.OrdinalIgnoreCase))
+                        vorschauBetroffen = true;
+                }
+                catch (Exception ex)
+                {
+                    fehler.Add($"{Path.GetFileName(pfad)}: {ex.Message}");
+                }
             }
-            catch (Exception ex)
+
+            // Vorschau leeren, wenn aktive Datei betroffen
+            if (vorschauBetroffen)
             {
-                MessageBox.Show("Fehler beim Löschen:\n" + ex.Message,
-                    "Fehler", MessageBoxButton.OK, MessageBoxImage.Error);
+                _aktiverDateipfad = null;
+                _dokumentGeladen  = false;
+                DateiAusgewählt?.Invoke(null);
+                ZeigeBrowser(mitAbdeckung: false);
+                WordVorschau.Navigate("about:blank");
             }
+
+            if (_projektPfad != null) AktualisiereDokumentListe();
+
+            int gelöscht = pfade.Count - fehler.Count;
+            AppZustand.Instanz.SetzeStatus(
+                gelöscht > 0 ? $"{gelöscht} Datei(en) gelöscht." : "Keine Datei gelöscht.");
+
+            if (fehler.Count > 0)
+                MessageBox.Show(
+                    "Folgende Dateien konnten nicht gelöscht werden:\n\n" + string.Join("\n", fehler),
+                    "Fehler beim Löschen", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
 
         // ── Neues Word-Dokument ───────────────────────────────────────────────

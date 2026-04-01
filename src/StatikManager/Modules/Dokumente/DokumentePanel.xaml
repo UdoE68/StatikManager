@@ -97,6 +97,7 @@
 
                 <ListView x:Name="DateiListe"
                           Visibility="Collapsed"
+                          SelectionMode="Extended"
                           SelectionChanged="DateiListe_SelectionChanged"
                           FontSize="13"
                           BorderThickness="0"
@@ -106,9 +107,40 @@
                     </ListView.ContextMenu>
                     <ListView.View>
                         <GridView>
-                            <GridViewColumn Header="Dateiname"
-                                            Width="165"
-                                            DisplayMemberBinding="{Binding Dateiname}"/>
+                            <GridViewColumn Header="Dateiname" Width="165">
+                                <GridViewColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Grid.Column="0"
+                                                       Text="{Binding Dateiname}"
+                                                       VerticalAlignment="Center"/>
+                                            <Button Grid.Column="1"
+                                                    Content="🗑"
+                                                    Padding="3,0"
+                                                    ToolTip="Auswahl löschen"
+                                                    Click="BtnZeileLöschen_Click">
+                                                <Button.Style>
+                                                    <Style TargetType="Button">
+                                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                                        <Style.Triggers>
+                                                            <DataTrigger Value="True"
+                                                                         Binding="{Binding IsSelected,
+                                                                             RelativeSource={RelativeSource
+                                                                                 AncestorType=ListViewItem}}">
+                                                                <Setter Property="Visibility" Value="Visible"/>
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </Button.Style>
+                                            </Button>
+                                        </Grid>
+                                    </DataTemplate>
+                                </GridViewColumn.CellTemplate>
+                            </GridViewColumn>
                             <GridViewColumn Header="Ordner"
                                             DisplayMemberBinding="{Binding OrdnerRelativ}"/>
                         </GridView>
