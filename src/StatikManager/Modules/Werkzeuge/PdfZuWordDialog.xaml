@@ -1,0 +1,76 @@
+<Window x:Class="StatikManager.Modules.Werkzeuge.PdfZuWordDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="PDF zu Word konvertieren"
+        Width="560" Height="300"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False">
+
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="10"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="12"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="16"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="6"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- PDF-Quelldatei -->
+        <StackPanel Grid.Row="0">
+            <TextBlock Text="PDF-Quelldatei:" FontWeight="SemiBold" Margin="0,0,0,4"/>
+            <DockPanel>
+                <Button x:Name="BtnPdfSuchen" DockPanel.Dock="Right" Content="Durchsuchen …"
+                        Width="100" Height="26" Margin="8,0,0,0"
+                        Click="BtnPdfSuchen_Click"/>
+                <TextBox x:Name="TxtPdfPfad" IsReadOnly="True" Height="26"
+                         VerticalContentAlignment="Center" Background="#F5F5F5"/>
+            </DockPanel>
+        </StackPanel>
+
+        <!-- Word-Zieldatei -->
+        <StackPanel Grid.Row="2">
+            <TextBlock Text="Word-Zieldatei (.docx):" FontWeight="SemiBold" Margin="0,0,0,4"/>
+            <DockPanel>
+                <Button x:Name="BtnWordSuchen" DockPanel.Dock="Right" Content="Durchsuchen …"
+                        Width="100" Height="26" Margin="8,0,0,0"
+                        Click="BtnWordSuchen_Click"/>
+                <TextBox x:Name="TxtWordPfad" IsReadOnly="True" Height="26"
+                         VerticalContentAlignment="Center" Background="#F5F5F5"/>
+            </DockPanel>
+        </StackPanel>
+
+        <!-- Info-Hinweis -->
+        <Border Grid.Row="4" Background="#FFF8E1" BorderBrush="#FFE082"
+                BorderThickness="1" CornerRadius="3" Padding="10,6">
+            <TextBlock TextWrapping="Wrap" FontSize="11" Foreground="#555">
+                Word analysiert den PDF-Inhalt: Text bleibt bearbeitbar, Grafiken werden als Bilder eingefügt.
+                Erfordert Microsoft Word 2013 oder neuer.
+            </TextBlock>
+        </Border>
+
+        <!-- Fortschrittsanzeige -->
+        <ProgressBar x:Name="Fortschritt" Grid.Row="6"
+                     Height="18" Minimum="0" Maximum="100" Value="0"/>
+        <TextBlock x:Name="TxtStatus" Grid.Row="8"
+                   Text="Bereit." Foreground="#666" FontSize="11"
+                   TextTrimming="CharacterEllipsis"/>
+
+        <!-- Buttons -->
+        <StackPanel Grid.Row="10" Orientation="Horizontal"
+                    HorizontalAlignment="Right" VerticalAlignment="Bottom">
+            <Button x:Name="BtnKonvertieren" Content="Konvertieren"
+                    Width="110" Height="28" Margin="0,0,8,0"
+                    Click="BtnKonvertieren_Click" IsDefault="True"/>
+            <Button x:Name="BtnSchliessen" Content="Schließen"
+                    Width="90" Height="28"
+                    Click="BtnSchliessen_Click" IsCancel="True"/>
+        </StackPanel>
+    </Grid>
+</Window>

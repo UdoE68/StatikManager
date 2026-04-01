@@ -1,0 +1,90 @@
+<Window x:Class="StatikManager.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Statik-Manager"
+        Height="750" Width="1200"
+        MinHeight="500" MinWidth="800"
+        WindowStartupLocation="CenterScreen">
+
+    <DockPanel>
+
+        <!-- ── Menüleiste ────────────────────────────────────────────────── -->
+        <Border DockPanel.Dock="Top"
+                Background="{DynamicResource Farbe.Werkzeugleiste}"
+                BorderBrush="{DynamicResource Farbe.Rahmen}"
+                BorderThickness="0,0,0,1">
+            <Menu x:Name="HauptMenü">
+
+                <MenuItem Header="_Datei">
+                    <MenuItem Header="Projekt laden …"
+                              InputGestureText="Strg+O"
+                              Click="MenüProjektLaden_Click"/>
+                    <Separator/>
+                    <MenuItem Header="Standardpfad festlegen …"
+                              Click="MenüStandardpfad_Click"
+                              ToolTip="Standardordner für den Projekt-öffnen-Dialog festlegen"/>
+                    <Separator/>
+                    <MenuItem Header="Beenden"
+                              Click="MenüBeenden_Click"/>
+                </MenuItem>
+
+                <!-- Module fügen hier ihre Menüs ein (Index 1, vor Hilfe) -->
+
+                <MenuItem x:Name="MenüHilfe" Header="_Hilfe">
+                    <MenuItem Header="Über Statik-Manager"
+                              Click="MenüÜber_Click"/>
+                </MenuItem>
+
+            </Menu>
+        </Border>
+
+        <!-- ── Werkzeugleiste ─────────────────────────────────────────────── -->
+        <Border DockPanel.Dock="Top"
+                Background="{DynamicResource Farbe.Werkzeugleiste}"
+                BorderBrush="{DynamicResource Farbe.Rahmen}"
+                BorderThickness="0,0,0,1"
+                Padding="6,4">
+            <!-- Buttons erhalten automatisch den WerkzeugleistenButton-Stil -->
+            <Border.Resources>
+                <Style TargetType="Button"
+                       BasedOn="{StaticResource WerkzeugleistenButton}"/>
+            </Border.Resources>
+            <StackPanel x:Name="WerkzeugLeiste" Orientation="Horizontal"/>
+        </Border>
+
+        <!-- ── Statusleiste ───────────────────────────────────────────────── -->
+        <StatusBar DockPanel.Dock="Bottom">
+            <StatusBarItem>
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <Border x:Name="StatusIndikator"
+                            Width="8" Height="8"
+                            CornerRadius="4"
+                            Margin="0,0,6,0"
+                            Visibility="Collapsed"/>
+                    <TextBlock x:Name="TxtStatus" Text="Bereit"/>
+                </StackPanel>
+            </StatusBarItem>
+            <StatusBarItem>
+                <ProgressBar x:Name="StatusProgress"
+                             Width="120" Height="6"
+                             Minimum="0"
+                             Margin="8,0,0,0"
+                             Visibility="Collapsed"/>
+            </StatusBarItem>
+            <StatusBarItem HorizontalAlignment="Right">
+                <TextBlock x:Name="TxtProjektInfo"
+                           Foreground="{DynamicResource Farbe.TextSekunder}"/>
+            </StatusBarItem>
+            <StatusBarItem HorizontalAlignment="Right">
+                <TextBlock x:Name="TxtVersion"
+                           Foreground="{DynamicResource Farbe.TextSekunder}"
+                           FontSize="10"
+                           Margin="0,0,6,0"/>
+            </StatusBarItem>
+        </StatusBar>
+
+        <!-- ── Inhaltsbereich (wird vom aktiven Modul befüllt) ─────────────── -->
+        <ContentControl x:Name="HauptInhalt"/>
+
+    </DockPanel>
+</Window>

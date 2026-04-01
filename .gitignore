@@ -1,0 +1,45 @@
+# Build-Ausgaben
+bin/
+obj/
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.userprefs
+
+# NuGet
+packages/
+*.nupkg
+project.lock.json
+project.assets.json
+.nuget/
+
+# Resharper
+_ReSharper*/
+*.DotSettings.user
+
+# Rider
+.idea/
+
+# VS Code
+.vscode/
+
+# Temporäre WPF-Compilate
+*_wpftmp.*
+*.g.cs
+*.g.i.cs
+
+# Lokale Einstellungen / Secrets
+*.env
+appsettings.Local.json
+
+# Logs
+*.log
+
+# Betriebssystem
+Thumbs.db
+desktop.ini
+.DS_Store
