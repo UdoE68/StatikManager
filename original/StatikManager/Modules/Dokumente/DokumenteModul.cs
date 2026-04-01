@@ -1,0 +1,92 @@
+using StatikManager.Core;
+using System.Collections.Generic;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Media;
+using System.Windows.Shapes;
+
+namespace StatikManager.Modules.Dokumente
+{
+    /// <summary>
+    /// Modul für die Dokumentenverwaltung.
+    /// Registriert sich mit eigenem Menü, Werkzeugleisten-Einträgen und Panel.
+    /// </summary>
+    public class DokumenteModul : IModul
+    {
+        private DokumentePanel? _panel;
+
+        public string Id   => "dokumente";
+        public string Name => "Dokumente";
+
+        // ── Panel ─────────────────────────────────────────────────────────────
+
+        public UIElement ErstellePanel()
+        {
+            _panel = new DokumentePanel();
+            return _panel;
+        }
+
+        // ── Menü ──────────────────────────────────────────────────────────────
+
+        public MenuItem? ErzeugeMenüEintrag()
+        {
+            var menü      = new MenuItem { Header = "_Dokumente" };
+            var itemLaden = new MenuItem { Header = "Projekt laden …", InputGestureText = "Strg+O" };
+
+            itemLaden.Click += (_, _) => _panel?.ProjektLaden();
+
+            menü.Items.Add(itemLaden);
+            return menü;
+        }
+
+        // ── Werkzeugleiste ────────────────────────────────────────────────────
+
+        public IEnumerable<FrameworkElement> ErzeugeWerkzeugleistenEinträge()
+        {
+            // "Projekt laden"-Button
+            var btnLaden = new Button
+            {
+                Content = "📂  Projekt laden",
+                ToolTip = "Projektordner auswählen"
+            };
+            btnLaden.Click += (_, _) => _panel?.ProjektLaden();
+            yield return btnLaden;
+
+            // Trennlinie
+            yield return MacheTrennlinie();
+
+            // Projektpfad-Anzeige
+            var txtProjekt = new TextBlock
+            {
+                Text              = "Kein Projekt geladen",
+                Foreground        = Brushes.Gray,
+                FontStyle         = FontStyles.Italic,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin            = new Thickness(4, 0, 0, 0)
+            };
+
+            AppZustand.Instanz.ProjektGeändert += pfad =>
+            {
+                txtProjekt.Text       = pfad ?? "Kein Projekt geladen";
+                txtProjekt.Foreground = pfad != null ? Brushes.Black : Brushes.Gray;
+                txtProjekt.FontStyle  = pfad != null ? FontStyles.Normal : FontStyles.Italic;
+            };
+            yield return txtProjekt;
+        }
+
+        // ── Bereinigung ───────────────────────────────────────────────────────
+
+        public void Bereinigen() => _panel?.Bereinigen();
+
+        // ── Hilfsmethode ──────────────────────────────────────────────────────
+
+        private static Rectangle MacheTrennlinie() => new Rectangle
+        {
+            Width             = 1,
+            Height            = 18,
+            Fill              = new SolidColorBrush(System.Windows.Media.Color.FromRgb(0xCC, 0xCC, 0xCC)),
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin            = new Thickness(6, 0, 6, 0)
+        };
+    }
+}

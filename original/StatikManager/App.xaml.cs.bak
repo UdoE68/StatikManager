@@ -1,0 +1,46 @@
+using Microsoft.Win32;
+using System.Diagnostics;
+using System.IO;
+using System.Windows;
+
+namespace StatikManager
+{
+    public partial class App : Application
+    {
+        protected override void OnStartup(StartupEventArgs e)
+        {
+            // Globaler Handler: verhindert Absturz und zeigt genauen Fehlertext.
+            DispatcherUnhandledException += (s, ex) =>
+            {
+                ex.Handled = true;
+                MessageBox.Show(
+                    "Unbehandelter Fehler:\n\n"
+                    + ex.Exception.GetType().Name + "\n"
+                    + ex.Exception.Message
+                    + (ex.Exception.InnerException != null
+                        ? "\n\nInner: " + ex.Exception.InnerException.Message : ""),
+                    "Fehler", MessageBoxButton.OK, MessageBoxImage.Error);
+            };
+
+            // WebBrowser-Steuerelement auf IE 11-Modus setzen.
+            // Ohne diesen Eintrag läuft der WPF-WebBrowser im IE 7-Kompatibilitätsmodus
+            // (kein querySelectorAll, kein CSS3, kaputtes Word-MHT-Rendering).
+            SetzeBrowserEmulationsModus();
+            base.OnStartup(e);
+        }
+
+        private static void SetzeBrowserEmulationsModus()
+        {
+            try
+            {
+                var exeName = Path.GetFileName(Process.GetCurrentProcess().MainModule!.FileName);
+                using var key = Registry.CurrentUser.CreateSubKey(
+                    @"Software\Microsoft\Internet Explorer\Main\FeatureControl\FEATURE_BROWSER_EMULATION",
+                    writable: true);
+                // 11001 = IE 11 Edge-Modus (höchste Kompatibilität)
+                key?.SetValue(exeName, 11001, RegistryValueKind.DWord);
+            }
+            catch { /* Fehler beim Registry-Zugriff – ignorieren, Fallback auf IE 7 */ }
+        }
+    }
+}

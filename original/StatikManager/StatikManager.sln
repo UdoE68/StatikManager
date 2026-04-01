@@ -1,0 +1,25 @@
+
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.5.2.0
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "StatikManager", "StatikManager.csproj", "{8C977BCF-F477-6A45-CC89-3456AA99C05C}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|x64 = Debug|x64
+		Release|x64 = Release|x64
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{8C977BCF-F477-6A45-CC89-3456AA99C05C}.Debug|x64.ActiveCfg = Debug|x64
+		{8C977BCF-F477-6A45-CC89-3456AA99C05C}.Debug|x64.Build.0 = Debug|x64
+		{8C977BCF-F477-6A45-CC89-3456AA99C05C}.Release|x64.ActiveCfg = Release|x64
+		{8C977BCF-F477-6A45-CC89-3456AA99C05C}.Release|x64.Build.0 = Release|x64
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {A1BB118C-9D85-4B10-A1BA-7CF6A843B5F4}
+	EndGlobalSection
+EndGlobal

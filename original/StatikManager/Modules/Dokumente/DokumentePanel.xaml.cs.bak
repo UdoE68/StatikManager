@@ -1,0 +1,954 @@
+using PdfSharp.Drawing;
+using PdfSharp.Pdf;
+using PdfSharp.Pdf.IO;
+using StatikManager.Core;
+using System;
+using System.IO;
+using System.Linq;
+using System.Threading;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Navigation;
+using System.Windows.Threading;
+using Word = Microsoft.Office.Interop.Word;
+
+namespace StatikManager.Modules.Dokumente
+{
+    public partial class DokumentePanel : UserControl
+    {
+        // ── Felder ────────────────────────────────────────────────────────────
+
+        private string? _aktiverDateipfad;
+        private string? _projektPfad;
+        private string  _cacheDir = "";
+        private bool    _dokumentGeladen;
+        private bool    _panelBereit;
+        private string  _filterTyp = "Alle";
+
+        private static readonly string CacheBasis = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            "StatikManager", "pdf-cache");
+
+        // Version erhöhen → alle gecachten PDFs werden neu generiert
+        private const string CacheVersion = "v5";
+
+        private Thread?                  _vorThread;
+        private CancellationTokenSource? _vorCts;
+        private DispatcherTimer?         _abdeckungTimer;
+        private FileSystemWatcher?       _dateiWatcher;
+        private DispatcherTimer?         _änderungTimer;
+
+        // Wird gesetzt wenn nach about:blank automatisch neu geladen werden soll
+        private string? _autoRefreshPfad;
+
+        public event Action<string?>? DateiAusgewählt;
+
+        // ── Initialisierung ───────────────────────────────────────────────────
+
+        public DokumentePanel()
+        {
+            InitializeComponent();
+
+            if (Einstellungen.Instanz.DokumentAnsicht == AnsichtModus.Liste)
+            {
+                RbListe.IsChecked         = true;
+                DokumentenBaum.Visibility = Visibility.Collapsed;
+                DateiListe.Visibility     = Visibility.Visible;
+            }
+
+            foreach (var f in new[] {
+                "Alle Dateien",
+                "Word (.doc, .docx)",
+                "Excel (.xls, .xlsx)",
+                "PDF (.pdf)",
+                "Bilder (.jpg, .png …)" })
+                CbFilter.Items.Add(f);
+            CbFilter.SelectedIndex = 0;
+
+            _panelBereit = true;
+        }
+
+        // ── Öffentliche Aktionen ──────────────────────────────────────────────
+
+        public void ProjektLaden()
+        {
+            var pfad = OrdnerDialog.Zeigen(
+                startPfad: Einstellungen.Instanz.StandardPfad ?? "",
+                titel:     "Projektordner wählen",
+                besitzer:  Window.GetWindow(this));
+
+            if (string.IsNullOrWhiteSpace(pfad)) return;
+
+            _projektPfad = pfad;
+
+            var hash = ((uint)pfad.ToLowerInvariant().GetHashCode()).ToString("X8");
+            _cacheDir = Path.Combine(CacheBasis, hash);
+            Directory.CreateDirectory(_cacheDir);
+
+            AppZustand.Instanz.SetzeProjekt(_projektPfad);
+            AktualisiereDokumentListe();
+            StartVorkonvertierung(new DirectoryInfo(_projektPfad), _cacheDir);
+        }
+
+        public void InWordÖffnen()
+        {
+            if (_aktiverDateipfad is null) return;
+
+            if (IstPdfDatei(Path.GetExtension(_aktiverDateipfad)))
+            {
+                // PDF → blockweise als Bilder in Word exportieren
+                PdfEditor.ExportierenNachWord();
+            }
+            else
+            {
+                // Word-/andere Dateien direkt mit zugewiesener Anwendung öffnen
+                try
+                {
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                    {
+                        FileName        = _aktiverDateipfad,
+                        UseShellExecute = true
+                    });
+                    AppZustand.Instanz.SetzeStatus("Geöffnet: " + Path.GetFileName(_aktiverDateipfad));
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show("Fehler beim Öffnen:\n" + ex.Message, "Fehler",
+                                    MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Konvertiert eine PDF-Datei in ein bearbeitbares Word-Dokument (Klon).
+        /// Word 2013+ analysiert den Inhalt:
+        ///   – Text bleibt als echter, editierbarer Text erhalten.
+        ///   – Grafiken und nicht konvertierbare Elemente werden als Bilder eingebettet.
+        /// Das Ergebnis wird gecacht; bei unveränderter PDF wird der vorhandene Klon direkt geöffnet.
+        /// </summary>
+        private void ErstelleUndÖffneWordKlon(string pdfPfad)
+        {
+            var zielPfad = GetWordKlonPfad(pdfPfad, _cacheDir);
+
+            // Bereits vorhandenen Klon direkt öffnen (sofern aktuell)
+            if (CacheGültig(zielPfad, pdfPfad))
+            {
+                ÖffneInWord(zielPfad);
+                return;
+            }
+
+            AppZustand.Instanz.SetzeStatus("Starte Word für PDF-Konvertierung …");
+
+            var thread = new Thread(() =>
+            {
+                // PDF in einen temp-Pfad ohne Sonderzeichen kopieren,
+                // damit COM-Interop nicht an Umlauten/Leerzeichen scheitert.
+                string tempPdf = Path.Combine(
+                    Path.GetTempPath(),
+                    "sm_konvert_" + Guid.NewGuid().ToString("N") + ".pdf");
+
+                Word.Application? wordApp = null;
+                Word.Document?    wordDoc = null;
+                try
+                {
+                    File.Copy(pdfPfad, tempPdf, overwrite: true);
+
+                    Dispatcher.BeginInvoke(new Action(() =>
+                        AppZustand.Instanz.SetzeStatus("Word analysiert PDF …")));
+
+                    // Word sichtbar öffnen – so sieht der Nutzer den Konvertierungsfortschritt
+                    // und kann mit eventuellen Word-Dialogen interagieren.
+                    wordApp = new Word.Application { Visible = true };
+                    wordApp.DisplayAlerts             = Word.WdAlertLevel.wdAlertsAll;
+                    wordApp.Options.ConfirmConversions = false;
+
+                    Dispatcher.BeginInvoke(new Action(() =>
+                        AppZustand.Instanz.SetzeStatus("Word lädt und analysiert PDF …")));
+
+                    // Word 2013+ wandelt das PDF via „PDF Reflow" um:
+                    // Text → echte Absätze, Grafiken → eingebettete Bilder.
+                    wordDoc = wordApp.Documents.Open(
+                        FileName:           tempPdf,
+                        ReadOnly:           false,
+                        AddToRecentFiles:   false,
+                        ConfirmConversions: false,
+                        Format:             Word.WdOpenFormat.wdOpenFormatAuto);
+
+                    Dispatcher.BeginInvoke(new Action(() =>
+                        AppZustand.Instanz.SetzeStatus("Speichere Word-Klon …")));
+
+                    // Zielverzeichnis anlegen
+                    var dir = Path.GetDirectoryName(zielPfad);
+                    if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+
+                    wordDoc.SaveAs2(zielPfad, Word.WdSaveFormat.wdFormatXMLDocument);
+
+                    if (!File.Exists(zielPfad))
+                        throw new Exception("SaveAs2 hat keine Datei erzeugt. Ziel: " + zielPfad);
+
+                    Dispatcher.BeginInvoke(new Action(() =>
+                    {
+                        AppZustand.Instanz.SetzeStatus(
+                            "Word-Klon erstellt: " + Path.GetFileName(zielPfad));
+                        ÖffneInWord(zielPfad);
+                    }));
+                }
+                catch (Exception ex)
+                {
+                    // Vollständige Fehlermeldung inkl. HResult für Diagnose
+                    var msg = ex.Message;
+                    if (ex is System.Runtime.InteropServices.COMException com)
+                        msg += $"\n\nCOM HResult: 0x{com.HResult:X8}";
+
+                    Dispatcher.BeginInvoke(new Action(() =>
+                    {
+                        AppZustand.Instanz.SetzeStatus("Fehler bei Konvertierung.");
+                        MessageBox.Show(
+                            "PDF → Word Konvertierung fehlgeschlagen:\n\n" + msg
+                            + "\n\nVoraussetzung: Microsoft Word 2013 oder neuer.",
+                            "Konvertierungsfehler", MessageBoxButton.OK, MessageBoxImage.Error);
+                    }));
+                }
+                finally
+                {
+                    try { wordDoc?.Close(SaveChanges: false); } catch { }
+                    try { wordApp?.Quit(SaveChanges: false); } catch { }
+                    if (wordDoc != null)
+                        try { System.Runtime.InteropServices.Marshal.ReleaseComObject(wordDoc); } catch { }
+                    if (wordApp != null)
+                        try { System.Runtime.InteropServices.Marshal.ReleaseComObject(wordApp); } catch { }
+                    GC.Collect();
+                    GC.WaitForPendingFinalizers();
+
+                    try { File.Delete(tempPdf); } catch { }
+                }
+            })
+            {
+                IsBackground = true,
+                Name         = "PdfZuWordKlon"
+            };
+            thread.SetApartmentState(ApartmentState.STA);
+            thread.Start();
+        }
+
+        private static void ÖffneInWord(string docxPfad)
+        {
+            try
+            {
+                System.Diagnostics.Process.Start(
+                    new System.Diagnostics.ProcessStartInfo(docxPfad) { UseShellExecute = true });
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Datei konnte nicht geöffnet werden:\n" + ex.Message,
+                    "Fehler", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private static string GetWordKlonPfad(string pdfPfad, string cacheDir)
+        {
+            // Falls noch kein Projekt geladen → Temp-Verzeichnis
+            if (string.IsNullOrEmpty(cacheDir))
+                cacheDir = Path.Combine(Path.GetTempPath(), "StatikManager", "wortklone");
+
+            var hash = ((uint)pdfPfad.ToLowerInvariant().GetHashCode()).ToString("X8");
+            var name = Path.GetFileNameWithoutExtension(pdfPfad);
+            return Path.Combine(cacheDir, $"{name}_{hash}_klon.docx");
+        }
+
+        public void Bereinigen()
+        {
+            _vorCts?.Cancel();
+            StoppeÄteDateiÜberwachung();
+        }
+
+        // ── Hintergrundkonvertierung (Word → Basis-PDF) ───────────────────────
+
+        private void StartVorkonvertierung(DirectoryInfo root, string cacheDir)
+        {
+            _vorCts?.Cancel();
+            var cts = new CancellationTokenSource();
+            _vorCts = cts;
+
+            _vorThread = new Thread(() => VorkonvertierungTask(root, cacheDir, cts.Token))
+            {
+                IsBackground = true,
+                Name         = "StatikVorkonvertierung"
+            };
+            _vorThread.SetApartmentState(ApartmentState.STA);
+            _vorThread.Start();
+        }
+
+        private static void VorkonvertierungTask(DirectoryInfo root, string cacheDir,
+                                                  CancellationToken token)
+        {
+            var zuKonvertieren = root
+                .EnumerateFiles("*.*", SearchOption.AllDirectories)
+                .Where(f => IstWordDatei(f.Extension) &&
+                            !CacheGültig(GetBasisPdfPfad(f.FullName, cacheDir), f.FullName))
+                .ToArray();
+
+            if (zuKonvertieren.Length == 0 || token.IsCancellationRequested) return;
+
+            Word.Application? wordApp = null;
+            try
+            {
+                wordApp = new Word.Application { Visible = false };
+                wordApp.DisplayAlerts = Word.WdAlertLevel.wdAlertsNone;
+
+                foreach (var file in zuKonvertieren)
+                {
+                    if (token.IsCancellationRequested) break;
+
+                    var pdfPfad = GetBasisPdfPfad(file.FullName, cacheDir);
+                    if (CacheGültig(pdfPfad, file.FullName)) continue;
+
+                    try
+                    {
+                        var tmpPfad = pdfPfad + ".tmp";
+                        var doc = wordApp.Documents.Open(
+                            FileName: file.FullName, ReadOnly: true,
+                            AddToRecentFiles: false, Visible: false);
+                        doc.ExportAsFixedFormat(
+                            OutputFileName: tmpPfad,
+                            ExportFormat:   Word.WdExportFormat.wdExportFormatPDF);
+                        doc.Close(SaveChanges: false);
+                        System.Runtime.InteropServices.Marshal.ReleaseComObject(doc);
+
+                        if (File.Exists(pdfPfad)) File.Delete(pdfPfad);
+                        File.Move(tmpPfad, pdfPfad);
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+            finally
+            {
+                try { wordApp?.Quit(); } catch { }
+                if (wordApp != null)
+                    try { System.Runtime.InteropServices.Marshal.ReleaseComObject(wordApp); } catch { }
+            }
+        }
+
+        // ── Ansicht-Umschalter ────────────────────────────────────────────────
+
+        private void Ansicht_Geändert(object sender, RoutedEventArgs e)
+        {
+            if (!_panelBereit) return;
+
+            var modus = RbBaum.IsChecked == true ? AnsichtModus.Baum : AnsichtModus.Liste;
+            Einstellungen.Instanz.DokumentAnsicht = modus;
+            Einstellungen.Instanz.Speichern();
+
+            DokumentenBaum.Visibility = modus == AnsichtModus.Baum ? Visibility.Visible : Visibility.Collapsed;
+            DateiListe.Visibility     = modus == AnsichtModus.Liste ? Visibility.Visible : Visibility.Collapsed;
+
+            _aktiverDateipfad = null;
+            _dokumentGeladen  = false;
+            DateiAusgewählt?.Invoke(null);
+            ZeigeBrowser(mitAbdeckung: false);
+            WordVorschau.Navigate("about:blank");
+
+            if (_projektPfad != null) AktualisiereDokumentListe();
+        }
+
+        // ── Datei-Typ-Filter ──────────────────────────────────────────────────
+
+        private void CbFilter_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (!_panelBereit) return;
+
+            switch (CbFilter.SelectedIndex)
+            {
+                case 1: _filterTyp = "Word";  break;
+                case 2: _filterTyp = "Excel"; break;
+                case 3: _filterTyp = "PDF";   break;
+                case 4: _filterTyp = "Bild";  break;
+                default: _filterTyp = "Alle"; break;
+            }
+
+            if (_projektPfad != null) AktualisiereDokumentListe();
+        }
+
+        // ── Dokumentenliste ───────────────────────────────────────────────────
+
+        private void AktualisiereDokumentListe()
+        {
+            if (_projektPfad is null) return;
+
+            _aktiverDateipfad = null;
+            _dokumentGeladen  = false;
+            DateiAusgewählt?.Invoke(null);
+            ZeigeBrowser(mitAbdeckung: false);
+            WordVorschau.Navigate("about:blank");
+
+            var root = new DirectoryInfo(_projektPfad);
+
+            if (RbBaum.IsChecked == true) ZeigeBaum(root);
+            else                          ZeigeListe(root);
+
+            AppZustand.Instanz.SetzeStatus($"{ZähleDateien(root)} Datei(en) gefunden.");
+        }
+
+        private void ZeigeBaum(DirectoryInfo root)
+        {
+            DokumentenBaum.Items.Clear();
+            var rootItem = new TreeViewItem { Header = "📁 " + root.Name, IsExpanded = true };
+            FülleBaumItem(rootItem, root);
+            DokumentenBaum.Items.Add(rootItem);
+        }
+
+        private void ZeigeListe(DirectoryInfo root)
+        {
+            DateiListe.Items.Clear();
+
+            foreach (var file in root.EnumerateFiles("*.*", SearchOption.AllDirectories)
+                                     .Where(f => PasstZuFilter(f.Extension))
+                                     .OrderBy(f => f.Name))
+            {
+                var ordnerVoll = file.DirectoryName ?? "";
+                var relOrdner  = ordnerVoll.StartsWith(root.FullName, StringComparison.OrdinalIgnoreCase)
+                    ? ordnerVoll.Substring(root.FullName.Length).TrimStart(Path.DirectorySeparatorChar)
+                    : ordnerVoll;
+                if (string.IsNullOrEmpty(relOrdner)) relOrdner = "\\";
+
+                DateiListe.Items.Add(new DateiEintrag
+                {
+                    Dateiname     = file.Name,
+                    OrdnerRelativ = relOrdner,
+                    VollerPfad    = file.FullName
+                });
+            }
+        }
+
+        private void FülleBaumItem(TreeViewItem parent, DirectoryInfo dir)
+        {
+            foreach (var sub in dir.GetDirectories().OrderBy(d => d.Name))
+            {
+                if (!EnthältDateien(sub)) continue;
+                var item = new TreeViewItem { Header = "📁 " + sub.Name, IsExpanded = true };
+                FülleBaumItem(item, sub);
+                parent.Items.Add(item);
+            }
+            foreach (var file in dir.GetFiles()
+                         .Where(f => PasstZuFilter(f.Extension))
+                         .OrderBy(f => f.Name))
+            {
+                parent.Items.Add(new TreeViewItem
+                {
+                    Header = DateiIcon(file.Extension) + " " + file.Name,
+                    Tag    = file.FullName
+                });
+            }
+        }
+
+        private bool EnthältDateien(DirectoryInfo dir)
+            => dir.EnumerateFiles("*.*", SearchOption.AllDirectories).Any(f => PasstZuFilter(f.Extension));
+
+        private int ZähleDateien(DirectoryInfo dir)
+            => dir.EnumerateFiles("*.*", SearchOption.AllDirectories).Count(f => PasstZuFilter(f.Extension));
+
+        // ── Filter- und Typ-Hilfsmethoden ─────────────────────────────────────
+
+        private bool PasstZuFilter(string ext)
+        {
+            var e = ext.ToLowerInvariant();
+            switch (_filterTyp)
+            {
+                case "Word":  return e == ".doc" || e == ".docx";
+                case "Excel": return e == ".xls" || e == ".xlsx" || e == ".xlsm";
+                case "PDF":   return e == ".pdf";
+                case "Bild":  return e == ".jpg" || e == ".jpeg" || e == ".png"
+                                  || e == ".gif" || e == ".bmp"  || e == ".tif" || e == ".tiff";
+                default:      return true;
+            }
+        }
+
+        private static string DateiIcon(string ext)
+        {
+            var e = ext.ToLowerInvariant();
+            if (e == ".doc"  || e == ".docx")                                return "📄";
+            if (e == ".xls"  || e == ".xlsx"  || e == ".xlsm")               return "📊";
+            if (e == ".pdf")                                                   return "📑";
+            if (e == ".jpg"  || e == ".jpeg"  || e == ".png"
+             || e == ".gif"  || e == ".bmp"   || e == ".tif"  || e == ".tiff") return "🖼️";
+            return "📎";
+        }
+
+        private static bool IstWordDatei(string ext)
+            => ext.Equals(".doc",  StringComparison.OrdinalIgnoreCase)
+            || ext.Equals(".docx", StringComparison.OrdinalIgnoreCase);
+
+        private static bool IstPdfDatei(string ext)
+            => ext.Equals(".pdf", StringComparison.OrdinalIgnoreCase);
+
+        private static bool IstBildDatei(string ext)
+        {
+            var e = ext.ToLowerInvariant();
+            return e == ".jpg" || e == ".jpeg" || e == ".png"
+                || e == ".gif" || e == ".bmp"  || e == ".tif" || e == ".tiff";
+        }
+
+        // ── Auswahl ───────────────────────────────────────────────────────────
+
+        private void DokumentenBaum_SelectedItemChanged(object sender,
+            RoutedPropertyChangedEventArgs<object> e)
+        {
+            if (DokumentenBaum.SelectedItem is not TreeViewItem item) return;
+            if (item.Tag is not string pfad) return;
+            try { LadeVorschau(pfad); }
+            catch (Exception ex) { AppZustand.Instanz.SetzeStatus("Fehler: " + ex.Message); }
+        }
+
+        private void DateiListe_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (DateiListe.SelectedItem is not DateiEintrag eintrag) return;
+            try { LadeVorschau(eintrag.VollerPfad); }
+            catch (Exception ex) { AppZustand.Instanz.SetzeStatus("Fehler: " + ex.Message); }
+        }
+
+        private void LadeVorschau(string pfad)
+        {
+            _aktiverDateipfad = pfad;
+            _dokumentGeladen  = false;
+            DateiAusgewählt?.Invoke(pfad);
+            StarteÄteDateiÜberwachung(pfad);
+
+            var ext = Path.GetExtension(pfad).ToLowerInvariant();
+
+            try
+            {
+                if (IstPdfDatei(ext))
+                {
+                    // PDF → Schnitt-Editor (zeigt Seiten als Bilder mit Schnittlinien)
+                    ZeigeSchnittEditor();
+                    AppZustand.Instanz.SetzeStatus("Lade PDF: " + Path.GetFileName(pfad) + " …");
+                    PdfEditor.LadePdf(pfad);
+                }
+                else if (IstWordDatei(ext))
+                {
+                    // Word → als PDF rendern und im Browser anzeigen
+                    ZeigeBrowser(mitAbdeckung: true);
+                    AppZustand.Instanz.SetzeStatus("Lade Vorschau: " + Path.GetFileName(pfad) + " …");
+                    var zielPdf = BestimmePdfPfad(pfad);
+                    WordVorschau.Navigate(new Uri(zielPdf));
+                }
+                else if (IstBildDatei(ext))
+                {
+                    ZeigeBrowser(mitAbdeckung: false);
+                    AppZustand.Instanz.SetzeStatus("Lade: " + Path.GetFileName(pfad) + " …");
+                    WordVorschau.Navigate(new Uri(pfad));
+                }
+                else
+                {
+                    ZeigeBrowser(mitAbdeckung: false);
+                    ZeigeKeinVorschauHinweis(pfad);
+                }
+            }
+            catch (Exception ex)
+            {
+                AppZustand.Instanz.SetzeStatus("Fehler beim Laden: " + ex.Message);
+                try { ZeigeBrowser(mitAbdeckung: false); } catch { }
+                try
+                {
+                    WordVorschau.NavigateToString(
+                        "<html><body style='font-family:Segoe UI;padding:30px;color:#c00'>"
+                        + "<b>Fehler beim Laden der Vorschau</b><br><br>"
+                        + System.Security.SecurityElement.Escape(ex.Message)
+                        + "</body></html>");
+                }
+                catch { }
+            }
+        }
+
+        private void ZeigeSchnittEditor()
+        {
+            WordVorschau.Navigate("about:blank");
+            WordVorschau.Visibility   = Visibility.Collapsed;
+            AbdeckungsPanel.Visibility = Visibility.Collapsed;
+            PdfEditor.Visibility      = Visibility.Visible;
+        }
+
+        private void ZeigeBrowser(bool mitAbdeckung)
+        {
+            PdfEditor.Visibility       = Visibility.Collapsed;
+            WordVorschau.Visibility    = Visibility.Visible;
+            AbdeckungsPanel.Visibility = mitAbdeckung ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        /// <summary>
+        /// Gibt den Pfad zum anzuzeigenden PDF zurück.
+        ///
+        /// Schritt 1: Basis-PDF ermitteln.
+        ///   – Word-Datei  → Word exportiert unsichtbar als PDF (gecacht).
+        ///   – PDF-Datei   → direkt verwenden.
+        ///
+        /// Schritt 2: Abdeckung einbrennen (falls aktiv).
+        ///   PdfSharp zeichnet weiße Bänder an Kopf und/oder Fußbereich
+        ///   JEDER Seite in den Seiteninhalt ein.
+        ///   Die Bänder sind Teil des PDFs – nicht im Fenster verankert.
+        /// </summary>
+        private string BestimmePdfPfad(string quellPfad)
+        {
+            bool   kopf   = ChkKopf.IsChecked == true;
+            bool   fuss   = ChkFuss.IsChecked == true;
+            double kopfMm = kopf ? ParseMm(TxtKopfMm.Text, 20) : 0;
+            double fussMm = fuss ? ParseMm(TxtFussMm.Text, 20) : 0;
+
+            // ── Schritt 1: Basis-PDF ──────────────────────────────────────────
+            string basePdf;
+            if (IstWordDatei(Path.GetExtension(quellPfad)))
+            {
+                basePdf = GetBasisPdfPfad(quellPfad, _cacheDir);
+                if (!CacheGültig(basePdf, quellPfad))
+                    ErstelleBasisPdf(quellPfad, basePdf);
+            }
+            else
+            {
+                basePdf = quellPfad;   // PDF direkt
+            }
+
+            // ── Schritt 2: Abdeckung einbrennen ──────────────────────────────
+            if (kopf || fuss)
+            {
+                var covPfad = GetCoveredPdfPfad(quellPfad, _cacheDir, kopfMm, fussMm);
+                if (!CacheGültig(covPfad, quellPfad))
+                    AbdeckePdfSeiten(basePdf, covPfad, kopfMm, fussMm);
+                return covPfad;
+            }
+
+            return basePdf;
+        }
+
+        private void ZeigeKeinVorschauHinweis(string pfad)
+        {
+            var name = Path.GetFileName(pfad)
+                .Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;");
+            WordVorschau.NavigateToString(
+                "<html><body style='font-family:Segoe UI,sans-serif;padding:40px;color:#555'>"
+                + "<h3 style='color:#333'>Keine Vorschau verfügbar</h3>"
+                + "<p>Die Datei <b>" + name + "</b> kann nicht angezeigt werden.</p>"
+                + "<p style='color:#aaa;font-size:12px'>Dateityp: " + Path.GetExtension(pfad) + "</p>"
+                + "</body></html>");
+            _dokumentGeladen = true;
+        }
+
+        // ── Vorschau geladen ──────────────────────────────────────────────────
+
+        private void WordVorschau_LoadCompleted(object sender, NavigationEventArgs e)
+        {
+            if (e.Uri == null || e.Uri.ToString() == "about:blank")
+            {
+                // Wenn nach dem about:blank ein Auto-Refresh ausstehend ist:
+                // Jetzt erst das neue PDF laden – Browser hat alten Cache komplett verworfen.
+                if (_autoRefreshPfad != null)
+                {
+                    var pfad = _autoRefreshPfad;
+                    _autoRefreshPfad = null;
+                    StarteNeuladungImHintergrund(pfad);
+                }
+                return;
+            }
+
+            _dokumentGeladen = true;
+            AppZustand.Instanz.SetzeStatus("Vorschau: " + Path.GetFileName(_aktiverDateipfad ?? ""));
+        }
+
+        /// <summary>
+        /// Erzeugt das PDF auf einem STA-Hintergrundthread (kein UI-Blockieren)
+        /// und navigiert danach auf dem UI-Thread zur neuen Datei.
+        /// </summary>
+        private void StarteNeuladungImHintergrund(string pfad)
+        {
+            AppZustand.Instanz.SetzeStatus("PDF wird neu erzeugt …");
+
+            var cacheDir = _cacheDir;
+            bool   kopf   = ChkKopf.IsChecked == true;
+            bool   fuss   = ChkFuss.IsChecked == true;
+            double kopfMm = kopf ? ParseMm(TxtKopfMm.Text, 20) : 0;
+            double fussMm = fuss ? ParseMm(TxtFussMm.Text, 20) : 0;
+
+            var thread = new Thread(() =>
+            {
+                string? zielPdf = null;
+                try
+                {
+                    if (IstWordDatei(Path.GetExtension(pfad)))
+                    {
+                        var basePdf = GetBasisPdfPfad(pfad, cacheDir);
+                        ErstelleBasisPdf(pfad, basePdf);
+
+                        if (kopf || fuss)
+                        {
+                            var covPdf = GetCoveredPdfPfad(pfad, cacheDir, kopfMm, fussMm);
+                            AbdeckePdfSeiten(basePdf, covPdf, kopfMm, fussMm);
+                            zielPdf = covPdf;
+                        }
+                        else
+                        {
+                            zielPdf = basePdf;
+                        }
+                    }
+                    else
+                    {
+                        // PDF direkt
+                        if (kopf || fuss)
+                        {
+                            var covPdf = GetCoveredPdfPfad(pfad, cacheDir, kopfMm, fussMm);
+                            AbdeckePdfSeiten(pfad, covPdf, kopfMm, fussMm);
+                            zielPdf = covPdf;
+                        }
+                        else
+                        {
+                            zielPdf = pfad;
+                        }
+                    }
+                }
+                catch { /* Fehler → zielPdf bleibt null */ }
+
+                Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    if (_aktiverDateipfad != pfad) return; // Nutzer hat inzwischen andere Datei gewählt
+                    if (zielPdf == null)
+                    {
+                        AppZustand.Instanz.SetzeStatus("Fehler beim Erzeugen der Vorschau.");
+                        return;
+                    }
+                    WordVorschau.Navigate(new Uri(zielPdf));
+                }));
+            })
+            {
+                IsBackground = true,
+                Name         = "StatikAutoRefresh"
+            };
+            thread.SetApartmentState(ApartmentState.STA);
+            thread.Start();
+        }
+
+        // ── Abdeckungs-Steuerung ──────────────────────────────────────────────
+
+        private void Abdeckung_Changed(object sender, RoutedEventArgs e)
+        {
+            // Debounce 400 ms – verhindert Neugenerierung bei jeder Zeicheneingabe
+            _abdeckungTimer?.Stop();
+            _abdeckungTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
+            _abdeckungTimer.Tick += (s2, e2) =>
+            {
+                _abdeckungTimer?.Stop();
+                AktualisiereAbdeckung();
+            };
+            _abdeckungTimer.Start();
+        }
+
+        private void AktualisiereAbdeckung()
+        {
+            if (!_dokumentGeladen || _aktiverDateipfad == null) return;
+
+            var ext = Path.GetExtension(_aktiverDateipfad).ToLowerInvariant();
+            if (!IstWordDatei(ext) && !IstPdfDatei(ext)) return;
+
+            try
+            {
+                var zielPdf = BestimmePdfPfad(_aktiverDateipfad);
+                var aktUri  = WordVorschau.Source;
+                if (aktUri == null ||
+                    !aktUri.LocalPath.Equals(zielPdf, StringComparison.OrdinalIgnoreCase))
+                {
+                    _dokumentGeladen = false;
+                    WordVorschau.Navigate(new Uri(zielPdf));
+                }
+            }
+            catch { /* ignore */ }
+        }
+
+        // ── PDF-Erzeugung ─────────────────────────────────────────────────────
+
+        private static void ErstelleBasisPdf(string quellPfad, string zielpfad)
+        {
+            Word.Application? wordApp = null;
+            Word.Document?    doc     = null;
+            try
+            {
+                wordApp = new Word.Application { Visible = false };
+                wordApp.DisplayAlerts = Word.WdAlertLevel.wdAlertsNone;  // keine Dialoge auch wenn Datei bereits offen
+                doc     = wordApp.Documents.Open(
+                              FileName: quellPfad, ReadOnly: true,
+                              AddToRecentFiles: false, Visible: false);
+                doc.ExportAsFixedFormat(
+                    OutputFileName: zielpfad,
+                    ExportFormat:   Word.WdExportFormat.wdExportFormatPDF);
+            }
+            finally
+            {
+                doc?.Close(SaveChanges: false);
+                wordApp?.Quit();
+                if (doc     != null) System.Runtime.InteropServices.Marshal.ReleaseComObject(doc);
+                if (wordApp != null) System.Runtime.InteropServices.Marshal.ReleaseComObject(wordApp);
+            }
+        }
+
+        /// <summary>
+        /// Brennt weiße Bänder am Seitenanfang und/oder -ende in jede PDF-Seite ein.
+        /// Die Bänder sind Bestandteil des Seiteninhalts und erscheinen in der Vorschau
+        /// präzise auf der Seite – nicht im Browser-Fenster verankert.
+        /// </summary>
+        private static void AbdeckePdfSeiten(string quellPdf, string zielpdf,
+                                              double kopfMm, double fussMm)
+        {
+            const double mmToPt = 72.0 / 25.4;   // Millimeter → PDF-Punkte
+
+            using var doc = PdfReader.Open(quellPdf, PdfDocumentOpenMode.Modify);
+
+            foreach (PdfPage page in doc.Pages)
+            {
+                double w = page.Width.Point;
+                double h = page.Height.Point;
+
+                // XGraphicsPdfPageOptions.Append: Inhalt wird ÜBER dem vorhandenen
+                // Seiteninhalt gezeichnet (deckt Kopf-/Fußzeilen-Text ab).
+                using var gfx = XGraphics.FromPdfPage(page, XGraphicsPdfPageOptions.Append);
+
+                if (kopfMm > 0)
+                    gfx.DrawRectangle(XBrushes.White, 0, 0, w, kopfMm * mmToPt);
+
+                if (fussMm > 0)
+                    gfx.DrawRectangle(XBrushes.White, 0, h - fussMm * mmToPt, w, fussMm * mmToPt);
+            }
+
+            doc.Save(zielpdf);
+        }
+
+        // ── Dateiüberwachung (Auto-Refresh bei Speichern) ─────────────────────
+
+        private void StarteÄteDateiÜberwachung(string pfad)
+        {
+            StoppeÄteDateiÜberwachung();
+
+            var dir  = Path.GetDirectoryName(pfad);
+            var name = Path.GetFileName(pfad);
+            if (dir == null || name == null) return;
+
+            // Gesamtes Verzeichnis beobachten (kein Dateinamen-Filter),
+            // weil Word beim Speichern eine Temp-Datei erstellt und dann
+            // zur Original-Datei umbenennt – dabei wäre ein reiner Changed-
+            // Event auf den Originalnamen nicht zuverlässig.
+            _dateiWatcher = new FileSystemWatcher(dir)
+            {
+                NotifyFilter          = NotifyFilters.LastWrite
+                                      | NotifyFilters.FileName
+                                      | NotifyFilters.Size,
+                EnableRaisingEvents   = true,
+                IncludeSubdirectories = false
+            };
+
+            // Nur Events für unsere Zieldatei weiterleiten
+            FileSystemEventHandler filter = (s, e) =>
+            {
+                if (string.Equals(e.Name, name, StringComparison.OrdinalIgnoreCase))
+                    DateiGeändert(s, e);
+            };
+            RenamedEventHandler filterRenamed = (s, e) =>
+            {
+                // e.Name = neuer Name → trifft zu, wenn Temp-Datei auf Original umbenannt wird
+                if (string.Equals(e.Name, name, StringComparison.OrdinalIgnoreCase))
+                    DateiGeändert(s, e);
+            };
+
+            _dateiWatcher.Changed += filter;
+            _dateiWatcher.Created += filter;
+            _dateiWatcher.Renamed += filterRenamed;
+        }
+
+        private void StoppeÄteDateiÜberwachung()
+        {
+            if (_dateiWatcher != null)
+            {
+                _dateiWatcher.EnableRaisingEvents = false;
+                _dateiWatcher.Dispose();
+                _dateiWatcher = null;
+            }
+            _änderungTimer?.Stop();
+        }
+
+        private void DateiGeändert(object sender, FileSystemEventArgs e)
+        {
+            // Datei-Events kommen auf Background-Thread → auf UI-Thread wechseln
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                // Debounce 2 s – Word schreibt in mehreren Schritten
+                _änderungTimer?.Stop();
+                _änderungTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(2000) };
+                _änderungTimer.Tick += (s, ev) =>
+                {
+                    _änderungTimer?.Stop();
+                    if (_aktiverDateipfad == null) return;
+
+                    LöscheCacheFürDatei(_aktiverDateipfad);
+                    AppZustand.Instanz.SetzeStatus("Datei geändert – Vorschau wird aktualisiert …");
+
+                    // Erst zu about:blank navigieren – das verwirft den IE-Cache
+                    // für die bisherige PDF-URL vollständig.
+                    // LoadCompleted erkennt das Flag und startet die Neuladung.
+                    _autoRefreshPfad = _aktiverDateipfad;
+                    _dokumentGeladen = false;
+                    WordVorschau.Navigate("about:blank");
+                };
+                _änderungTimer.Start();
+            }));
+        }
+
+        private void LöscheCacheFürDatei(string quellPfad)
+        {
+            if (string.IsNullOrEmpty(_cacheDir)) return;
+            try
+            {
+                var hash    = ((uint)quellPfad.ToLowerInvariant().GetHashCode()).ToString("X8");
+                var name    = Path.GetFileNameWithoutExtension(quellPfad);
+                var präfix  = $"{name}_{hash}_{CacheVersion}";
+
+                foreach (var f in Directory.GetFiles(_cacheDir, präfix + "*.pdf"))
+                    try { File.Delete(f); } catch { }
+            }
+            catch { }
+        }
+
+        // ── Cache-Hilfsmethoden ───────────────────────────────────────────────
+
+        private static string GetBasisPdfPfad(string quellPfad, string cacheDir)
+        {
+            var hash = ((uint)quellPfad.ToLowerInvariant().GetHashCode()).ToString("X8");
+            var name = Path.GetFileNameWithoutExtension(quellPfad);
+            return Path.Combine(cacheDir, $"{name}_{hash}_{CacheVersion}.pdf");
+        }
+
+        private static string GetCoveredPdfPfad(string quellPfad, string cacheDir,
+                                                  double kopfMm, double fussMm)
+        {
+            var hash   = ((uint)quellPfad.ToLowerInvariant().GetHashCode()).ToString("X8");
+            var name   = Path.GetFileNameWithoutExtension(quellPfad);
+            var covKey = $"cov_k{(int)Math.Round(kopfMm)}_f{(int)Math.Round(fussMm)}";
+            return Path.Combine(cacheDir, $"{name}_{hash}_{CacheVersion}_{covKey}.pdf");
+        }
+
+        private static bool CacheGültig(string pdfPfad, string quellPfad)
+            => File.Exists(pdfPfad)
+            && File.GetLastWriteTime(pdfPfad) >= File.GetLastWriteTime(quellPfad);
+
+        // ── Hilfsmethoden ────────────────────────────────────────────────────
+
+        private static double ParseMm(string text, double fallback)
+            => double.TryParse(text.Replace(",", "."),
+                   System.Globalization.NumberStyles.Any,
+                   System.Globalization.CultureInfo.InvariantCulture,
+                   out double val) ? val : fallback;
+
+        // ── Datenklasse ───────────────────────────────────────────────────────
+
+        private class DateiEintrag
+        {
+            public string Dateiname     { get; set; } = "";
+            public string OrdnerRelativ { get; set; } = "";
+            public string VollerPfad    { get; set; } = "";
+        }
+    }
+}

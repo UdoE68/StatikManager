@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(powershell -Command \"Get-ChildItem ''HKCU:\\\\Software\\\\Microsoft\\\\Office\\\\Word\\\\Addins'' | Select-Object Name, PSChildName\")",
+      "Bash(powershell -Command \"Get-ItemProperty ''HKCU:\\\\Software\\\\Microsoft\\\\Office\\\\Word\\\\Addins\\\\BildschnittAddin ?''\")",
+      "Bash(powershell -Command \"Remove-Item -Path ''HKCU:\\\\Software\\\\Microsoft\\\\Office\\\\Word\\\\Addins\\\\BildschnittAddin ?'' -Recurse -Force; Write-Host ''Geloescht.''\")",
+      "Bash(powershell -Command \"Get-ChildItem ''HKCU:\\\\Software\\\\Microsoft\\\\Office\\\\Word\\\\Addins'' | Where-Object { $_PSChildName -like ''*Bild*'' } | Select-Object PSChildName, @{N=''Manifest'';E={\\(Get-ItemProperty $_PSPath\\).Manifest}}\")",
+      "Bash(powershell -Command \"Get-ChildItem ''HKCU:\\\\Software\\\\Microsoft\\\\Office\\\\Word\\\\Addins'' | Select-Object PSChildName\")",
+      "Bash(dir \"C:\\\\Projekte\\\\BildschnittAddin\" /b /a)",
+      "Bash(dir \"C:\\\\Projekte\\\\BildschnittAddin\\\\Dialog\" /b /a)",
+      "Bash(powershell.exe -NoProfile -Command \":*)",
+      "Bash(for f:*)",
+      "Bash(do)",
+      "Bash(test -f \"$f\")",
+      "Bash(echo \"OK    $f\")",
+      "Bash(echo \"FEHLT $f\")",
+      "Bash(powershell -Command \"Get-ChildItem ''C:\\\\Projekte\\\\BildschnittAddin\\\\obj\\\\Debug\\\\Dialog\\\\'' | Select-Object Name, LastWriteTime\")",
+      "Bash(powershell -Command \":*)",
+      "Bash(powershell -Command \"Select-String -Path ''C:\\\\Projekte\\\\BildschnittAddin\\\\obj\\\\Debug\\\\Dialog\\\\BildVorschauFenster.g.cs'' -Pattern ''BtnH|BtnV|BtnAuto|BtnSchliessen|BtnAusgewahlte|BtnAlle|Schnittlinien''\")"
+    ],
+    "additionalDirectories": [
+      "C:\\Projekte\\BildschnittAddin\\Bildverarbeitung",
+      "C:\\Projekte\\BildschnittAddin"
+    ]
+  }
+}

@@ -1,0 +1,108 @@
+<UserControl x:Class="StatikManager.Modules.Werkzeuge.PdfSchnittEditor"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <!-- ── Werkzeugleiste ──────────────────────────────────────────────── -->
+        <Border Grid.Row="0"
+                Background="{DynamicResource Farbe.Werkzeugleiste}"
+                BorderBrush="{DynamicResource Farbe.Rahmen}"
+                BorderThickness="0,0,0,1"
+                Padding="8,5">
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+
+                <!-- Schnitte aktivieren / deaktivieren (Standard: AUS → Original-PDF sichtbar) -->
+                <ToggleButton x:Name="BtnSchnitteSichtbar"
+                              Content="Schnitte"
+                              Width="80" Height="26"
+                              Margin="0,0,4,0"
+                              IsChecked="False"
+                              ToolTip="Schnittlinien ein- oder ausblenden"
+                              Checked="BtnSchnitteSichtbar_Checked"
+                              Unchecked="BtnSchnitteSichtbar_Unchecked"/>
+
+                <!-- Schnitte neu berechnen -->
+                <Button x:Name="BtnNeuBerechnen"
+                        Content="🔄"
+                        Width="28" Height="26"
+                        Margin="0,0,6,0"
+                        ToolTip="Schnitte mit aktueller Leerzeilen-Einstellung neu berechnen"
+                        Click="BtnNeuBerechnen_Click"/>
+
+                <!-- Manuellen Schnitt setzen (Scheren-Modus) -->
+                <ToggleButton x:Name="BtnSchere"
+                              Content="✂"
+                              Width="28" Height="26"
+                              Margin="0,0,4,0"
+                              ToolTip="Scheren-Modus: Klick setzt Schnitt · Rechtsklick entfernt Schnitt"
+                              Checked="BtnSchere_Checked"
+                              Unchecked="BtnSchere_Unchecked"/>
+
+                <!-- Alle Schnitte löschen -->
+                <Button x:Name="BtnSchnitteLöschen"
+                        Content="🗑"
+                        Width="28" Height="26"
+                        Margin="0,0,4,0"
+                        ToolTip="Alle Schnittlinien entfernen"
+                        Click="BtnSchnitteLöschen_Click"/>
+
+                <Separator Width="1" Height="18" Background="#BBB" Margin="4,0"/>
+
+                <!-- Leerzeilen-Schwellenwert -->
+                <TextBlock Text="Leerzeilen:" VerticalAlignment="Center" Margin="0,0,4,0"
+                           FontSize="11"
+                           ToolTip="0 = jede Zeile · 1 = eine Leerzeile nötig · 2 = zwei Leerzeilen …"/>
+                <RepeatButton x:Name="BtnLeerzeichenMinus"
+                              Content="−" Width="22" Height="22"
+                              Margin="0,0,2,0" FontSize="13" FontWeight="Bold"
+                              Click="BtnLeerzeichenMinus_Click"/>
+                <Border BorderBrush="#AAA" BorderThickness="1" CornerRadius="3"
+                        Padding="5,1" Margin="0,0,2,0" VerticalAlignment="Center"
+                        Background="White">
+                    <TextBlock x:Name="TxtLeerzeilen" Text="1"
+                               Width="16" TextAlignment="Center"
+                               FontSize="12" FontWeight="Bold"/>
+                </Border>
+                <RepeatButton x:Name="BtnLeerzeichenPlus"
+                              Content="+" Width="22" Height="22"
+                              Margin="0,0,4,0" FontSize="13" FontWeight="Bold"
+                              Click="BtnLeerzeichenPlus_Click"/>
+
+                <Separator Width="1" Height="18" Background="#BBB" Margin="4,0"/>
+
+                <!-- Word-Export -->
+                <Button x:Name="BtnExport"
+                        Content="📄 Nach Word"
+                        Height="26" Margin="0,0,8,0"
+                        ToolTip="Alle Blöcke als Bilder exportieren – Word-Datei neben der PDF anlegen"
+                        Click="BtnExport_Click"/>
+
+                <Separator Width="1" Height="18" Background="#BBB" Margin="0,0,8,0"/>
+
+                <TextBlock x:Name="TxtInfo"
+                           VerticalAlignment="Center"
+                           Foreground="#555"
+                           FontSize="11"
+                           FontStyle="Italic"/>
+            </StackPanel>
+        </Border>
+
+        <!-- ── Vorschau: dunkler Schreibtisch, Seiten als Blätter mit Rand ── -->
+        <ScrollViewer Grid.Row="1"
+                      x:Name="ScrollView"
+                      HorizontalScrollBarVisibility="Auto"
+                      VerticalScrollBarVisibility="Auto"
+                      Background="#4A4A4A">
+
+            <Canvas x:Name="PdfCanvas"
+                    Background="Transparent"
+                    MouseLeftButtonDown="Canvas_MouseLeftButtonDown"/>
+
+        </ScrollViewer>
+    </Grid>
+</UserControl>

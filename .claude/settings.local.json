@@ -1,0 +1,33 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(\"C:\\\\Program Files\\\\Microsoft Visual Studio\\\\2022\\\\Community\\\\MSBuild\\\\Current\\\\Bin\\\\MSBuild.exe\" \"C:\\\\KI\\\\StatikManager_V1\\\\src\\\\StatikManager\\\\StatikManager.csproj\" -t:Restore,Build -p:Configuration=Debug -p:Platform=x64 -verbosity:minimal 2>&1)",
+      "Bash(\"C:\\\\Program Files\\\\Microsoft Visual Studio\\\\2022\\\\Community\\\\MSBuild\\\\Current\\\\Bin\\\\MSBuild.exe\" \"C:\\\\KI\\\\StatikManager_V1\\\\src\\\\StatikManager\\\\StatikManager.csproj\" /p:Configuration=Debug /p:Platform=x64 /t:Build /v:minimal)",
+      "Bash(\"/c/Program Files/Microsoft Visual Studio/2022/Community/MSBuild/Current/Bin/MSBuild.exe\" StatikManager.csproj /p:Configuration=Debug /p:Platform=x64 /t:Build /v:minimal 2>&1)",
+      "Bash(dotnet build:*)",
+      "Bash(\"C:/Program Files/Microsoft Visual Studio/2022/Community/MSBuild/Current/Bin/MSBuild.exe\" StatikManager.csproj /p:Configuration=Debug /p:Platform=x64 /nologo /verbosity:minimal)",
+      "Bash(\"C:/Program Files/Microsoft Visual Studio/2022/Community/MSBuild/Current/Bin/MSBuild.exe\" \"C:/KI/StatikManager_V1/src/StatikManager/StatikManager.csproj\" /p:Configuration=Debug /p:Platform=x64 /nologo /verbosity:minimal)",
+      "Bash(MSYS_NO_PATHCONV=1 \"C:/Program Files/Microsoft Visual Studio/2022/Community/MSBuild/Current/Bin/MSBuild.exe\" \"C:\\\\KI\\\\StatikManager_V1\\\\src\\\\StatikManager\\\\StatikManager.csproj\" /p:Configuration=Debug /p:Platform=x64 /nologo /verbosity:minimal)",
+      "Bash(MSYS_NO_PATHCONV=1 taskkill //PID 36256 //F)",
+      "Bash(powershell -Command \"Stop-Process -Id 36256 -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 2; Write-Output 'done'\" 2>&1)",
+      "Bash(MSYS_NO_PATHCONV=1 \"C:/Program Files/Microsoft Visual Studio/2022/Community/MSBuild/Current/Bin/MSBuild.exe\" \"C:/KI/StatikManager_V1/src/StatikManager/StatikManager.csproj\" -t:Build -p:Configuration=Debug -verbosity:minimal)",
+      "Bash(MSYS_NO_PATHCONV=1 \"C:/Program Files/Microsoft Visual Studio/2022/Community/MSBuild/Current/Bin/MSBuild.exe\" \"C:/KI/StatikManager_V1/src/StatikManager/StatikManager.csproj\" -p:Configuration=Debug -t:Build -v:minimal)",
+      "Bash(xargs grep:*)",
+      "Bash(find C:/KI/StatikManager_V1/packages -name *.cs)",
+      "Bash(find C:/KI/StatikManager_V1 -path */Docnet* -name *.dll)",
+      "Read(//c/Users/Besitzer/.nuget/packages/docnet.core/**)",
+      "Bash(powershell -Command \"Add-Type -Path ''''src/StatikManager/bin/Debug/net48/Docnet.Core.dll''''; [Docnet.Core.DocLib] | Get-Member -Static | Where-Object { $_Name -eq ''''Instance'''' }\")",
+      "Bash(powershell -Command \":*)",
+      "Bash(\"C:\\\\Program Files\\\\Microsoft Visual Studio\\\\2022\\\\Community\\\\MSBuild\\\\Current\\\\Bin\\\\MSBuild.exe\" StatikManager.csproj /p:Configuration=Debug /p:Platform=x64 /t:Build /v:minimal)",
+      "Bash(\"C:\\\\Program Files\\\\Microsoft Visual Studio\\\\2022\\\\Community\\\\MSBuild\\\\Current\\\\Bin\\\\MSBuild.exe\" \"C:\\\\KI\\\\StatikManager_V1\\\\src\\\\StatikManager\\\\StatikManager.csproj\" -t:Build -p:Configuration=Debug -p:Platform=x64)",
+      "Bash(git -C \"C:\\\\KI\\\\StatikManager_V1\" status)",
+      "Bash(git -C \"C:\\\\KI\\\\StatikManager_V1\" remote -v)",
+      "Bash(git -C \"C:\\\\KI\\\\StatikManager_V1\" status --short)",
+      "Bash(git -C \"C:\\\\KI\\\\StatikManager_V1\" branch -M main)",
+      "Bash(git -C \"C:\\\\KI\\\\StatikManager_V1\" push -u origin main)",
+      "Bash(git -C \"C:\\\\KI\\\\StatikManager_V1\" add src/StatikManager/Modules/Dokumente/DokumentePanel.xaml src/StatikManager/Modules/Dokumente/DokumentePanel.xaml.cs)",
+      "Bash(git:*)",
+      "Bash(\"C:\\\\Program Files\\\\Microsoft Visual Studio\\\\2022\\\\Community\\\\MSBuild\\\\Current\\\\Bin\\\\MSBuild.exe\" \"C:\\\\KI\\\\StatikManager_V1\\\\src\\\\StatikManager\\\\StatikManager.csproj\" -t:Build -p:Configuration=Debug -p:Platform=x64 -nologo -verbosity:minimal)"
+    ]
+  }
+}

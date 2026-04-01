@@ -1,0 +1,1658 @@
+using Docnet.Core;
+using Docnet.Core.Models;
+using PdfSharp.Pdf.IO;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using IO = System.IO;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Media.Effects;
+using System.Windows.Media.Imaging;
+using System.Windows.Shapes;
+using Word = Microsoft.Office.Interop.Word;
+
+namespace StatikManager.Modules.Werkzeuge
+{
+    /// <summary>
+    /// PDF-Vorschau mit automatischer Zwischenraum-Schnitterkennung.
+    /// Zoom per Strg+Mausrad, verschiebbare Schnittlinien, präziser Word-Export.
+    /// </summary>
+    public partial class PdfSchnittEditor : UserControl
+    {
+        // ── Render-Konstanten ─────────────────────────────────────────────────
+        private const int    RenderBreite  = 900;
+        private const double ExportDpi     = 300.0;  // DPI für Export-Render
+        private const double SeitenAbstand = 30;
+        private const double ContentDichte = 0.003;
+        private const int    SeiteX        = 20;
+
+        // Zoom-Grenzen
+        private const double ZoomMin  = 0.20;
+        private const double ZoomMax  = 4.00;
+        private const double ZoomStep = 0.15;
+
+        // Mindestabstand-Grenzen (Pixel im Vorschau-Render)
+        private const int AbstandMin  = 0;
+        private const int AbstandMax  = 300;
+        private const int AbstandStep = 5;
+
+        // Mindestabstand zwischen zwei Schnittlinien (Vorschau-px)
+        private const double MinLinienAbstand = 5.0;
+
+        public PdfSchnittEditor() => InitializeComponent();
+
+        // ── Zustand ───────────────────────────────────────────────────────────
+        private string?            _pdfPfad;
+        private List<BitmapSource> _seitenBilder  = new();
+        private double[]           _seitenYStart   = Array.Empty<double>();
+        private double[]           _seitenHöhe     = Array.Empty<double>();
+        private List<double>       _schnittLinienY = new();
+
+        private int    _mindestAbstandPx = 15;   // Mindesthöhe freier Zwischenraum (px)
+        private bool   _automatikmodus   = true;
+        private bool   _schereModus;
+        private double _zoomFaktor       = 1.0;
+
+        // Drag-State für Schnittlinien
+        private Line?  _gezogeneLinie;
+        private double _ziehOffsetY;
+
+        // Crop-Ränder als Bruchteil der Seitenbreite/-höhe (0 = kein Rand, 0.5 = halbe Seite)
+        private double _cropLinks  = 0.0;
+        private double _cropRechts = 0.0;
+        private double _cropOben   = 0.0;
+        private double _cropUnten  = 0.0;
+
+        // Drag-State für Crop-Linien (Tag-Wert der gezogenen Linie)
+        private string? _gezogeneCropSeite;
+
+        // Export-Sperre: verhindert Doppelstart
+        private volatile bool _exportLäuft;
+
+        // ── Fehler-Hilfsmethoden ──────────────────────────────────────────────
+
+        private static void LogException(Exception ex, string kontext)
+            => App.LogFehler(kontext, App.GetExceptionKette(ex));
+
+        private bool SafeExecute(Action aktion, string kontext)
+        {
+            try { aktion(); return true; }
+            catch (Exception ex) { LogException(ex, kontext); return false; }
+        }
+
+        // ── Öffentliche API ───────────────────────────────────────────────────
+
+        public void LadePdf(string pfad)
+        {
+            if (string.IsNullOrEmpty(pfad) || !IO.File.Exists(pfad))
+            {
+                TxtInfo.Text = "Datei nicht gefunden.";
+                return;
+            }
+
+            _pdfPfad = pfad;
+            PdfCanvas.Children.Clear();
+            _seitenBilder.Clear();
+            _schnittLinienY.Clear();
+            _seitenYStart = Array.Empty<double>();
+            _seitenHöhe   = Array.Empty<double>();
+            _cropLinks = _cropRechts = _cropOben = _cropUnten = 0.0;
+            TxtInfo.Text                 = "Lade PDF …";
+            BtnExport.IsEnabled          = false;
+            BtnSchnitteLöschen.IsEnabled = false;
+
+            bool  autoModus = _automatikmodus;
+            int   abstand   = _mindestAbstandPx;
+            string pfadKopie = pfad;
+
+            Task.Run(() =>
+            {
+                List<BitmapSource>? bilder = null;
+                double[]? yStart = null, höhe = null;
+                List<double>? cuts = null;
+                string? fehler = null;
+
+                try
+                {
+                    bilder = RenderiereAlleSeiten(pfadKopie, RenderBreite);
+                    if (bilder.Count == 0) { fehler = "PDF enthält keine lesbaren Seiten."; }
+                    else
+                    {
+                        BerechneLayoutStatic(bilder, SeitenAbstand, out yStart, out höhe);
+                        cuts = autoModus
+                            ? ErkenneCutsAllerSeiten(bilder, yStart, höhe, abstand)
+                            : new List<double>();
+                    }
+                }
+                catch (Exception ex) { LogException(ex, "LadePdf"); fehler = App.GetExceptionKette(ex); }
+
+                Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    try
+                    {
+                        if (fehler != null)
+                        {
+                            TxtInfo.Text = "Ladefehler. Siehe Log.";
+                            MessageBox.Show(fehler, "PDF-Schnitt-Editor",
+                                MessageBoxButton.OK, MessageBoxImage.Error);
+                            return;
+                        }
+                        _seitenBilder   = bilder!;
+                        _seitenYStart   = yStart!;
+                        _seitenHöhe     = höhe!;
+                        _schnittLinienY = cuts!;
+                        ZeicheCanvas();
+                        BtnExport.IsEnabled          = true;
+                        BtnSchnitteLöschen.IsEnabled = cuts!.Count > 0;
+                        TxtInfo.Text = $"{bilder!.Count} Seite(n) geladen · {cuts!.Count} Schnitt(e)";
+                    }
+                    catch (Exception ex) { LogException(ex, "LadePdf/UI"); }
+                }));
+            });
+        }
+
+        public void ExportierenNachWord()
+        {
+            // Doppelstart verhindern (auch bei schnellen Doppelklicks vor UI-Refresh)
+            if (_exportLäuft) { TxtInfo.Text = "Export läuft bereits – bitte warten."; return; }
+            if (_seitenBilder.Count == 0 || _pdfPfad == null) return;
+
+            string zielPfad = IO.Path.Combine(
+                IO.Path.GetDirectoryName(_pdfPfad)!,
+                IO.Path.GetFileNameWithoutExtension(_pdfPfad) + ".docx");
+
+            // Überschreiben-Abfrage VOR dem Sperren
+            if (IO.File.Exists(zielPfad))
+            {
+                var antwort = MessageBox.Show(
+                    $"Die Datei existiert bereits:\n{IO.Path.GetFileName(zielPfad)}\n\nMöchten Sie sie überschreiben?",
+                    "Datei überschreiben?",
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Question);
+                if (antwort != MessageBoxResult.Yes) return;
+            }
+
+            // Ab hier gesperrt
+            _exportLäuft = true;
+            BtnExport.IsEnabled = false;
+            TxtInfo.Text = "Export gestartet …";
+
+            var blöcke   = BerechneBöcke();
+            var yStartK  = (double[])_seitenYStart.Clone();
+            var höheK    = (double[])_seitenHöhe.Clone();
+            string pdfK  = _pdfPfad;
+            double cropL = _cropLinks, cropR = _cropRechts, cropO = _cropOben, cropU = _cropUnten;
+
+            var thread = new Thread(() =>
+                ExportThreadWorker(blöcke, zielPfad, pdfK, yStartK, höheK, cropL, cropR, cropO, cropU))
+            { IsBackground = true, Name = "PdfSchnittExport" };
+            thread.SetApartmentState(ApartmentState.STA);
+            thread.Start();
+        }
+
+        // ── Rendering ────────────────────────────────────────────────────────
+
+        private static List<BitmapSource> RenderiereAlleSeiten(string pfad, int breite, int höhe = 0)
+        {
+            if (höhe <= 0) höhe = breite * 2;
+            var result = new List<BitmapSource>();
+            try
+            {
+                using var lib       = DocLib.Instance;
+                using var docReader = lib.GetDocReader(pfad, new PageDimensions(breite, höhe));
+                int n = docReader.GetPageCount();
+                for (int i = 0; i < n; i++)
+                {
+                    try
+                    {
+                        using var pageReader = docReader.GetPageReader(i);
+                        byte[]? raw = pageReader.GetImage();
+                        int w = pageReader.GetPageWidth(), h = pageReader.GetPageHeight();
+                        if (raw == null || w <= 0 || h <= 0 || raw.Length < w * h * 4) continue;
+
+                        // Transparente Pixel gegen Weiß kompositionieren
+                        KompositioniereGegenWeiss(raw, w, h);
+
+                        var bmp = BitmapSource.Create(w, h, 96, 96,
+                            PixelFormats.Bgra32, null, raw, w * 4);
+                        bmp.Freeze();
+                        result.Add(bmp);
+                    }
+                    catch (Exception ex) { LogException(ex, $"Seite[{i}]"); }
+                }
+            }
+            catch (Exception ex) { LogException(ex, "RenderiereAlleSeiten"); }
+            return result;
+        }
+
+        private static void KompositioniereGegenWeiss(byte[] raw, int w, int h)
+        {
+            int maxOff = Math.Min(w * h * 4, raw.Length - 3);
+            for (int p = 0; p < maxOff; p += 4)
+            {
+                byte a = raw[p + 3];
+                if (a == 255) continue;
+                if (a == 0) { raw[p] = raw[p+1] = raw[p+2] = raw[p+3] = 255; }
+                else
+                {
+                    float af = a / 255f, inv = 1f - af;
+                    raw[p]   = (byte)(raw[p]   * af + 255f * inv);
+                    raw[p+1] = (byte)(raw[p+1] * af + 255f * inv);
+                    raw[p+2] = (byte)(raw[p+2] * af + 255f * inv);
+                    raw[p+3] = 255;
+                }
+            }
+        }
+
+        // ── Layout ────────────────────────────────────────────────────────────
+
+        private static void BerechneLayoutStatic(
+            List<BitmapSource> bilder, double abstand,
+            out double[] yStart, out double[] höhe)
+        {
+            yStart = new double[bilder.Count];
+            höhe   = new double[bilder.Count];
+            double y = 0;
+            for (int i = 0; i < bilder.Count; i++)
+            {
+                yStart[i] = y;
+                höhe[i]   = Math.Max(1, bilder[i].PixelHeight);
+                y += höhe[i] + abstand;
+            }
+        }
+
+        // ── Automatische Schnitterkennung (Zwischenraum-basiert) ──────────────
+
+        private static List<double> ErkenneCutsAllerSeiten(
+            List<BitmapSource> bilder, double[] yStart, double[] höhe, int mindestAbstandPx)
+        {
+            var cuts = new List<double>();
+            int count = Math.Min(bilder.Count, Math.Min(yStart.Length, höhe.Length));
+            for (int i = 0; i < count; i++)
+            {
+                try
+                {
+                    foreach (var cy in ErkenneCutsInSeite(bilder[i], mindestAbstandPx))
+                        cuts.Add(yStart[i] + cy);
+                }
+                catch (Exception ex) { LogException(ex, $"ErkenneCuts/Seite[{i}]"); }
+            }
+            cuts.Sort();
+            return cuts;
+        }
+
+        /// <summary>
+        /// Erkennt horizontale Zwischenräume in einer Seite und liefert Schnitt-Y-Koordinaten.
+        /// <paramref name="mindestAbstandPx"/> = Mindesthöhe des freien Bereichs in Pixeln
+        /// der Vorschau-Auflösung. 0 = jeden Zwischenraum ≥ 2 px schneiden.
+        /// </summary>
+        private static List<double> ErkenneCutsInSeite(BitmapSource bmp, int mindestAbstandPx)
+        {
+            int w = bmp.PixelWidth, h = bmp.PixelHeight;
+            if (w <= 0 || h <= 0) return new List<double>();
+
+            int    stride = w * 4;
+            byte[] pixels;
+            try
+            {
+                pixels = new byte[(long)h * stride];
+                bmp.CopyPixels(pixels, stride, 0);
+            }
+            catch (Exception ex) { LogException(ex, "CopyPixels"); return new List<double>(); }
+
+            int schritt     = Math.Max(1, w / 120);
+            int zeilSchritt = Math.Max(1, h / 100);
+
+            // ── Adaptiver Hintergrund (90. Perzentil der Helligkeit) ──────────
+            var sample = new List<byte>((h / zeilSchritt + 1) * (w / schritt + 1));
+            for (int y = 0; y < h; y += zeilSchritt)
+            {
+                int off = y * stride;
+                for (int x = 0; x < w; x += schritt)
+                {
+                    int idx = off + x * 4;
+                    if (idx + 2 >= pixels.Length) break;
+                    sample.Add((byte)((pixels[idx] + pixels[idx+1] + pixels[idx+2]) / 3));
+                }
+            }
+            if (sample.Count == 0) return new List<double>();
+            sample.Sort();
+
+            byte bgLevel      = sample[Math.Min(sample.Count - 1, sample.Count * 90 / 100)];
+            byte contentThresh = (byte)Math.Max(0, bgLevel - 18);
+
+            // ── Inhalt pro Zeile bestimmen ─────────────────────────────────────
+            var rowHasContent = new bool[h];
+            for (int y = 0; y < h; y++)
+            {
+                int dunkel = 0, gesamt = 0, off = y * stride;
+                for (int x = 0; x < w; x += schritt)
+                {
+                    int idx = off + x * 4;
+                    if (idx + 2 >= pixels.Length) break;
+                    if ((byte)((pixels[idx]+pixels[idx+1]+pixels[idx+2])/3) < contentThresh) dunkel++;
+                    gesamt++;
+                }
+                rowHasContent[y] = gesamt > 0 && (double)dunkel / gesamt >= ContentDichte;
+            }
+
+            // ── Bänder (Inhalt / Zwischenraum) identifizieren ─────────────────
+            var bänder = new List<(int Start, int Ende, bool IstInhalt)>();
+            int bStart = 0; bool bTyp = rowHasContent[0];
+            for (int y = 1; y <= h; y++)
+            {
+                bool t = y < h && rowHasContent[y];
+                if (t != bTyp) { bänder.Add((bStart, y, bTyp)); bStart = y; bTyp = t; }
+            }
+
+            // ── Schnitte an Zwischenräumen ≥ Mindestabstand setzen ────────────
+            double minGap = Math.Max(2.0, mindestAbstandPx);
+            var cuts = new List<double>();
+            foreach (var (start, ende, istInhalt) in bänder)
+                if (!istInhalt && (ende - start) >= minGap)
+                    cuts.Add((start + ende) / 2.0);
+
+            return cuts;
+        }
+
+        // ── Canvas zeichnen ───────────────────────────────────────────────────
+
+        private void ZeicheCanvas()
+        {
+            try
+            {
+                PdfCanvas.Children.Clear();
+                if (_seitenBilder.Count == 0) return;
+                if (_seitenYStart.Length != _seitenBilder.Count ||
+                    _seitenHöhe.Length   != _seitenBilder.Count) return;
+
+                int    last = _seitenYStart.Length - 1;
+                double gesamtH = _seitenYStart[last] + _seitenHöhe[last] + SeitenAbstand;
+                PdfCanvas.Width  = RenderBreite + SeiteX * 2;
+                PdfCanvas.Height = Math.Max(gesamtH, 1);
+
+                for (int i = 0; i < _seitenBilder.Count; i++)
+                    SafeExecute(() => ZeicheSeite(i), $"ZeicheSeite[{i}]");
+
+                bool sichtbar = BtnSchnitteSichtbar.IsChecked == true;
+                foreach (var y in _schnittLinienY)
+                {
+                    try
+                    {
+                        var l = MacheSchnittLinie(y);
+                        l.Visibility = sichtbar ? Visibility.Visible : Visibility.Collapsed;
+                        PdfCanvas.Children.Add(l);
+                    }
+                    catch (Exception ex) { LogException(ex, $"ZeicheCanvas/Linie@{y}"); }
+                }
+
+                ZeicheCropLinien();
+            }
+            catch (Exception ex) { LogException(ex, "ZeicheCanvas"); }
+        }
+
+        private void ZeicheSeite(int i)
+        {
+            if (_seitenBilder[i] == null) return;
+            double h = Math.Max(1, _seitenHöhe[i]);
+
+            DropShadowEffect? shadow = null;
+            try
+            {
+                shadow = new DropShadowEffect
+                {
+                    BlurRadius  = 20, ShadowDepth = 7,
+                    Direction   = 280, Color       = Colors.Black, Opacity = 0.85
+                };
+            }
+            catch { /* ohne Schatten weiterzeichnen */ }
+
+            var blatt = new Border
+            {
+                Width               = RenderBreite,
+                Height              = h,
+                Background          = Brushes.White,
+                BorderBrush         = new SolidColorBrush(Color.FromRgb(160, 160, 160)),
+                BorderThickness     = new Thickness(2),
+                Child               = new Image
+                {
+                    Source  = _seitenBilder[i], Width = RenderBreite,
+                    Height  = h, Stretch = Stretch.Fill,
+                    SnapsToDevicePixels = true
+                },
+                Effect              = shadow,
+                SnapsToDevicePixels = true
+            };
+            Canvas.SetLeft(blatt, SeiteX);
+            Canvas.SetTop(blatt, _seitenYStart[i]);
+            PdfCanvas.Children.Add(blatt);
+        }
+
+        // ── Schnittlinien-Objekte ─────────────────────────────────────────────
+
+        private Line MacheSchnittLinie(double y)
+        {
+            double dicke = 2.0 / _zoomFaktor; // Pixel-unabhängige Stärke beim Zoomen
+            var l = new Line
+            {
+                X1               = SeiteX,
+                X2               = SeiteX + RenderBreite,
+                Y1               = y, Y2 = y,
+                Stroke           = Brushes.Red,
+                StrokeThickness  = dicke,
+                StrokeDashArray  = new DoubleCollection(new[] { 8.0 / _zoomFaktor, 4.0 / _zoomFaktor }),
+                Cursor           = Cursors.SizeNS,
+                Tag              = y,
+                IsHitTestVisible = true
+            };
+            l.MouseLeftButtonDown  += Linie_MouseDown;
+            l.MouseEnter           += (s, e) => { if (s is Line ln) ln.Stroke = Brushes.OrangeRed; };
+            l.MouseLeave           += (s, e) => { if (s is Line ln) ln.Stroke = Brushes.Red; };
+
+            // Kontextmenü: Linie löschen
+            var menu      = new ContextMenu();
+            var itemDel   = new MenuItem { Header = "Linie löschen" };
+            itemDel.Click += (s, e) => SafeExecute(() => DeleteCutLine(l), "CutLine_Delete");
+            menu.Items.Add(itemDel);
+            l.ContextMenu = menu;
+
+            return l;
+        }
+
+        // ── Crop-Linien ───────────────────────────────────────────────────────
+
+        private static bool IstCropLinie(Line l)
+            => l.Tag is string s && s.StartsWith("CROP_");
+
+        private void ZeicheCropLinien()
+        {
+            if (_seitenBilder.Count == 0 || _seitenYStart.Length == 0) return;
+            bool sichtbar = BtnRandAnzeigen.IsChecked == true;
+            double canvasH = PdfCanvas.Height;
+            double dicke = 1.5 / _zoomFaktor;
+            double dash1 = 10.0 / _zoomFaktor;
+            double dash2 = 5.0  / _zoomFaktor;
+
+            // Vertikale Linien (spannen gesamte Canvas-Höhe)
+            double xL = SeiteX + _cropLinks  * RenderBreite;
+            double xR = SeiteX + (1.0 - _cropRechts) * RenderBreite;
+            PdfCanvas.Children.Add(MacheCropLinie(xL, 0, xL, canvasH, "CROP_LINKS",  dicke, dash1, dash2, sichtbar));
+            PdfCanvas.Children.Add(MacheCropLinie(xR, 0, xR, canvasH, "CROP_RECHTS", dicke, dash1, dash2, sichtbar));
+
+            // Horizontale Linien pro Seite
+            for (int i = 0; i < _seitenBilder.Count; i++)
+            {
+                double yO = _seitenYStart[i] + _cropOben  * _seitenHöhe[i];
+                double yU = _seitenYStart[i] + (1.0 - _cropUnten) * _seitenHöhe[i];
+                PdfCanvas.Children.Add(MacheCropLinie(SeiteX, yO, SeiteX + RenderBreite, yO, $"CROP_OBEN_{i}",  dicke, dash1, dash2, sichtbar));
+                PdfCanvas.Children.Add(MacheCropLinie(SeiteX, yU, SeiteX + RenderBreite, yU, $"CROP_UNTEN_{i}", dicke, dash1, dash2, sichtbar));
+            }
+        }
+
+        private Line MacheCropLinie(
+            double x1, double y1, double x2, double y2, string tag,
+            double dicke, double dash1, double dash2, bool sichtbar)
+        {
+            var l = new Line
+            {
+                X1 = x1, Y1 = y1, X2 = x2, Y2 = y2,
+                Stroke          = Brushes.LimeGreen,
+                StrokeThickness = dicke,
+                StrokeDashArray = new DoubleCollection(new[] { dash1, dash2 }),
+                Tag             = tag,
+                Cursor          = (tag == "CROP_LINKS" || tag == "CROP_RECHTS")
+                                    ? Cursors.SizeWE : Cursors.SizeNS,
+                IsHitTestVisible = true,
+                Visibility = sichtbar ? Visibility.Visible : Visibility.Collapsed
+            };
+            l.MouseLeftButtonDown += CropLinie_MouseDown;
+            l.MouseEnter += (s, _) => { if (s is Line ln) ln.Stroke = Brushes.Chartreuse; };
+            l.MouseLeave += (s, _) => { if (s is Line ln) ln.Stroke = Brushes.LimeGreen; };
+
+            var menu     = new ContextMenu();
+            var itemEdit = new MenuItem { Header = "Rand bearbeiten …" };
+            itemEdit.Click += (_, __) => BtnRandBearbeiten_Click(this, new RoutedEventArgs());
+            menu.Items.Add(itemEdit);
+            l.ContextMenu = menu;
+            return l;
+        }
+
+        private void AktualisiereCropLinien()
+        {
+            if (_seitenBilder.Count == 0) return;
+            double canvasH = PdfCanvas.Height;
+            foreach (var l in PdfCanvas.Children.OfType<Line>())
+            {
+                string tag = l.Tag?.ToString() ?? "";
+                if (tag == "CROP_LINKS")
+                    { l.X1 = l.X2 = SeiteX + _cropLinks * RenderBreite; l.Y1 = 0; l.Y2 = canvasH; }
+                else if (tag == "CROP_RECHTS")
+                    { l.X1 = l.X2 = SeiteX + (1.0 - _cropRechts) * RenderBreite; l.Y1 = 0; l.Y2 = canvasH; }
+                else if (tag.StartsWith("CROP_OBEN_") &&
+                         int.TryParse(tag.Substring(10), out int iO) && iO < _seitenYStart.Length)
+                    l.Y1 = l.Y2 = _seitenYStart[iO] + _cropOben * _seitenHöhe[iO];
+                else if (tag.StartsWith("CROP_UNTEN_") &&
+                         int.TryParse(tag.Substring(11), out int iU) && iU < _seitenYStart.Length)
+                    l.Y1 = l.Y2 = _seitenYStart[iU] + (1.0 - _cropUnten) * _seitenHöhe[iU];
+            }
+        }
+
+        // ── Automatische Rand-Erkennung ───────────────────────────────────────
+
+        private static (double Links, double Rechts, double Oben, double Unten)
+            ErkenneCropRänderVonBitmap(BitmapSource bmp, int sicherheitsPx = 4)
+        {
+            int w = bmp.PixelWidth, h = bmp.PixelHeight;
+            if (w <= 0 || h <= 0) return (0, 0, 0, 0);
+            int stride = w * 4;
+            var pixels = new byte[(long)h * stride];
+            try { bmp.CopyPixels(pixels, stride, 0); }
+            catch { return (0, 0, 0, 0); }
+
+            // Dichte-basierte Erkennung (wie bei Schnitterkennung): 0.3 % dunkle Pixel = Inhalt
+            const byte    BgSchwelle    = 240;
+            const double  DichteSchwelle = 0.003;
+
+            bool ZeileHatInhalt(int y)
+            {
+                int off = y * stride, dunkel = 0;
+                for (int x = 0; x < w; x++)
+                {
+                    int idx = off + x * 4;
+                    if (pixels[idx] < BgSchwelle || pixels[idx+1] < BgSchwelle || pixels[idx+2] < BgSchwelle)
+                        dunkel++;
+                }
+                return (double)dunkel / w >= DichteSchwelle;
+            }
+
+            bool SpalteHatInhalt(int x)
+            {
+                int dunkel = 0;
+                for (int y = 0; y < h; y++)
+                {
+                    int idx = y * stride + x * 4;
+                    if (pixels[idx] < BgSchwelle || pixels[idx+1] < BgSchwelle || pixels[idx+2] < BgSchwelle)
+                        dunkel++;
+                }
+                return (double)dunkel / h >= DichteSchwelle;
+            }
+
+            int oben = -1, unten = -1, links = -1, rechts = -1;
+            for (int y = 0; y < h; y++)   if (ZeileHatInhalt(y))  { oben  = y; break; }
+            if (oben < 0) return (0, 0, 0, 0);
+            for (int y = h-1; y >= 0; y--) if (ZeileHatInhalt(y))  { unten = y; break; }
+            for (int x = 0; x < w; x++)   if (SpalteHatInhalt(x)) { links = x; break; }
+            for (int x = w-1; x >= 0; x--) if (SpalteHatInhalt(x)) { rechts = x; break; }
+
+            if (links < 0 || rechts < 0 || unten < 0) return (0, 0, 0, 0);
+
+            // Sicherheitsabstand
+            oben   = Math.Max(0,   oben  - sicherheitsPx);
+            unten  = Math.Min(h-1, unten + sicherheitsPx);
+            links  = Math.Max(0,   links - sicherheitsPx);
+            rechts = Math.Min(w-1, rechts + sicherheitsPx);
+
+            return (
+                (double)links        / w,
+                (double)(w-1-rechts) / w,
+                (double)oben         / h,
+                (double)(h-1-unten)  / h
+            );
+        }
+
+        // ── Crop-Linien Drag & Drop ───────────────────────────────────────────
+
+        private void CropLinie_MouseDown(object sender, MouseButtonEventArgs e)
+        {
+            try
+            {
+                if (sender is not Line l || !IstCropLinie(l)) return;
+                _gezogeneCropSeite = l.Tag?.ToString();
+                l.CaptureMouse();
+                PdfCanvas.MouseMove         += CropCanvas_MouseMove;
+                PdfCanvas.MouseLeftButtonUp += CropCanvas_MouseUp;
+                e.Handled = true;
+            }
+            catch (Exception ex) { LogException(ex, "CropLinie_MouseDown"); }
+        }
+
+        private void CropCanvas_MouseMove(object sender, MouseEventArgs e)
+        {
+            try
+            {
+                if (_gezogeneCropSeite == null || _seitenBilder.Count == 0) return;
+                Point pos = e.GetPosition(PdfCanvas);
+
+                switch (_gezogeneCropSeite)
+                {
+                    case "CROP_LINKS":
+                        _cropLinks = Math.Max(0, Math.Min(0.49 - _cropRechts,
+                            (pos.X - SeiteX) / RenderBreite));
+                        break;
+                    case "CROP_RECHTS":
+                        _cropRechts = Math.Max(0, Math.Min(0.49 - _cropLinks,
+                            (SeiteX + RenderBreite - pos.X) / RenderBreite));
+                        break;
+                    default:
+                        if (_gezogeneCropSeite.StartsWith("CROP_OBEN_") &&
+                            int.TryParse(_gezogeneCropSeite.Substring(10), out int iO) &&
+                            iO < _seitenYStart.Length && _seitenHöhe[iO] > 0)
+                        {
+                            double frac = (pos.Y - _seitenYStart[iO]) / _seitenHöhe[iO];
+                            _cropOben = Math.Max(0, Math.Min(0.49 - _cropUnten, frac));
+                        }
+                        else if (_gezogeneCropSeite.StartsWith("CROP_UNTEN_") &&
+                                 int.TryParse(_gezogeneCropSeite.Substring(11), out int iU) &&
+                                 iU < _seitenYStart.Length && _seitenHöhe[iU] > 0)
+                        {
+                            double bot  = _seitenYStart[iU] + _seitenHöhe[iU];
+                            double frac = (bot - pos.Y) / _seitenHöhe[iU];
+                            _cropUnten = Math.Max(0, Math.Min(0.49 - _cropOben, frac));
+                        }
+                        break;
+                }
+
+                AktualisiereCropLinien();
+                e.Handled = true;
+            }
+            catch (Exception ex) { LogException(ex, "CropCanvas_MouseMove"); }
+        }
+
+        private void CropCanvas_MouseUp(object sender, MouseButtonEventArgs e)
+        {
+            try
+            {
+                if (_gezogeneCropSeite == null) return;
+                var linie = PdfCanvas.Children.OfType<Line>()
+                    .FirstOrDefault(l => l.IsMouseCaptured);
+                linie?.ReleaseMouseCapture();
+                PdfCanvas.MouseMove         -= CropCanvas_MouseMove;
+                PdfCanvas.MouseLeftButtonUp -= CropCanvas_MouseUp;
+                _gezogeneCropSeite = null;
+                e.Handled = true;
+            }
+            catch (Exception ex) { LogException(ex, "CropCanvas_MouseUp"); _gezogeneCropSeite = null; }
+        }
+
+        // ── Toolbar-Handler: Rand ─────────────────────────────────────────────
+
+        private void BtnRandAnzeigen_Checked(object sender, RoutedEventArgs e)
+            => SafeExecute(() =>
+            {
+                foreach (var l in PdfCanvas.Children.OfType<Line>().Where(IstCropLinie))
+                    l.Visibility = Visibility.Visible;
+            }, "BtnRandAnzeigen_Checked");
+
+        private void BtnRandAnzeigen_Unchecked(object sender, RoutedEventArgs e)
+            => SafeExecute(() =>
+            {
+                foreach (var l in PdfCanvas.Children.OfType<Line>().Where(IstCropLinie))
+                    l.Visibility = Visibility.Collapsed;
+            }, "BtnRandAnzeigen_Unchecked");
+
+        private void BtnRandAuto_Click(object sender, RoutedEventArgs e)
+        {
+            SafeExecute(() =>
+            {
+                if (_seitenBilder.Count == 0) return;
+                TxtInfo.Text = "Erkenne Rand …";
+                var bilder = _seitenBilder.ToList();
+
+                Task.Run(() =>
+                {
+                    double minL = double.MaxValue, minR = double.MaxValue;
+                    double minO = double.MaxValue, minU = double.MaxValue;
+                    foreach (var bmp in bilder)
+                    {
+                        var (l, r, o, u) = ErkenneCropRänderVonBitmap(bmp);
+                        if (l < minL) minL = l;
+                        if (r < minR) minR = r;
+                        if (o < minO) minO = o;
+                        if (u < minU) minU = u;
+                    }
+                    if (minL == double.MaxValue) minL = 0;
+                    if (minR == double.MaxValue) minR = 0;
+                    if (minO == double.MaxValue) minO = 0;
+                    if (minU == double.MaxValue) minU = 0;
+
+                    Dispatcher.BeginInvoke(new Action(() =>
+                    {
+                        _cropLinks  = minL; _cropRechts = minR;
+                        _cropOben   = minO; _cropUnten  = minU;
+                        AktualisiereCropLinien();
+                        if (BtnRandAnzeigen.IsChecked != true) BtnRandAnzeigen.IsChecked = true;
+                        TxtInfo.Text = $"Rand · L:{minL*100:F1}%  O:{minO*100:F1}%  R:{minR*100:F1}%  U:{minU*100:F1}%";
+                    }));
+                });
+            }, "BtnRandAuto_Click");
+        }
+
+        private void BtnRandBearbeiten_Click(object sender, RoutedEventArgs e)
+        {
+            SafeExecute(() =>
+            {
+                if (_seitenBilder.Count == 0)
+                { MessageBox.Show("Kein PDF geladen.", "Rand bearbeiten"); return; }
+
+                double refH = _seitenHöhe.Length > 0 ? _seitenHöhe[0] : 1000;
+                double refW = RenderBreite;
+
+                int obenPx   = (int)Math.Round(_cropOben   * refH);
+                int untenPx  = (int)Math.Round(_cropUnten  * refH);
+                int linksPx  = (int)Math.Round(_cropLinks  * refW);
+                int rechtsPx = (int)Math.Round(_cropRechts * refW);
+
+                TextBox MkTxt(int v) => new TextBox
+                {
+                    Text = v.ToString(), Width = 64,
+                    TextAlignment = TextAlignment.Right,
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+                TextBlock MkLbl(string s) => new TextBlock
+                {
+                    Text = s, VerticalAlignment = VerticalAlignment.Center,
+                    Margin = new Thickness(0, 0, 6, 0), Width = 60
+                };
+
+                var txtOben   = MkTxt(obenPx);
+                var txtUnten  = MkTxt(untenPx);
+                var txtLinks  = MkTxt(linksPx);
+                var txtRechts = MkTxt(rechtsPx);
+
+                var sp = new StackPanel { Margin = new Thickness(14) };
+                sp.Children.Add(new TextBlock
+                {
+                    Text = "Rand in Vorschau-Pixeln (0 = kein Rand):",
+                    TextWrapping = TextWrapping.Wrap,
+                    Margin = new Thickness(0, 0, 0, 8)
+                });
+
+                void AddRow(string label, TextBox tb)
+                {
+                    var row = new DockPanel { Margin = new Thickness(0, 3, 0, 3) };
+                    var lbl = MkLbl(label); DockPanel.SetDock(lbl, Dock.Left); row.Children.Add(lbl);
+                    var px  = new TextBlock { Text = " px", VerticalAlignment = VerticalAlignment.Center };
+                    DockPanel.SetDock(px, Dock.Right); row.Children.Add(px);
+                    row.Children.Add(tb);
+                    sp.Children.Add(row);
+                }
+
+                AddRow("Oben:",   txtOben);
+                AddRow("Unten:",  txtUnten);
+                AddRow("Links:",  txtLinks);
+                AddRow("Rechts:", txtRechts);
+
+                bool ok = false;
+                Window? dlg = null;
+                var btnOk = new Button
+                    { Content = "OK", Width = 70, IsDefault = true, Margin = new Thickness(0, 0, 8, 0) };
+                var btnCancel = new Button { Content = "Abbrechen", Width = 80, IsCancel = true };
+                btnOk.Click     += (_, __) => { ok = true; dlg!.Close(); };
+                btnCancel.Click += (_, __) => dlg!.Close();
+
+                var btnRow = new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    HorizontalAlignment = HorizontalAlignment.Right,
+                    Margin = new Thickness(0, 12, 0, 0)
+                };
+                btnRow.Children.Add(btnOk);
+                btnRow.Children.Add(btnCancel);
+                sp.Children.Add(btnRow);
+
+                dlg = new Window
+                {
+                    Title = "Rand bearbeiten", Content = sp,
+                    SizeToContent = SizeToContent.WidthAndHeight,
+                    MinWidth = 260,
+                    WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                    Owner = Window.GetWindow(this),
+                    ResizeMode = ResizeMode.NoResize, ShowInTaskbar = false
+                };
+                dlg.ShowDialog();
+                if (!ok) return;
+
+                if (!int.TryParse(txtOben.Text.Trim(),   out int nO) || nO < 0) return;
+                if (!int.TryParse(txtUnten.Text.Trim(),  out int nU) || nU < 0) return;
+                if (!int.TryParse(txtLinks.Text.Trim(),  out int nL) || nL < 0) return;
+                if (!int.TryParse(txtRechts.Text.Trim(), out int nR) || nR < 0) return;
+
+                if (nO + nU >= refH || nL + nR >= refW)
+                {
+                    MessageBox.Show("Rand-Summe überschreitet die Seitengröße.",
+                        "Ungültige Eingabe", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+
+                _cropOben = nO / refH; _cropUnten  = nU / refH;
+                _cropLinks = nL / refW; _cropRechts = nR / refW;
+
+                AktualisiereCropLinien();
+                if (BtnRandAnzeigen.IsChecked != true) BtnRandAnzeigen.IsChecked = true;
+            }, "BtnRandBearbeiten_Click");
+        }
+
+        // ── Zoom ──────────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Strg + Mausrad → zentriert auf Mausposition zoomen.
+        /// Normales Mausrad → Scrollen (Standard-Verhalten des ScrollViewer).
+        /// </summary>
+        private void ScrollView_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
+        {
+            if ((Keyboard.Modifiers & ModifierKeys.Control) == 0) return;
+            e.Handled = true;
+
+            try
+            {
+                // Mausposition in Canvas-Koordinaten (vor dem Zoom)
+                Point mouseInCanvas = e.GetPosition(PdfCanvas);
+                // Mausposition relativ zum ScrollViewer-Viewport
+                Point mouseInView   = e.GetPosition(ScrollView);
+
+                double faktor   = e.Delta > 0 ? 1.0 + ZoomStep : 1.0 / (1.0 + ZoomStep);
+                double neuerZoom = Math.Max(ZoomMin, Math.Min(ZoomMax, _zoomFaktor * faktor));
+                if (Math.Abs(neuerZoom - _zoomFaktor) < 0.001) return;
+
+                SetzeZoom(neuerZoom);
+
+                // Scrollposition so anpassen, dass der Punkt unter dem Mauszeiger stabil bleibt:
+                // newOffset = mouseInCanvas * newZoom - mouseInView
+                Dispatcher.BeginInvoke(
+                    new Action(() =>
+                    {
+                        ScrollView.ScrollToHorizontalOffset(mouseInCanvas.X * neuerZoom - mouseInView.X);
+                        ScrollView.ScrollToVerticalOffset  (mouseInCanvas.Y * neuerZoom - mouseInView.Y);
+                    }),
+                    System.Windows.Threading.DispatcherPriority.Loaded);
+            }
+            catch (Exception ex) { LogException(ex, "Zoom/MouseWheel"); }
+        }
+
+        private void BtnZoomMinus_Click(object sender, RoutedEventArgs e)
+            => SafeExecute(() => SetzeZoom(Math.Max(ZoomMin, _zoomFaktor / (1.0 + ZoomStep))), "ZoomMinus");
+
+        private void BtnZoomPlus_Click(object sender, RoutedEventArgs e)
+            => SafeExecute(() => SetzeZoom(Math.Min(ZoomMax, _zoomFaktor * (1.0 + ZoomStep))), "ZoomPlus");
+
+        private void BtnZoomReset_Click(object sender, RoutedEventArgs e)
+            => SafeExecute(() => SetzeZoom(1.0), "ZoomReset");
+
+        private void SetzeZoom(double zoom)
+        {
+            _zoomFaktor   = zoom;
+            CanvasZoom.ScaleX = zoom;
+            CanvasZoom.ScaleY = zoom;
+            TxtZoom.Text  = $"{zoom * 100:0}%";
+
+            // Schnittlinien-Dicke proportional anpassen → visuell immer 2px
+            double dicke  = 2.0 / zoom;
+            double dash1  = 8.0 / zoom;
+            double dash2  = 4.0 / zoom;
+            foreach (var l in PdfCanvas.Children.OfType<Line>())
+            {
+                l.StrokeThickness = dicke;
+                l.StrokeDashArray = new DoubleCollection(new[] { dash1, dash2 });
+            }
+        }
+
+        // ── Automatik / Manuell ───────────────────────────────────────────────
+
+        private void RbtnModus_Changed(object sender, RoutedEventArgs e)
+        {
+            SafeExecute(() =>
+            {
+                _automatikmodus = RbtnAutomatik.IsChecked == true;
+                BtnNeuBerechnen.IsEnabled  = _automatikmodus;
+                BtnAbstandMinus.IsEnabled  = _automatikmodus;
+                BtnAbstandPlus.IsEnabled   = _automatikmodus;
+                TxtAbstandLabel.Opacity    = _automatikmodus ? 1.0 : 0.4;
+                TxtAbstand.Opacity         = _automatikmodus ? 1.0 : 0.4;
+
+                if (!_automatikmodus)
+                {
+                    // Automatisch erzeugte Cuts entfernen; manuelle bleiben erhalten,
+                    // aber da wir nicht unterscheiden, löschen wir alle → Benutzer setzt manuell
+                    // (optional könnte man sie behalten – hier klare Trennung)
+                    var linien = PdfCanvas.Children.OfType<Line>().Where(l => !IstCropLinie(l)).ToList();
+                    foreach (var l in linien) PdfCanvas.Children.Remove(l);
+                    _schnittLinienY.Clear();
+                    BtnSchnitteLöschen.IsEnabled = false;
+                    TxtInfo.Text = $"{_seitenBilder.Count} Seite(n) · Modus: Manuell";
+                }
+                else if (_seitenBilder.Count > 0)
+                {
+                    AktualisiereCuts(zeigeNachBerechnung: BtnSchnitteSichtbar.IsChecked == true);
+                }
+            }, "RbtnModus_Changed");
+        }
+
+        // ── Schnitte aktualisieren ────────────────────────────────────────────
+
+        private void AktualisiereCuts(bool zeigeNachBerechnung = false)
+        {
+            if (!_automatikmodus || _seitenBilder.Count == 0) return;
+
+            TxtInfo.Text = "Erkenne Zwischenräume …";
+            var bilderK = _seitenBilder.ToList();
+            var yStartK = (double[])_seitenYStart.Clone();
+            var höheK   = (double[])_seitenHöhe.Clone();
+            int abstand = _mindestAbstandPx;
+
+            Task.Run(() =>
+            {
+                List<double>? cuts = null;
+                string? fehler = null;
+                try { cuts = ErkenneCutsAllerSeiten(bilderK, yStartK, höheK, abstand); }
+                catch (Exception ex) { LogException(ex, "AktualisiereCuts"); fehler = ex.Message; }
+
+                Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    try
+                    {
+                        if (fehler != null) { TxtInfo.Text = "Fehler: " + fehler; return; }
+                        _schnittLinienY = cuts!;
+
+                        var alte = PdfCanvas.Children.OfType<Line>().Where(l => !IstCropLinie(l)).ToList();
+                        foreach (var l in alte) PdfCanvas.Children.Remove(l);
+
+                        bool sichtbar = zeigeNachBerechnung || BtnSchnitteSichtbar.IsChecked == true;
+                        if (zeigeNachBerechnung)
+                        {
+                            BtnSchnitteSichtbar.Checked -= BtnSchnitteSichtbar_Checked;
+                            BtnSchnitteSichtbar.IsChecked = true;
+                            BtnSchnitteSichtbar.Checked += BtnSchnitteSichtbar_Checked;
+                        }
+
+                        foreach (var y in _schnittLinienY)
+                        {
+                            var l = MacheSchnittLinie(y);
+                            l.Visibility = sichtbar ? Visibility.Visible : Visibility.Collapsed;
+                            PdfCanvas.Children.Add(l);
+                        }
+
+                        BtnSchnitteLöschen.IsEnabled = cuts!.Count > 0;
+                        TxtInfo.Text = $"{_seitenBilder.Count} Seite(n) · {cuts!.Count} Schnitt(e) erkannt";
+                    }
+                    catch (Exception ex) { LogException(ex, "AktualisiereCuts/UI"); }
+                }));
+            });
+        }
+
+        // ── Schnittlinien: Drag & Drop ────────────────────────────────────────
+
+        private void Linie_MouseDown(object sender, MouseButtonEventArgs e)
+        {
+            try
+            {
+                if (sender is not Line linie) return;
+                _gezogeneLinie = linie;
+                _ziehOffsetY   = e.GetPosition(PdfCanvas).Y - linie.Y1;
+                linie.CaptureMouse();
+                linie.Stroke = Brushes.DarkRed;
+                PdfCanvas.MouseMove         += Canvas_MouseMove;
+                PdfCanvas.MouseLeftButtonUp += Canvas_MouseUp;
+                e.Handled = true;
+            }
+            catch (Exception ex) { LogException(ex, "Linie_MouseDown"); _gezogeneLinie = null; }
+        }
+
+        private void Canvas_MouseMove(object sender, MouseEventArgs e)
+        {
+            try
+            {
+                if (_gezogeneLinie == null) return;
+                double ny = BegrenzeYPosition(e.GetPosition(PdfCanvas).Y - _ziehOffsetY);
+                _gezogeneLinie.Y1 = ny;
+                _gezogeneLinie.Y2 = ny;
+                e.Handled = true;
+            }
+            catch (Exception ex) { LogException(ex, "Canvas_MouseMove"); }
+        }
+
+        private void Canvas_MouseUp(object sender, MouseButtonEventArgs e)
+        {
+            try
+            {
+                if (_gezogeneLinie == null) return;
+                double ny = BegrenzeYPosition(e.GetPosition(PdfCanvas).Y - _ziehOffsetY);
+                _gezogeneLinie.Y1  = ny;
+                _gezogeneLinie.Y2  = ny;
+                _gezogeneLinie.Tag = ny;
+                _gezogeneLinie.Stroke = Brushes.Red;
+                _gezogeneLinie.ReleaseMouseCapture();
+                PdfCanvas.MouseMove         -= Canvas_MouseMove;
+                PdfCanvas.MouseLeftButtonUp -= Canvas_MouseUp;
+                _gezogeneLinie = null;
+                SynchronisiereSchnittLinienAusCanvas();
+                e.Handled = true;
+            }
+            catch (Exception ex)
+            {
+                LogException(ex, "Canvas_MouseUp");
+                _gezogeneLinie = null;
+            }
+        }
+
+        /// <summary>
+        /// Klemmt die Y-Position auf den gültigen Seitenbereich.
+        /// Verhindert, dass Schnitte in den Abstand zwischen Seiten oder außerhalb geraten.
+        /// </summary>
+        private double BegrenzeYPosition(double y)
+        {
+            if (_seitenYStart.Length == 0) return Math.Max(0, y);
+
+            // Innerhalb irgendeiner Seite bleiben
+            double yKlemm = y;
+            bool   imBereich = false;
+            for (int i = 0; i < _seitenYStart.Length; i++)
+            {
+                double top = _seitenYStart[i];
+                double bot = top + _seitenHöhe[i];
+                if (y >= top && y <= bot) { imBereich = true; break; }
+            }
+
+            if (!imBereich)
+            {
+                // Nächste Seitengrenze suchen
+                double best = double.MaxValue;
+                for (int i = 0; i < _seitenYStart.Length; i++)
+                {
+                    double mid = _seitenYStart[i] + _seitenHöhe[i] / 2.0;
+                    if (Math.Abs(mid - y) < Math.Abs(best - y)) best = mid;
+                }
+                yKlemm = best;
+            }
+
+            return yKlemm;
+        }
+
+        private void DeleteCutLine(Line linie)
+        {
+            PdfCanvas.Children.Remove(linie);
+            SynchronisiereSchnittLinienAusCanvas();
+            BtnSchnitteLöschen.IsEnabled = _schnittLinienY.Count > 0;
+            TxtInfo.Text = $"{_seitenBilder.Count} Seite(n) · {_schnittLinienY.Count} Schnitt(e)";
+        }
+
+        private void SynchronisiereSchnittLinienAusCanvas()
+        {
+            try
+            {
+                _schnittLinienY = PdfCanvas.Children.OfType<Line>()
+                    .Where(l => !IstCropLinie(l))
+                    .Select(l => l.Y1).OrderBy(y => y).ToList();
+            }
+            catch (Exception ex) { LogException(ex, "Synchronisiere"); }
+        }
+
+        // ── Maus: Scheren-Modus ───────────────────────────────────────────────
+
+        private void Canvas_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        {
+            try
+            {
+                if (!_schereModus || _seitenBilder.Count == 0) return;
+                if (e.OriginalSource is Line) return;
+
+                double y = e.GetPosition(PdfCanvas).Y;
+                y = BegrenzeYPosition(y);
+
+                // Mindestabstand zu bestehenden Linien prüfen
+                if (_schnittLinienY.Any(ly => Math.Abs(ly - y) < MinLinienAbstand)) return;
+
+                _schnittLinienY.Add(y);
+                _schnittLinienY.Sort();
+                var l = MacheSchnittLinie(y);
+                l.Visibility = BtnSchnitteSichtbar.IsChecked == true
+                    ? Visibility.Visible : Visibility.Collapsed;
+                PdfCanvas.Children.Add(l);
+                BtnSchnitteLöschen.IsEnabled = true;
+                TxtInfo.Text = $"{_seitenBilder.Count} Seite(n) · {_schnittLinienY.Count} Schnitt(e)";
+                e.Handled = true;
+            }
+            catch (Exception ex) { LogException(ex, "Canvas_MouseLeftButtonDown"); }
+        }
+
+        // ── Toolbar-Handler ───────────────────────────────────────────────────
+
+        private void BtnSchere_Checked(object sender, RoutedEventArgs e)
+            => SafeExecute(() => { _schereModus = true; PdfCanvas.Cursor = Cursors.Cross; }, "BtnSchere_Checked");
+
+        private void BtnSchere_Unchecked(object sender, RoutedEventArgs e)
+            => SafeExecute(() => { _schereModus = false; PdfCanvas.Cursor = Cursors.Arrow; }, "BtnSchere_Unchecked");
+
+        private void BtnSchnitteSichtbar_Checked(object sender, RoutedEventArgs e)
+        {
+            SafeExecute(() =>
+            {
+                if (_schnittLinienY.Count > 0 || PdfCanvas.Children.OfType<Line>().Any(l => !IstCropLinie(l)))
+                    foreach (var l in PdfCanvas.Children.OfType<Line>().Where(l => !IstCropLinie(l)))
+                        l.Visibility = Visibility.Visible;
+                else if (_seitenBilder.Count > 0 && _automatikmodus)
+                    AktualisiereCuts(zeigeNachBerechnung: true);
+            }, "BtnSchnitteSichtbar_Checked");
+        }
+
+        private void BtnSchnitteSichtbar_Unchecked(object sender, RoutedEventArgs e)
+            => SafeExecute(() =>
+            {
+                foreach (var l in PdfCanvas.Children.OfType<Line>().Where(l => !IstCropLinie(l)))
+                    l.Visibility = Visibility.Collapsed;
+            }, "BtnSchnitteSichtbar_Unchecked");
+
+        private void BtnNeuBerechnen_Click(object sender, RoutedEventArgs e)
+        {
+            SafeExecute(() =>
+            {
+                if (!_automatikmodus) return;
+                BtnSchnitteSichtbar.Checked -= BtnSchnitteSichtbar_Checked;
+                BtnSchnitteSichtbar.IsChecked = true;
+                BtnSchnitteSichtbar.Checked += BtnSchnitteSichtbar_Checked;
+                AktualisiereCuts(zeigeNachBerechnung: true);
+            }, "BtnNeuBerechnen_Click");
+        }
+
+        private void BtnSchnitteLöschen_Click(object sender, RoutedEventArgs e)
+        {
+            SafeExecute(() =>
+            {
+                foreach (var l in PdfCanvas.Children.OfType<Line>().Where(l => !IstCropLinie(l)).ToList())
+                    PdfCanvas.Children.Remove(l);
+                _schnittLinienY.Clear();
+                BtnSchnitteLöschen.IsEnabled = false;
+                TxtInfo.Text = $"{_seitenBilder.Count} Seite(n) · 0 Schnitte";
+            }, "BtnSchnitteLöschen_Click");
+        }
+
+        private void BtnAbstandMinus_Click(object sender, RoutedEventArgs e)
+        {
+            SafeExecute(() =>
+            {
+                if (_mindestAbstandPx <= AbstandMin) return;
+                _mindestAbstandPx = Math.Max(AbstandMin, _mindestAbstandPx - AbstandStep);
+                TxtAbstand.Text   = _mindestAbstandPx.ToString();
+                AktualisiereCuts();
+            }, "BtnAbstandMinus_Click");
+        }
+
+        private void BtnAbstandPlus_Click(object sender, RoutedEventArgs e)
+        {
+            SafeExecute(() =>
+            {
+                if (_mindestAbstandPx >= AbstandMax) return;
+                _mindestAbstandPx = Math.Min(AbstandMax, _mindestAbstandPx + AbstandStep);
+                TxtAbstand.Text   = _mindestAbstandPx.ToString();
+                AktualisiereCuts();
+            }, "BtnAbstandPlus_Click");
+        }
+
+        private void BtnExport_Click(object sender, RoutedEventArgs e)
+            => SafeExecute(ExportierenNachWord, "BtnExport_Click");
+
+        // ── Blöcke ────────────────────────────────────────────────────────────
+
+        private List<(double YStart, double YEnd)> BerechneBöcke()
+        {
+            var blocks = new List<(double, double)>();
+            if (_seitenYStart.Length == 0 || _seitenHöhe.Length == 0) return blocks;
+
+            int    last = _seitenYStart.Length - 1;
+            double gesamtH = _seitenYStart[last] + _seitenHöhe[last];
+
+            var grenzen = new List<double> { 0 };
+            grenzen.AddRange(_schnittLinienY.Where(y => y > 0 && y < gesamtH));
+            grenzen.Add(gesamtH);
+            grenzen.Sort();
+
+            for (int i = 0; i < grenzen.Count - 1; i++)
+                if (grenzen[i + 1] - grenzen[i] > 1)
+                    blocks.Add((grenzen[i], grenzen[i + 1]));
+            return blocks;
+        }
+
+        // ── Hilfsmethoden für Seiten-Gruppierung ─────────────────────────────
+
+        /// <summary>
+        /// Ordnet jeden Block der PDF-Seite zu, in deren Mitte er liegt.
+        /// Leere Gruppen (PDF-Seiten ohne Block) werden nicht zurückgegeben.
+        /// </summary>
+        private static List<List<(double YStart, double YEnd)>> GruppiereBlöckeNachSeite(
+            List<(double YStart, double YEnd)> blöcke,
+            double[] seitenYStart, double[] seitenHöhe, double seitenAbstand)
+        {
+            int n = seitenYStart.Length;
+            var gruppen = Enumerable.Range(0, n)
+                .Select(_ => new List<(double, double)>())
+                .ToList();
+
+            foreach (var (yS, yE) in blöcke)
+            {
+                double midY   = (yS + yE) / 2.0;
+                int    pageIdx = n - 1;                  // Fallback: letzte Seite
+                for (int i = 0; i < n - 1; i++)
+                {
+                    // Grenze liegt in der Mitte des Zwischenraums zwischen Seite i und i+1
+                    double grenze = seitenYStart[i] + seitenHöhe[i] + seitenAbstand / 2.0;
+                    if (midY < grenze) { pageIdx = i; break; }
+                }
+                gruppen[pageIdx].Add((yS, yE));
+            }
+
+            return gruppen.Where(g => g.Count > 0).ToList();
+        }
+
+        // ── Word-Export ───────────────────────────────────────────────────────
+
+        private void ExportThreadWorker(
+            List<(double YStart, double YEnd)> blöcke,
+            string zielPfad, string pdfPfad,
+            double[] seitenYStart, double[] seitenHöhe,
+            double cropLinks, double cropRechts, double cropOben, double cropUnten)
+        {
+            var alleTemp = new List<string>();
+            try
+            {
+                // ── 1. PDF-Seitengröße und effektive Maße nach Beschnitt ──────────
+                Dispatcher.BeginInvoke(new Action(() => TxtInfo.Text = "Lese PDF-Maße …"));
+                var (nativeW_pts, nativeH_pts) = HolePdfSeitenGrösse(pdfPfad);
+                int exportPixW = Math.Max(1, (int)Math.Round(nativeW_pts / 72.0 * ExportDpi));
+                int exportPixH = Math.Max(1, (int)Math.Round(nativeH_pts / 72.0 * ExportDpi));
+
+                double nativeW_eff = nativeW_pts * Math.Max(0.01, 1.0 - cropLinks - cropRechts);
+                double nativeH_eff = nativeH_pts * Math.Max(0.01, 1.0 - cropOben  - cropUnten);
+
+                App.LogFehler("Export/Maße",
+                    $"PDF: {nativeW_pts:F1}×{nativeH_pts:F1} pt | " +
+                    $"Render: {exportPixW}×{exportPixH} px | DPI={ExportDpi} | " +
+                    $"Eff: {nativeW_eff:F1}×{nativeH_eff:F1} pt | " +
+                    $"Crop L:{cropLinks:P1} R:{cropRechts:P1} O:{cropOben:P1} U:{cropUnten:P1}");
+
+                // ── 2. Hochauflösend rendern ───────────────────────────────────────
+                Dispatcher.BeginInvoke(new Action(() => TxtInfo.Text = "Rendere in hoher Auflösung …"));
+                List<BitmapSource> hochRes;
+                try { hochRes = RenderiereAlleSeiten(pdfPfad, exportPixW, exportPixH); }
+                catch (Exception ex) { LogException(ex, "Export/Render"); hochRes = new List<BitmapSource>(); }
+
+                if (hochRes.Count == 0)
+                {
+                    Dispatcher.BeginInvoke(new Action(() => {
+                        BtnExport.IsEnabled = true;
+                        TxtInfo.Text = "Export abgebrochen: Render fehlgeschlagen.";
+                    }));
+                    return;
+                }
+
+                // ── 3. Blöcke nach PDF-Seite gruppieren ───────────────────────────
+                var seitenGruppen = GruppiereBlöckeNachSeite(blöcke, seitenYStart, seitenHöhe, SeitenAbstand);
+                if (seitenGruppen.Count == 0)
+                {
+                    Dispatcher.BeginInvoke(new Action(() => {
+                        BtnExport.IsEnabled = true;
+                        TxtInfo.Text = "Export abgebrochen: Keine Blöcke.";
+                    }));
+                    return;
+                }
+
+                // ── 4. PNG-Segmente erstellen ──────────────────────────────────────
+                Dispatcher.BeginInvoke(new Action(() => TxtInfo.Text = "Erstelle Bildsegmente …"));
+                var gruppenSegmente = new List<List<(string Pfad, int PixW, int PixH)>>();
+                for (int gi = 0; gi < seitenGruppen.Count; gi++)
+                {
+                    var segsGruppe = new List<(string Pfad, int PixW, int PixH)>();
+                    int bi = 0;
+                    foreach (var (yS, yE) in seitenGruppen[gi])
+                    {
+                        BitmapSource? bmp = null;
+                        try { bmp = RendereBlockHochRes(hochRes, seitenYStart, seitenHöhe, yS, yE,
+                                  cropLinks, cropRechts, cropOben, cropUnten); }
+                        catch (Exception ex) { LogException(ex, $"Export/Block[{gi}/{bi}]"); }
+                        if (bmp == null) { bi++; continue; }
+
+                        try
+                        {
+                            string png = IO.Path.Combine(IO.Path.GetTempPath(), $"sm_{Guid.NewGuid():N}.png");
+                            var enc = new PngBitmapEncoder();
+                            enc.Frames.Add(BitmapFrame.Create(bmp));
+                            using var fs = IO.File.Create(png);
+                            enc.Save(fs);
+                            alleTemp.Add(png);
+                            segsGruppe.Add((png, bmp.PixelWidth, bmp.PixelHeight));
+                        }
+                        catch (Exception ex) { LogException(ex, $"Export/PNG[{gi}/{bi}]"); }
+                        bi++;
+                    }
+                    gruppenSegmente.Add(segsGruppe);
+                }
+
+                int gesamtSegmente = gruppenSegmente.Sum(g => g.Count);
+                if (gesamtSegmente == 0)
+                {
+                    Dispatcher.BeginInvoke(new Action(() => {
+                        BtnExport.IsEnabled = true;
+                        TxtInfo.Text = "Export abgebrochen: Keine Segmente gerendert.";
+                    }));
+                    return;
+                }
+
+                // ── 5. Word-Dokument erstellen ─────────────────────────────────────
+                Dispatcher.BeginInvoke(new Action(() => TxtInfo.Text = "Word wird geöffnet …"));
+                Word.Application? wordApp = null;
+                Word.Document?    wordDoc = null;
+                try
+                {
+                    wordApp = new Word.Application { Visible = false };
+                    wordApp.DisplayAlerts = Word.WdAlertLevel.wdAlertsNone;
+                    wordDoc = wordApp.Documents.Add();
+
+                    // Seitenformat: beschnittene Maße, kein Rand
+                    wordDoc.PageSetup.PageWidth    = (float)nativeW_eff;
+                    wordDoc.PageSetup.PageHeight   = (float)nativeH_eff;
+                    wordDoc.PageSetup.TopMargin    = 0f;
+                    wordDoc.PageSetup.BottomMargin = 0f;
+                    wordDoc.PageSetup.LeftMargin   = 0f;
+                    wordDoc.PageSetup.RightMargin  = 0f;
+
+                    NormiereAbsatzstil(wordDoc);
+
+                    // ── Segmente einfügen: Breite = nativeW_eff, Höhe proportional ─
+                    // Jede Seitengruppe bekommt eine neue Word-Seite (außer der ersten).
+                    // Innerhalb einer Gruppe: Höhen proportional zur Pixel-Höhe, Summe = nativeH_eff.
+                    // Das garantiert exaktes Einpassen ohne Überläufe oder Rundungsfehler.
+                    int seiteNr = 0;
+                    for (int gi = 0; gi < gruppenSegmente.Count; gi++)
+                    {
+                        var gruppe = gruppenSegmente[gi];
+                        if (gruppe.Count == 0) continue;
+
+                        int totalGroupPixH = gruppe.Sum(s => s.PixH);
+                        if (totalGroupPixH <= 0) continue;
+                        seiteNr++;
+
+                        Dispatcher.BeginInvoke(new Action(() =>
+                            TxtInfo.Text = $"Füge Seite {seiteNr} von {gruppenSegmente.Count(g => g.Count > 0)} ein …"));
+
+                        for (int si = 0; si < gruppe.Count; si++)
+                        {
+                            if (!IO.File.Exists(gruppe[si].Pfad)) continue;
+
+                            bool umbruch     = (gi > 0 && si == 0);
+                            bool neuerAbsatz = (si > 0);
+
+                            // Proportionale Größenberechnung: garantiert exaktes Seiteneinpassen
+                            float imgW_pt = (float)nativeW_eff;
+                            float imgH_pt = (float)(nativeH_eff * gruppe[si].PixH / (double)totalGroupPixH);
+
+                            App.LogFehler("Export/Segment",
+                                $"[{gi}/{si}] {gruppe[si].PixH}px / {totalGroupPixH}px → " +
+                                $"{imgW_pt:F1}×{imgH_pt:F2} pt (Umbruch={umbruch})");
+
+                            try { EinfügenSegment(wordDoc, gruppe[si].Pfad, imgW_pt, imgH_pt, neuerAbsatz, umbruch); }
+                            catch (Exception ex) { LogException(ex, $"Export/Word[{gi}/{si}]"); }
+                        }
+                    }
+
+                    BereinigeDokumentAbsätze(wordDoc);
+
+                    // Datei vorher löschen → kein Word-Überschreiben-Dialog
+                    if (IO.File.Exists(zielPfad))
+                        try { IO.File.Delete(zielPfad); } catch { }
+
+                    Dispatcher.BeginInvoke(new Action(() => TxtInfo.Text = "Speichere Word-Dokument …"));
+                    wordDoc.SaveAs2(zielPfad, Word.WdSaveFormat.wdFormatXMLDocument);
+
+                    string dateiName = IO.Path.GetFileName(zielPfad);
+                    int    seiten    = gruppenSegmente.Count(g => g.Count > 0);
+                    Dispatcher.BeginInvoke(new Action(() =>
+                    {
+                        TxtInfo.Text = $"Exportiert: {gesamtSegmente} Segment(e), {seiten} Seite(n) → {dateiName}";
+                        if (MessageBox.Show(
+                            $"Word-Dokument erstellt:\n{zielPfad}\n\nJetzt öffnen?",
+                            "Export fertig", MessageBoxButton.YesNo,
+                            MessageBoxImage.Information) == MessageBoxResult.Yes)
+                        {
+                            try { System.Diagnostics.Process.Start(
+                                new System.Diagnostics.ProcessStartInfo(zielPfad)
+                                { UseShellExecute = true }); }
+                            catch { }
+                        }
+                    }));
+                }
+                catch (Exception ex)
+                {
+                    LogException(ex, "Export/Word");
+                    var inner = App.EntpackeTIE(ex);
+                    Dispatcher.BeginInvoke(new Action(() =>
+                    {
+                        TxtInfo.Text = "Export fehlgeschlagen. Siehe Log.";
+                        MessageBox.Show(
+                            $"Word-Export Fehler:\n[{inner.GetType().Name}] {inner.Message}\n\n[Log: {App.LogDatei}]",
+                            "Fehler", MessageBoxButton.OK, MessageBoxImage.Error);
+                    }));
+                }
+                finally
+                {
+                    try { wordDoc?.Close(false); }  catch { }
+                    try { wordApp?.Quit(); }          catch { }
+                    if (wordDoc != null) try { System.Runtime.InteropServices.Marshal.ReleaseComObject(wordDoc); } catch { }
+                    if (wordApp != null) try { System.Runtime.InteropServices.Marshal.ReleaseComObject(wordApp); } catch { }
+                }
+            }
+            finally
+            {
+                foreach (var f in alleTemp) try { IO.File.Delete(f); } catch { }
+
+                // Export-Sperre immer zurücksetzen (auch im Fehlerfall)
+                Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    _exportLäuft = false;
+                    BtnExport.IsEnabled = true;
+                }));
+            }
+        }
+
+        /// <summary>
+        /// Liest die nativen Seitenmaße der ersten PDF-Seite in Points (72 pt = 1 inch).
+        /// Wird für die exakte 300-DPI-Render-Berechnung verwendet.
+        /// Fallback: A4 (595 × 842 pt).
+        /// </summary>
+        private static (double widthPts, double heightPts) HolePdfSeitenGrösse(string pfad)
+        {
+            try
+            {
+                using var doc = PdfReader.Open(pfad, PdfDocumentOpenMode.ReadOnly);
+                if (doc.PageCount > 0)
+                {
+                    var page = doc.Pages[0];
+                    double w = page.Width.Point;
+                    double h = page.Height.Point;
+                    if (w > 0 && h > 0) return (w, h);
+                }
+            }
+            catch (Exception ex) { LogException(ex, "HolePdfSeitenGrösse"); }
+            return (595.0, 842.0); // A4-Fallback
+        }
+
+        /// <summary>
+        /// Setzt den Normal-Stil des Dokuments auf 0 Abstand / einfachen Zeilenabstand.
+        /// </summary>
+        private static void NormiereAbsatzstil(Word.Document doc)
+        {
+            try
+            {
+                var normal = doc.Styles[Word.WdBuiltinStyle.wdStyleNormal];
+                var pf     = normal.ParagraphFormat;
+                pf.SpaceBefore         = 0f;
+                pf.SpaceAfter          = 0f;
+                pf.SpaceBeforeAuto     = 0;  // False: nicht automatisch
+                pf.SpaceAfterAuto      = 0;
+                pf.LineSpacingRule     = Word.WdLineSpacing.wdLineSpaceSingle;
+                pf.LeftIndent          = 0f;
+                pf.RightIndent         = 0f;
+                pf.FirstLineIndent     = 0f;
+            }
+            catch (Exception ex) { LogException(ex, "NormiereAbsatzstil"); }
+        }
+
+        /// <summary>
+        /// Fügt ein Bildsegment in das Word-Dokument ein.
+        ///
+        /// Geometrie:  pts = px / ExportDpi * 72  (× skalierung)
+        ///
+        /// seitenumbruchVorher = true:
+        ///   Vor diesem Segment wird ein neuer Absatz eingefügt und
+        ///   PageBreakBefore = wdTrue gesetzt, damit die neue PDF-Seite
+        ///   sauber auf einer neuen Word-Seite beginnt.
+        ///
+        /// neuerAbsatz = true:
+        ///   Folgesegment innerhalb derselben PDF-Seite — neuer Absatz,
+        ///   kein Seitenumbruch.
+        /// </summary>
+        private static void EinfügenSegment(
+            Word.Document doc,
+            string bildPfad,
+            float imgW_pt, float imgH_pt,
+            bool neuerAbsatz,
+            bool seitenumbruchVorher = false)
+        {
+            if (seitenumbruchVorher || neuerAbsatz)
+            {
+                Word.Range rNew = doc.Content;
+                rNew.Collapse(Word.WdCollapseDirection.wdCollapseEnd);
+                rNew.InsertParagraphAfter();
+            }
+
+            Word.Range r = doc.Content;
+            r.Collapse(Word.WdCollapseDirection.wdCollapseEnd);
+
+            SetzeAbsatzFormat(r.ParagraphFormat);
+            try { r.ParagraphFormat.PageBreakBefore = seitenumbruchVorher ? -1 : 0; } catch { }
+
+            var shape = r.InlineShapes.AddPicture(bildPfad, false, true);
+            shape.Width  = imgW_pt;
+            shape.Height = imgH_pt;
+        }
+
+        private static void SetzeAbsatzFormat(Word.ParagraphFormat pf)
+        {
+            try
+            {
+                pf.SpaceBefore      = 0f;
+                pf.SpaceAfter       = 0f;
+                pf.SpaceBeforeAuto  = 0;
+                pf.SpaceAfterAuto   = 0;
+                pf.LineSpacingRule  = Word.WdLineSpacing.wdLineSpaceSingle;
+                pf.LeftIndent       = 0f;
+                pf.RightIndent      = 0f;
+                pf.FirstLineIndent  = 0f;
+            }
+            catch { /* ParagraphFormat-Fehler nicht propagieren */ }
+        }
+
+        /// <summary>
+        /// Letzte Sicherung: alle Absätze im fertigen Dokument nochmals bereinigen.
+        /// Verhindert, dass Word Abstände nachträglich einfügt.
+        /// </summary>
+        private static void BereinigeDokumentAbsätze(Word.Document doc)
+        {
+            try
+            {
+                foreach (Word.Paragraph para in doc.Paragraphs)
+                    SetzeAbsatzFormat(para.Format);
+            }
+            catch (Exception ex) { LogException(ex, "BereinigeDokumentAbsätze"); }
+        }
+
+        // ── Hochauflösung: Block zusammensetzen ──────────────────────────────
+
+        private static BitmapSource? RendereBlockHochRes(
+            List<BitmapSource> hochRes,
+            double[] seitenYStart, double[] seitenHöhe,
+            double yStart, double yEnd,
+            double cropLinks = 0, double cropRechts = 0,
+            double cropOben = 0, double cropUnten = 0)
+        {
+            if (hochRes == null || hochRes.Count == 0) return null;
+            if (seitenYStart == null || seitenHöhe  == null) return null;
+            if (yEnd <= yStart) return null;
+
+            var teile = new List<(BitmapSource Bmp, int H)>();
+            int maxW  = 0;
+            int n     = Math.Min(hochRes.Count, Math.Min(seitenYStart.Length, seitenHöhe.Length));
+
+            for (int i = 0; i < n; i++)
+            {
+                try
+                {
+                    if (hochRes[i] == null || seitenHöhe[i] <= 0) continue;
+
+                    double sTop    = seitenYStart[i];
+                    double sBottom = sTop + seitenHöhe[i];
+
+                    // Effektive Seitengrenzen nach Beschnitt (in Vorschau-Koordinaten)
+                    double effTop    = sTop    + cropOben  * seitenHöhe[i];
+                    double effBottom = sBottom - cropUnten * seitenHöhe[i];
+
+                    double übTop = Math.Max(yStart, effTop);
+                    double übBot = Math.Min(yEnd,   effBottom);
+                    if (übBot <= übTop) continue;
+
+                    double scY = hochRes[i].PixelHeight / seitenHöhe[i];
+                    int pixT   = (int)Math.Round((übTop - sTop) * scY);  // ab Seiten-Top (inkl. Crop-Offset)
+                    int pixH   = (int)Math.Round((übBot - übTop) * scY);
+                    int w      = hochRes[i].PixelWidth;
+
+                    // Horizontaler Beschnitt in Export-Pixeln
+                    int cropL_px = (int)Math.Round(cropLinks  * w);
+                    int cropR_px = (int)Math.Round(cropRechts * w);
+                    int cropW    = Math.Max(1, w - cropL_px - cropR_px);
+                    if (cropL_px + cropW > w) cropW = w - cropL_px;
+                    if (cropW <= 0) continue;
+
+                    pixT = Math.Max(0, pixT);
+                    int maxH = hochRes[i].PixelHeight - pixT;
+                    if (maxH <= 0) continue;
+                    pixH = Math.Min(maxH, Math.Max(1, pixH));
+                    if (pixT + pixH > hochRes[i].PixelHeight) continue;
+
+                    var crop = new CroppedBitmap(hochRes[i], new Int32Rect(cropL_px, pixT, cropW, pixH));
+                    crop.Freeze();
+                    teile.Add((crop, pixH));
+                    if (cropW > maxW) maxW = cropW;
+                }
+                catch (Exception ex) { LogException(ex, $"RendereBlockHochRes/Seite[{i}]"); }
+            }
+
+            if (teile.Count == 0 || maxW == 0) return null;
+
+            int totalH = teile.Sum(t => t.H);
+            if (totalH <= 0) return null;
+
+            try
+            {
+                var visual = new DrawingVisual();
+                using (var ctx = visual.RenderOpen())
+                {
+                    double y = 0;
+                    foreach (var (bmp, h) in teile)
+                    {
+                        ctx.DrawImage(bmp, new Rect(0, y, maxW, h));
+                        y += h;
+                    }
+                }
+                // 96 DPI: 1 WPF-Unit = 1 Pixel, damit Koordinaten direkt als Pixel gelten.
+                var rtb = new RenderTargetBitmap(
+                    maxW, totalH, 96, 96, PixelFormats.Pbgra32);
+                rtb.Render(visual);
+                rtb.Freeze();
+                return rtb;
+            }
+            catch (Exception ex) { LogException(ex, "RendereBlockHochRes/Render"); return null; }
+        }
+    }
+}

@@ -19,8 +19,8 @@
                 <!-- ── Zoom ──────────────────────────────────────────────── -->
                 <TextBlock Text="Zoom:" VerticalAlignment="Center"
                            Margin="0,0,4,0" FontSize="11"/>
-                <Button Content="&#x1F50D;&#x2212;" Width="32" Height="22"
-                        Margin="0,0,2,0" FontSize="12"
+                <Button Content="−" Width="22" Height="22"
+                        Margin="0,0,2,0" FontSize="13" FontWeight="Bold"
                         ToolTip="Verkleinern (Strg + Mausrad)"
                         Click="BtnZoomMinus_Click"/>
                 <Border BorderBrush="#AAA" BorderThickness="1" CornerRadius="3"
@@ -30,19 +30,14 @@
                                Width="36" TextAlignment="Center"
                                FontSize="12" FontWeight="Bold"/>
                 </Border>
-                <Button Content="&#x1F50D;+" Width="32" Height="22"
-                        Margin="0,0,2,0" FontSize="12"
-                        ToolTip="Vergr&#246;&#223;ern (Strg + Mausrad)"
+                <Button Content="+" Width="22" Height="22"
+                        Margin="0,0,2,0" FontSize="13" FontWeight="Bold"
+                        ToolTip="Vergrößern (Strg + Mausrad)"
                         Click="BtnZoomPlus_Click"/>
-                <Button Content="1:1" Width="30" Height="22"
-                        Margin="0,0,2,0" FontSize="10"
-                        ToolTip="Zoom auf 100 % zur&#252;cksetzen"
+                <Button Content="1:1" Width="28" Height="22"
+                        Margin="0,0,6,0" FontSize="10"
+                        ToolTip="Zoom auf 100 % zurücksetzen"
                         Click="BtnZoomReset_Click"/>
-                <Button Content="Ganzes Fenster" Height="22"
-                        Padding="6,0"
-                        Margin="0,0,6,0" FontSize="11"
-                        ToolTip="Zeigt eine Seite vollständig im Fenster"
-                        Click="BtnZoomFit_Click"/>
 
                 <Separator Width="1" Height="18" Background="#BBB" Margin="0,0,8,0"/>
 
@@ -50,26 +45,26 @@
                 <TextBlock Text="Rand:" VerticalAlignment="Center"
                            Margin="0,0,4,0" FontSize="11"/>
                 <ToggleButton x:Name="BtnRandAnzeigen"
-                              Content="&#x25A1;"
+                              Content="▣"
                               Width="28" Height="26"
                               Margin="0,0,2,0"
-                              IsChecked="False"
+                              IsChecked="True"
                               ToolTip="Beschnittrahmen ein-/ausblenden"
                               Checked="BtnRandAnzeigen_Checked"
                               Unchecked="BtnRandAnzeigen_Unchecked"/>
                 <Button x:Name="BtnRandAuto"
-                        Content="&#x1F50D; Auto"
+                        Content="🔍 Auto"
                         Height="26" Padding="6,0"
                         Margin="0,0,2,0"
-                        Style="{StaticResource GreenButton}"
-                        ToolTip="Rand automatisch aus Wei&#223;raum erkennen und setzen"
+                        Background="#C8E6C9" BorderBrush="#388E3C"
+                        ToolTip="Rand automatisch aus Weißraum erkennen und setzen"
                         Click="BtnRandAuto_Click"/>
                 <Button x:Name="BtnRandBearbeiten"
-                        Content="&#x270F; Werte"
+                        Content="✏ Werte"
                         Height="26" Padding="6,0"
                         Margin="0,0,6,0"
-                        Style="{StaticResource PrimaryButton}"
-                        ToolTip="Rand in mm numerisch eingeben"
+                        Background="#BBDEFB" BorderBrush="#1976D2"
+                        ToolTip="Rand in Pixeln numerisch eingeben"
                         Click="BtnRandBearbeiten_Click"/>
 
                 <!-- ── Sicherheitsabstand für Auto-Rand ──────────────────── -->
@@ -78,7 +73,7 @@
                            FontSize="11"
                            ToolTip="Sicherheitsabstand beim automatischen Rand (0 = kein Abstand)"/>
                 <RepeatButton x:Name="BtnSicherheitMinus"
-                              Content="&#x2212;" Width="20" Height="22"
+                              Content="−" Width="20" Height="22"
                               Margin="0,0,1,0" FontSize="12" FontWeight="Bold"
                               ToolTip="Sicherheitsabstand verringern"
                               Click="BtnSicherheitMinus_Click"/>
@@ -92,29 +87,20 @@
                 <RepeatButton x:Name="BtnSicherheitPlus"
                               Content="+" Width="20" Height="22"
                               Margin="0,0,1,0" FontSize="12" FontWeight="Bold"
-                              ToolTip="Sicherheitsabstand erh&#246;hen"
+                              ToolTip="Sicherheitsabstand erhöhen"
                               Click="BtnSicherheitPlus_Click"/>
-                <TextBlock Text="mm" VerticalAlignment="Center"
+                <TextBlock Text="px" VerticalAlignment="Center"
                            Margin="0,0,8,0" FontSize="11"/>
-
-                <Separator Width="1" Height="18" Background="#BBB" Margin="0,0,8,0"/>
-
-                <!-- ── Layout-Modus ──────────────────────────────────────── -->
-                <Button x:Name="BtnLayoutWechsel"
-                        Content="&#x29C9; Nebeneinander"
-                        Height="26" Padding="6,0"
-                        Margin="0,0,6,0"
-                        ToolTip="Seiten nebeneinander / untereinander anzeigen"
-                        Click="BtnLayoutWechsel_Click"/>
 
                 <Separator Width="1" Height="18" Background="#BBB" Margin="0,0,8,0"/>
 
                 <!-- Word-Export -->
                 <Button x:Name="BtnExport"
-                        Content="&#x1F4C4; Nach Word exportieren"
+                        Content="📄 Nach Word exportieren"
                         Height="26" Padding="8,0"
                         Margin="0,0,8,0"
-                        Style="{StaticResource PrimaryButton}"
+                        Background="#E3F2FD" BorderBrush="#1976D2"
+                        FontWeight="SemiBold"
                         ToolTip="Alle PDF-Seiten als Bilder in eine Word-Datei exportieren"
                         Click="BtnExport_Click"/>
 

@@ -1,0 +1,73 @@
+<UserControl x:Class="StatikManager.Modules.Werkzeuge.PdfSchnittEditor"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <!-- ── Werkzeugleiste ──────────────────────────────────────────────── -->
+        <Border Grid.Row="0"
+                Background="{DynamicResource Farbe.Werkzeugleiste}"
+                BorderBrush="{DynamicResource Farbe.Rahmen}"
+                BorderThickness="0,0,0,1"
+                Padding="8,5">
+            <StackPanel Orientation="Horizontal">
+
+                <ToggleButton x:Name="BtnSchere"
+                              Content="✂ Schnitt setzen"
+                              Width="125" Height="26"
+                              Margin="0,0,6,0"
+                              ToolTip="Scheren-Modus: Klick auf Vorschau setzt Schnitt. Rechtsklick auf Linie entfernt sie."
+                              Checked="BtnSchere_Checked"
+                              Unchecked="BtnSchere_Unchecked"/>
+
+                <ToggleButton x:Name="BtnSchnitteSichtbar"
+                              Content="👁 Linien"
+                              Width="80" Height="26"
+                              Margin="0,0,6,0"
+                              IsChecked="True"
+                              ToolTip="Schnittlinien ein-/ausblenden"
+                              Checked="BtnSchnitteSichtbar_Checked"
+                              Unchecked="BtnSchnitteSichtbar_Unchecked"/>
+
+                <Button x:Name="BtnSchnitteLöschen"
+                        Content="🗑 Alle Schnitte"
+                        Height="26" Margin="0,0,6,0"
+                        ToolTip="Alle Schnittlinien entfernen"
+                        Click="BtnSchnitteLöschen_Click"/>
+
+                <Separator Width="1" Height="18" Background="#CCC" Margin="0,0,6,0"/>
+
+                <Button x:Name="BtnExport"
+                        Content="📄 Nach Word exportieren"
+                        Height="26" Margin="0,0,8,0"
+                        ToolTip="Blöcke als hochauflösende Bilder in Word-Dokument neben der PDF speichern"
+                        Click="BtnExport_Click"/>
+
+                <Separator Width="1" Height="18" Background="#CCC" Margin="0,0,8,0"/>
+
+                <TextBlock x:Name="TxtInfo"
+                           VerticalAlignment="Center"
+                           Foreground="#666"
+                           FontSize="11"
+                           FontStyle="Italic"/>
+            </StackPanel>
+        </Border>
+
+        <!-- ── Vorschau-Bereich ───────────────────────────────────────────── -->
+        <ScrollViewer Grid.Row="1"
+                      x:Name="ScrollView"
+                      HorizontalScrollBarVisibility="Auto"
+                      VerticalScrollBarVisibility="Auto"
+                      Background="#E0E0E0">
+
+            <Canvas x:Name="PdfCanvas"
+                    Background="White"
+                    MouseLeftButtonDown="Canvas_MouseLeftButtonDown"/>
+
+        </ScrollViewer>
+    </Grid>
+</UserControl>

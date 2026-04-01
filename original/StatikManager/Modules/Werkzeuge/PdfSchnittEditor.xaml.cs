@@ -1,8 +1,6 @@
 using Docnet.Core;
 using Docnet.Core.Models;
 using PdfSharp.Pdf.IO;
-using StatikManager.Core;
-using StatikManager.Infrastructure;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -45,23 +43,13 @@ namespace StatikManager.Modules.Werkzeuge
         private double[]           _seitenYStart   = Array.Empty<double>();
         private double[]           _seitenHöhe     = Array.Empty<double>();
 
-        // Horizontaler Layout-Modus
-        private bool     _layoutHorizontal;
-        private double[] _seitenXStart = Array.Empty<double>();
-
         private double _zoomFaktor = 1.0;
 
-        // Smooth-Zoom
-        private double _zielZoom    = 1.0;
-        private Point? _zoomAnker;      // Canvas-Koordinaten des Maus-Ankerpunkts
-        private Point? _zoomAnkerView;  // Viewport-Koordinaten des Maus-Ankerpunkts
-        private System.Windows.Threading.DispatcherTimer? _zoomTimer;
-
-        // Crop-Ränder als Bruchteil der Seitenbreite/-höhe (0 = kein Rand, 0.5 = halbe Seite) – pro Seite
-        private double[] _cropLinks  = Array.Empty<double>();
-        private double[] _cropRechts = Array.Empty<double>();
-        private double[] _cropOben   = Array.Empty<double>();
-        private double[] _cropUnten  = Array.Empty<double>();
+        // Crop-Ränder als Bruchteil der Seitenbreite/-höhe (0 = kein Rand, 0.5 = halbe Seite)
+        private double _cropLinks  = 0.0;
+        private double _cropRechts = 0.0;
+        private double _cropOben   = 0.0;
+        private double _cropUnten  = 0.0;
 
         // Sicherheitsabstand für automatische Rand-Erkennung (Vorschau-Pixel, min 0, max 50)
         private double _cropSicherheitMm  = 2.0;   // Sicherheitsabstand fuer Auto-Rand (mm)
@@ -76,10 +64,6 @@ namespace StatikManager.Modules.Werkzeuge
 
         // Abbruch laufender Lade-Aufträge
         private CancellationTokenSource? _ladeCts;
-        // Abbruch laufender Auto-Rand-Berechnung
-        private CancellationTokenSource? _autoRandCts;
-        // Generationszähler: verhindert, dass veraltete Dispatcher-Callbacks UI überschreiben
-        private volatile int _ladeGeneration;
 
         // ── Fehler-Hilfsmethoden ──────────────────────────────────────────────
 
@@ -102,13 +86,7 @@ namespace StatikManager.Modules.Werkzeuge
                 return;
             }
 
-            var oldCts = _ladeCts;
-            _ladeCts = null;
-            oldCts?.Cancel();
-            oldCts?.Dispose();
-            _autoRandCts?.Cancel();
-            _ladeGeneration++;
-            int myGen = _ladeGeneration;
+            _ladeCts?.Cancel();
             var cts = new CancellationTokenSource();
             _ladeCts = cts;
             var token = cts.Token;
@@ -118,7 +96,7 @@ namespace StatikManager.Modules.Werkzeuge
             _seitenBilder.Clear();
             _seitenYStart = Array.Empty<double>();
             _seitenHöhe   = Array.Empty<double>();
-            _cropLinks = _cropRechts = _cropOben = _cropUnten = Array.Empty<double>();
+            _cropLinks = _cropRechts = _cropOben = _cropUnten = 0.0;
             TxtInfo.Text        = "Lade PDF …";
             BtnExport.IsEnabled = false;
 
@@ -126,21 +104,16 @@ namespace StatikManager.Modules.Werkzeuge
 
             string pfadKopie = pfad;
 
-            var ladeThread = new Thread(() =>
+            Task.Run(() =>
             {
                 List<BitmapSource>? bilder = null;
                 double[]? yStart = null, höhe = null;
                 string? fehler = null;
 
-                // Serialisierung: kein paralleler pdfium-Zugriff mit Word-Vorschau-Threads.
-                try { AppZustand.RenderSem.Wait(token); }
-                catch (OperationCanceledException) { return; }
-                try
-                {
                 try
                 {
                     if (token.IsCancellationRequested) return;
-                    bilder = PdfRenderer.RenderiereAlleSeiten(pfadKopie, RenderBreite, token: token);
+                    bilder = RenderiereAlleSeiten(pfadKopie, RenderBreite, token: token);
                     if (token.IsCancellationRequested) return;
                     if (bilder.Count == 0) { fehler = "PDF enthält keine lesbaren Seiten."; }
                     else
@@ -150,12 +123,10 @@ namespace StatikManager.Modules.Werkzeuge
                 }
                 catch (OperationCanceledException) { return; }
                 catch (Exception ex) { LogException(ex, "LadePdf"); fehler = App.GetExceptionKette(ex); }
-                }
-                finally { AppZustand.RenderSem.Release(); }
 
                 Dispatcher.BeginInvoke(new Action(() =>
                 {
-                    if (token.IsCancellationRequested || myGen != _ladeGeneration) return;
+                    if (token.IsCancellationRequested) return;
                     try
                     {
                         if (fehler != null)
@@ -168,7 +139,6 @@ namespace StatikManager.Modules.Werkzeuge
                         _seitenBilder = bilder!;
                         _seitenYStart = yStart!;
                         _seitenHöhe   = höhe!;
-                        InitCropArrays(_seitenBilder.Count);
                         ZeicheCanvas();
                         // Pixel-pro-mm fuer Sicherheitsabstand-Konvertierung
                         if (_pdfPfad != null && bilder!.Count > 0)
@@ -180,11 +150,8 @@ namespace StatikManager.Modules.Werkzeuge
                         TxtInfo.Text = $"{bilder!.Count} Seite(n) geladen";
                     }
                     catch (Exception ex) { LogException(ex, "LadePdf/UI"); }
-                    finally { AppZustand.Instanz.SetzeLaden(false); }
                 }));
-            }) { IsBackground = true, Name = "PdfSchnittLaden" };
-            AppZustand.Instanz.SetzeLaden(true);
-            ladeThread.Start();
+            });
         }
 
         public void ExportierenNachWord()
@@ -224,16 +191,76 @@ namespace StatikManager.Modules.Werkzeuge
             var yStartK  = (double[])_seitenYStart.Clone();
             var höheK    = (double[])_seitenHöhe.Clone();
             string pdfK  = _pdfPfad;
-            var cropLK = (double[])_cropLinks.Clone();
-            var cropRK = (double[])_cropRechts.Clone();
-            var cropOK = (double[])_cropOben.Clone();
-            var cropUK = (double[])_cropUnten.Clone();
+            double cropL = _cropLinks, cropR = _cropRechts, cropO = _cropOben, cropU = _cropUnten;
 
             var thread = new Thread(() =>
-                ExportThreadWorker(zielPfad, pdfK, yStartK, höheK, cropLK, cropRK, cropOK, cropUK))
+                ExportThreadWorker(zielPfad, pdfK, yStartK, höheK, cropL, cropR, cropO, cropU))
             { IsBackground = true, Name = "PdfSchnittExport" };
             thread.SetApartmentState(ApartmentState.STA);
             thread.Start();
+        }
+
+        // ── Rendering ────────────────────────────────────────────────────────
+
+        private static List<BitmapSource> RenderiereAlleSeiten(string pfad, int breite, int höhe = 0,
+                                                               CancellationToken token = default)
+        {
+            if (höhe <= 0) höhe = breite * 2;
+            var result = new List<BitmapSource>();
+            try
+            {
+                using var lib       = DocLib.Instance;
+                // Docnet erfordert dimOne <= dimTwo (Breite <= Höhe).
+                // Bei Querformat-PDFs tauschen, damit der Constraint nicht verletzt wird.
+                // Die tatsächliche Render-Größe liefert GetPageWidth/Height().
+                int dimMin = Math.Min(breite, höhe);
+                int dimMax = Math.Max(breite, höhe);
+                using var docReader = lib.GetDocReader(pfad, new PageDimensions(dimMin, dimMax));
+                int n = docReader.GetPageCount();
+                for (int i = 0; i < n; i++)
+                {
+                    token.ThrowIfCancellationRequested();
+                    try
+                    {
+                        using var pageReader = docReader.GetPageReader(i);
+                        byte[]? raw = pageReader.GetImage();
+                        int w = pageReader.GetPageWidth(), h = pageReader.GetPageHeight();
+                        if (raw == null || w <= 0 || h <= 0 || raw.Length < w * h * 4) continue;
+
+                        // Transparente Pixel gegen Weiß kompositionieren
+                        KompositioniereGegenWeiss(raw, w, h);
+
+                        var bmp = BitmapSource.Create(w, h, 96, 96,
+                            PixelFormats.Bgra32, null, raw, w * 4);
+                        bmp.Freeze();
+                        result.Add(bmp);
+                    }
+                    catch (OperationCanceledException) { throw; }
+                    catch (Exception ex) { LogException(ex, $"Seite[{i}]"); }
+                }
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex) { LogException(ex, "RenderiereAlleSeiten"); }
+            return result;
+        }
+
+        private static void KompositioniereGegenWeiss(byte[] raw, int w, int h)
+        {
+            int maxOff = Math.Min(w * h * 4, raw.Length - 3);
+            for (int p = 0; p < maxOff; p += 4)
+            {
+                byte a = raw[p + 3];
+                if (a == 255) continue;
+                if (a == 0) { raw[p] = raw[p+1] = raw[p+2] = raw[p+3] = 255; }
+                else
+                {
+                    float af = a / 255f, inv = 1f - af;
+                    raw[p]   = (byte)(raw[p]   * af + 255f * inv);
+                    raw[p+1] = (byte)(raw[p+1] * af + 255f * inv);
+                    raw[p+2] = (byte)(raw[p+2] * af + 255f * inv);
+                    raw[p+3] = 255;
+                }
+            }
         }
 
         // ── Layout ────────────────────────────────────────────────────────────
@@ -252,60 +279,8 @@ namespace StatikManager.Modules.Werkzeuge
                 y += höhe[i] + abstand;
             }
         }
-        private static void BerechneLayoutHorizontalStatic(
-            List<BitmapSource> bilder, double abstand,
-            out double[] xStart)
-        {
-            xStart = new double[bilder.Count];
-            double x = SeiteX;
-            for (int i = 0; i < bilder.Count; i++)
-            {
-                xStart[i] = x;
-                x += Math.Max(1, bilder[i].PixelWidth) + abstand;
-            }
-        }
-
         // ── Crop-Linien ───────────────────────────────────────────────────────
 
-        // Initialisiert alle Crop-Arrays auf 0, Länge = Seitenanzahl.
-        private void InitCropArrays(int n)
-        {
-            _cropLinks  = new double[n];
-            _cropRechts = new double[n];
-            _cropOben   = new double[n];
-            _cropUnten  = new double[n];
-        }
-
-        // Gibt den Index der Seite zurück, die aktuell am stärksten sichtbar ist.
-        private int AktiveSeiteIndex()
-        {
-            if (_seitenBilder.Count == 0) return -1;
-            if (_seitenBilder.Count == 1) return 0;
-            double zoom = Math.Max(0.001, _zoomFaktor);
-            double vpT  = ScrollView.VerticalOffset   / zoom;
-            double vpB  = (ScrollView.VerticalOffset  + ScrollView.ViewportHeight) / zoom;
-            double vpL  = ScrollView.HorizontalOffset / zoom;
-            double vpR  = (ScrollView.HorizontalOffset + ScrollView.ViewportWidth)  / zoom;
-            int    best = 0;
-            double bestOvl = -1;
-            for (int i = 0; i < _seitenBilder.Count; i++)
-            {
-                double ovl;
-                if (_layoutHorizontal && i < _seitenXStart.Length)
-                {
-                    double pH = i < _seitenHöhe.Length ? _seitenHöhe[i] : 0;
-                    ovl = Math.Max(0, Math.Min(vpR, _seitenXStart[i] + _seitenBilder[i].PixelWidth) - Math.Max(vpL, _seitenXStart[i]))
-                        * Math.Max(0, Math.Min(vpB, SeiteX + pH) - Math.Max(vpT, SeiteX));
-                }
-                else if (!_layoutHorizontal && i < _seitenYStart.Length)
-                {
-                    ovl = Math.Max(0, Math.Min(vpB, _seitenYStart[i] + _seitenHöhe[i]) - Math.Max(vpT, _seitenYStart[i]));
-                }
-                else ovl = 0;
-                if (ovl > bestOvl) { bestOvl = ovl; best = i; }
-            }
-            return best;
-        }
 
         // ── Canvas zeichnen ───────────────────────────────────────────────────
 
@@ -318,23 +293,11 @@ namespace StatikManager.Modules.Werkzeuge
                 if (_seitenYStart.Length != _seitenBilder.Count ||
                     _seitenHöhe.Length   != _seitenBilder.Count) return;
 
-                if (_layoutHorizontal)
-                {
-                    BerechneLayoutHorizontalStatic(_seitenBilder, SeitenAbstand, out _seitenXStart);
-                    int lastH = _seitenXStart.Length - 1;
-                    double gesamtW = _seitenXStart[lastH] + _seitenBilder[lastH].PixelWidth + SeitenAbstand;
-                    double maxH    = _seitenBilder.Max(b => (double)b.PixelHeight);
-                    PdfCanvas.Width  = Math.Max(gesamtW, 1);
-                    PdfCanvas.Height = Math.Max(maxH + SeiteX * 2, 1);
-                }
-                else
-                {
-                    int    last    = _seitenYStart.Length - 1;
-                    double gesamtH = _seitenYStart[last] + _seitenHöhe[last] + SeitenAbstand;
-                    double maxBmpW = _seitenBilder.Max(b => (double)b.PixelWidth);
-                    PdfCanvas.Width  = maxBmpW + SeiteX * 2;
-                    PdfCanvas.Height = Math.Max(gesamtH, 1);
-                }
+                int    last = _seitenYStart.Length - 1;
+                double gesamtH  = _seitenYStart[last] + _seitenHöhe[last] + SeitenAbstand;
+                double maxBmpW  = _seitenBilder.Max(b => (double)b.PixelWidth);
+                PdfCanvas.Width  = maxBmpW + SeiteX * 2;
+                PdfCanvas.Height = Math.Max(gesamtH, 1);
 
                 for (int i = 0; i < _seitenBilder.Count; i++)
                     SafeExecute(() => ZeicheSeite(i), $"ZeicheSeite[{i}]");
@@ -380,10 +343,8 @@ namespace StatikManager.Modules.Werkzeuge
                 Effect              = shadow,
                 SnapsToDevicePixels = true
             };
-            double setX = _layoutHorizontal && i < _seitenXStart.Length ? _seitenXStart[i] : SeiteX;
-            double setY = _layoutHorizontal ? SeiteX : _seitenYStart[i];
-            Canvas.SetLeft(blatt, setX);
-            Canvas.SetTop(blatt,  setY);
+            Canvas.SetLeft(blatt, SeiteX);
+            Canvas.SetTop(blatt, _seitenYStart[i]);
             PdfCanvas.Children.Add(blatt);
         }
         // Crop-Linien-Tags: visuelle Linie = "CROP_XXX", Hit-Zone = "CROP_XXX_HIT"
@@ -395,52 +356,21 @@ namespace StatikManager.Modules.Werkzeuge
 
         private void ZeicheCropLinien()
         {
-            if (_seitenBilder.Count == 0) return;
+            if (_seitenBilder.Count == 0 || _seitenYStart.Length == 0) return;
             bool sichtbar = BtnRandAnzeigen.IsChecked == true;
+            double canvasH = PdfCanvas.Height;
 
-            if (_layoutHorizontal)
+            double xL = SeiteX + _cropLinks  * RenderBreite;
+            double xR = SeiteX + (1.0 - _cropRechts) * RenderBreite;
+            MacheCropLinie(xL, 0, xL, canvasH, "CROP_LINKS",  sichtbar);
+            MacheCropLinie(xR, 0, xR, canvasH, "CROP_RECHTS", sichtbar);
+
+            for (int i = 0; i < _seitenBilder.Count; i++)
             {
-                if (_seitenXStart.Length != _seitenBilder.Count) return;
-                for (int i = 0; i < _seitenBilder.Count; i++)
-                {
-                    double cL = i < _cropLinks.Length  ? _cropLinks[i]  : 0;
-                    double cR = i < _cropRechts.Length ? _cropRechts[i] : 0;
-                    double cO = i < _cropOben.Length   ? _cropOben[i]   : 0;
-                    double cU = i < _cropUnten.Length  ? _cropUnten[i]  : 0;
-                    double pageW = _seitenBilder[i].PixelWidth;
-                    double pageH = _seitenHöhe[i];
-                    MacheCropLinie(_seitenXStart[i] + cL * pageW, SeiteX,
-                                   _seitenXStart[i] + cL * pageW, SeiteX + pageH,        $"CROP_LINKS_{i}",  sichtbar);
-                    MacheCropLinie(_seitenXStart[i] + (1.0 - cR) * pageW, SeiteX,
-                                   _seitenXStart[i] + (1.0 - cR) * pageW, SeiteX + pageH, $"CROP_RECHTS_{i}", sichtbar);
-                    MacheCropLinie(_seitenXStart[i], SeiteX + cO * pageH,
-                                   _seitenXStart[i] + pageW, SeiteX + cO * pageH,        $"CROP_OBEN_{i}",  sichtbar);
-                    MacheCropLinie(_seitenXStart[i], SeiteX + (1.0 - cU) * pageH,
-                                   _seitenXStart[i] + pageW, SeiteX + (1.0 - cU) * pageH, $"CROP_UNTEN_{i}", sichtbar);
-                }
-            }
-            else
-            {
-                if (_seitenYStart.Length == 0) return;
-                for (int i = 0; i < _seitenBilder.Count; i++)
-                {
-                    if (i >= _seitenYStart.Length || i >= _seitenHöhe.Length) break;
-                    double cL = i < _cropLinks.Length  ? _cropLinks[i]  : 0;
-                    double cR = i < _cropRechts.Length ? _cropRechts[i] : 0;
-                    double cO = i < _cropOben.Length   ? _cropOben[i]   : 0;
-                    double cU = i < _cropUnten.Length  ? _cropUnten[i]  : 0;
-                    double pageW = _seitenBilder[i].PixelWidth;
-                    double pT    = _seitenYStart[i];
-                    double pH    = _seitenHöhe[i];
-                    MacheCropLinie(SeiteX + cL * pageW, pT,
-                                   SeiteX + cL * pageW, pT + pH,            $"CROP_LINKS_{i}",  sichtbar);
-                    MacheCropLinie(SeiteX + (1.0 - cR) * pageW, pT,
-                                   SeiteX + (1.0 - cR) * pageW, pT + pH,    $"CROP_RECHTS_{i}", sichtbar);
-                    MacheCropLinie(SeiteX, pT + cO * pH,
-                                   SeiteX + pageW, pT + cO * pH,             $"CROP_OBEN_{i}",  sichtbar);
-                    MacheCropLinie(SeiteX, pT + (1.0 - cU) * pH,
-                                   SeiteX + pageW, pT + (1.0 - cU) * pH,    $"CROP_UNTEN_{i}", sichtbar);
-                }
+                double yO = _seitenYStart[i] + _cropOben  * _seitenHöhe[i];
+                double yU = _seitenYStart[i] + (1.0 - _cropUnten) * _seitenHöhe[i];
+                MacheCropLinie(SeiteX, yO, SeiteX + RenderBreite, yO, $"CROP_OBEN_{i}",  sichtbar);
+                MacheCropLinie(SeiteX, yU, SeiteX + RenderBreite, yU, $"CROP_UNTEN_{i}", sichtbar);
             }
         }
 
@@ -453,8 +383,7 @@ namespace StatikManager.Modules.Werkzeuge
         {
             double dickeVis = 2.0 / _zoomFaktor;
             double dickeHit = Math.Max(14.0, 14.0 / _zoomFaktor); // ≥14 px Greifbereich
-            bool istVertikal = (tag == "CROP_LINKS" || tag == "CROP_RECHTS"
-                             || tag.StartsWith("CROP_LINKS_") || tag.StartsWith("CROP_RECHTS_"));
+            bool istVertikal = (tag == "CROP_LINKS" || tag == "CROP_RECHTS");
             var cursor     = istVertikal ? Cursors.SizeWE : Cursors.SizeNS;
             var visibility = sichtbar ? Visibility.Visible : Visibility.Collapsed;
 
@@ -502,72 +431,23 @@ namespace StatikManager.Modules.Werkzeuge
         private void AktualisiereCropLinien()
         {
             if (_seitenBilder.Count == 0) return;
+            double canvasH = PdfCanvas.Height;
             foreach (var l in PdfCanvas.Children.OfType<Line>())
             {
-                string tag = BasisTag(l.Tag?.ToString() ?? "");
+                // Basis-Tag ermitteln (visuelle Linie "CROP_X" und Hit-Zone "CROP_X_HIT" gemeinsam)
+                string raw  = l.Tag?.ToString() ?? "";
+                string tag  = BasisTag(raw);
 
-                if (tag.StartsWith("CROP_LINKS_") &&
-                    int.TryParse(tag.Substring(11), out int iL) && iL < _seitenBilder.Count)
-                {
-                    double cL    = iL < _cropLinks.Length ? _cropLinks[iL] : 0;
-                    double pageW = _seitenBilder[iL].PixelWidth;
-                    if (_layoutHorizontal && iL < _seitenXStart.Length)
-                    {
-                        l.X1 = l.X2 = _seitenXStart[iL] + cL * pageW;
-                        l.Y1 = SeiteX; l.Y2 = SeiteX + _seitenHöhe[iL];
-                    }
-                    else if (!_layoutHorizontal && iL < _seitenYStart.Length)
-                    {
-                        l.X1 = l.X2 = SeiteX + cL * pageW;
-                        l.Y1 = _seitenYStart[iL]; l.Y2 = _seitenYStart[iL] + _seitenHöhe[iL];
-                    }
-                }
-                else if (tag.StartsWith("CROP_RECHTS_") &&
-                         int.TryParse(tag.Substring(12), out int iR) && iR < _seitenBilder.Count)
-                {
-                    double cR    = iR < _cropRechts.Length ? _cropRechts[iR] : 0;
-                    double pageW = _seitenBilder[iR].PixelWidth;
-                    if (_layoutHorizontal && iR < _seitenXStart.Length)
-                    {
-                        l.X1 = l.X2 = _seitenXStart[iR] + (1.0 - cR) * pageW;
-                        l.Y1 = SeiteX; l.Y2 = SeiteX + _seitenHöhe[iR];
-                    }
-                    else if (!_layoutHorizontal && iR < _seitenYStart.Length)
-                    {
-                        l.X1 = l.X2 = SeiteX + (1.0 - cR) * pageW;
-                        l.Y1 = _seitenYStart[iR]; l.Y2 = _seitenYStart[iR] + _seitenHöhe[iR];
-                    }
-                }
+                if (tag == "CROP_LINKS")
+                    { l.X1 = l.X2 = SeiteX + _cropLinks * RenderBreite; l.Y1 = 0; l.Y2 = canvasH; }
+                else if (tag == "CROP_RECHTS")
+                    { l.X1 = l.X2 = SeiteX + (1.0 - _cropRechts) * RenderBreite; l.Y1 = 0; l.Y2 = canvasH; }
                 else if (tag.StartsWith("CROP_OBEN_") &&
-                         int.TryParse(tag.Substring(10), out int iO) && iO < _seitenHöhe.Length)
-                {
-                    double cO = iO < _cropOben.Length ? _cropOben[iO] : 0;
-                    if (_layoutHorizontal && iO < _seitenXStart.Length)
-                    {
-                        l.Y1 = l.Y2 = SeiteX + cO * _seitenHöhe[iO];
-                        l.X1 = _seitenXStart[iO]; l.X2 = _seitenXStart[iO] + _seitenBilder[iO].PixelWidth;
-                    }
-                    else if (!_layoutHorizontal && iO < _seitenYStart.Length)
-                    {
-                        l.Y1 = l.Y2 = _seitenYStart[iO] + cO * _seitenHöhe[iO];
-                        l.X1 = SeiteX; l.X2 = SeiteX + _seitenBilder[iO].PixelWidth;
-                    }
-                }
+                         int.TryParse(tag.Substring(10), out int iO) && iO < _seitenYStart.Length)
+                    l.Y1 = l.Y2 = _seitenYStart[iO] + _cropOben * _seitenHöhe[iO];
                 else if (tag.StartsWith("CROP_UNTEN_") &&
-                         int.TryParse(tag.Substring(11), out int iU) && iU < _seitenHöhe.Length)
-                {
-                    double cU = iU < _cropUnten.Length ? _cropUnten[iU] : 0;
-                    if (_layoutHorizontal && iU < _seitenXStart.Length)
-                    {
-                        l.Y1 = l.Y2 = SeiteX + (1.0 - cU) * _seitenHöhe[iU];
-                        l.X1 = _seitenXStart[iU]; l.X2 = _seitenXStart[iU] + _seitenBilder[iU].PixelWidth;
-                    }
-                    else if (!_layoutHorizontal && iU < _seitenYStart.Length)
-                    {
-                        l.Y1 = l.Y2 = _seitenYStart[iU] + (1.0 - cU) * _seitenHöhe[iU];
-                        l.X1 = SeiteX; l.X2 = SeiteX + _seitenBilder[iU].PixelWidth;
-                    }
-                }
+                         int.TryParse(tag.Substring(11), out int iU) && iU < _seitenYStart.Length)
+                    l.Y1 = l.Y2 = _seitenYStart[iU] + (1.0 - _cropUnten) * _seitenHöhe[iU];
             }
         }
 
@@ -676,43 +556,33 @@ namespace StatikManager.Modules.Werkzeuge
                 if (_gezogeneCropSeite == null || _seitenBilder.Count == 0) return;
                 Point pos = e.GetPosition(PdfCanvas);
 
-                string gs = _gezogeneCropSeite;
-                if (gs.StartsWith("CROP_LINKS_") &&
-                    int.TryParse(gs.Substring(11), out int iL) && iL < _seitenBilder.Count)
+                switch (_gezogeneCropSeite)
                 {
-                    double cR    = iL < _cropRechts.Length ? _cropRechts[iL] : 0;
-                    double pageW = _seitenBilder[iL].PixelWidth;
-                    double xBase = _layoutHorizontal && iL < _seitenXStart.Length ? _seitenXStart[iL] : SeiteX;
-                    if (iL < _cropLinks.Length)
-                        _cropLinks[iL] = Math.Max(0, Math.Min(0.49 - cR, (pos.X - xBase) / pageW));
-                }
-                else if (gs.StartsWith("CROP_RECHTS_") &&
-                         int.TryParse(gs.Substring(12), out int iR) && iR < _seitenBilder.Count)
-                {
-                    double cL    = iR < _cropLinks.Length ? _cropLinks[iR] : 0;
-                    double pageW = _seitenBilder[iR].PixelWidth;
-                    double xBase = _layoutHorizontal && iR < _seitenXStart.Length ? _seitenXStart[iR] : SeiteX;
-                    if (iR < _cropRechts.Length)
-                        _cropRechts[iR] = Math.Max(0, Math.Min(0.49 - cL, (xBase + pageW - pos.X) / pageW));
-                }
-                else if (gs.StartsWith("CROP_OBEN_") &&
-                         int.TryParse(gs.Substring(10), out int iO) &&
-                         iO < _seitenHöhe.Length && _seitenHöhe[iO] > 0)
-                {
-                    double cU    = iO < _cropUnten.Length ? _cropUnten[iO] : 0;
-                    double yBase = _layoutHorizontal ? SeiteX : (_seitenYStart.Length > iO ? _seitenYStart[iO] : 0);
-                    if (iO < _cropOben.Length)
-                        _cropOben[iO] = Math.Max(0, Math.Min(0.49 - cU, (pos.Y - yBase) / _seitenHöhe[iO]));
-                }
-                else if (gs.StartsWith("CROP_UNTEN_") &&
-                         int.TryParse(gs.Substring(11), out int iU) &&
-                         iU < _seitenHöhe.Length && _seitenHöhe[iU] > 0)
-                {
-                    double cO    = iU < _cropOben.Length ? _cropOben[iU] : 0;
-                    double yBase = _layoutHorizontal ? SeiteX : (_seitenYStart.Length > iU ? _seitenYStart[iU] : 0);
-                    double bot   = yBase + _seitenHöhe[iU];
-                    if (iU < _cropUnten.Length)
-                        _cropUnten[iU] = Math.Max(0, Math.Min(0.49 - cO, (bot - pos.Y) / _seitenHöhe[iU]));
+                    case "CROP_LINKS":
+                        _cropLinks = Math.Max(0, Math.Min(0.49 - _cropRechts,
+                            (pos.X - SeiteX) / RenderBreite));
+                        break;
+                    case "CROP_RECHTS":
+                        _cropRechts = Math.Max(0, Math.Min(0.49 - _cropLinks,
+                            (SeiteX + RenderBreite - pos.X) / RenderBreite));
+                        break;
+                    default:
+                        if (_gezogeneCropSeite.StartsWith("CROP_OBEN_") &&
+                            int.TryParse(_gezogeneCropSeite.Substring(10), out int iO) &&
+                            iO < _seitenYStart.Length && _seitenHöhe[iO] > 0)
+                        {
+                            double frac = (pos.Y - _seitenYStart[iO]) / _seitenHöhe[iO];
+                            _cropOben = Math.Max(0, Math.Min(0.49 - _cropUnten, frac));
+                        }
+                        else if (_gezogeneCropSeite.StartsWith("CROP_UNTEN_") &&
+                                 int.TryParse(_gezogeneCropSeite.Substring(11), out int iU) &&
+                                 iU < _seitenYStart.Length && _seitenHöhe[iU] > 0)
+                        {
+                            double bot  = _seitenYStart[iU] + _seitenHöhe[iU];
+                            double frac = (bot - pos.Y) / _seitenHöhe[iU];
+                            _cropUnten = Math.Max(0, Math.Min(0.49 - _cropOben, frac));
+                        }
+                        break;
                 }
 
                 AktualisiereCropLinien();
@@ -757,55 +627,34 @@ namespace StatikManager.Modules.Werkzeuge
         private void AktualisiereAutoRand()
         {
             if (_seitenBilder.Count == 0) return;
-
-            _autoRandCts?.Cancel();
-            var cts = new CancellationTokenSource();
-            _autoRandCts = cts;
-            var token = cts.Token;
-
             TxtInfo.Text = "Erkenne Rand …";
             var bilder = _seitenBilder.ToList();
             int sicherheitPx = Math.Max(0, (int)Math.Round(_cropSicherheitMm * _pxPerMm));
-            int n = bilder.Count;
-
-            AppZustand.Instanz.SetzeProgress(0, n);
-            AppZustand.Instanz.SetzeStatus($"Auto-Rand: 0 von {n} Seiten");
 
             Task.Run(() =>
             {
-                var perL = new double[n]; var perR = new double[n];
-                var perO = new double[n]; var perU = new double[n];
-                try
+                double minL = double.MaxValue, minR = double.MaxValue;
+                double minO = double.MaxValue, minU = double.MaxValue;
+                foreach (var bmp in bilder)
                 {
-                    for (int i = 0; i < n; i++)
-                    {
-                        if (token.IsCancellationRequested)
-                        {
-                            Dispatcher.BeginInvoke(new Action(() => AppZustand.Instanz.ResetProgress()));
-                            return;
-                        }
-                        var (l, r, o, u) = ErkenneCropRänderVonBitmap(bilder[i], sicherheitPx);
-                        perL[i] = l; perR[i] = r; perO[i] = o; perU[i] = u;
-                        int seite = i + 1;
-                        Dispatcher.BeginInvoke(new Action(() =>
-                        {
-                            AppZustand.Instanz.SetzeProgress(seite, n);
-                            AppZustand.Instanz.SetzeStatus($"Auto-Rand: Seite {seite} von {n}");
-                        }));
-                    }
+                    var (l, r, o, u) = ErkenneCropRänderVonBitmap(bmp, sicherheitPx);
+                    if (l < minL) minL = l;
+                    if (r < minR) minR = r;
+                    if (o < minO) minO = o;
+                    if (u < minU) minU = u;
                 }
-                catch (OperationCanceledException) { return; }
+                if (minL == double.MaxValue) minL = 0;
+                if (minR == double.MaxValue) minR = 0;
+                if (minO == double.MaxValue) minO = 0;
+                if (minU == double.MaxValue) minU = 0;
 
                 Dispatcher.BeginInvoke(new Action(() =>
                 {
-                    if (token.IsCancellationRequested) { AppZustand.Instanz.ResetProgress(); return; }
-                    _cropLinks = perL; _cropRechts = perR; _cropOben = perO; _cropUnten = perU;
+                    _cropLinks  = minL; _cropRechts = minR;
+                    _cropOben   = minO; _cropUnten  = minU;
                     AktualisiereCropLinien();
                     if (BtnRandAnzeigen.IsChecked != true) BtnRandAnzeigen.IsChecked = true;
-                    TxtInfo.Text = n == 1
-                        ? $"Rand · L:{perL[0]*100:F1}%  O:{perO[0]*100:F1}%  R:{perR[0]*100:F1}%  U:{perU[0]*100:F1}%"
-                        : $"Auto-Rand für {n} Seiten erkannt.";
-                    AppZustand.Instanz.ResetProgress();
+                    TxtInfo.Text = $"Rand · L:{minL*100:F1}%  O:{minO*100:F1}%  R:{minR*100:F1}%  U:{minU*100:F1}%";
                 }));
             });
         }
@@ -817,27 +666,15 @@ namespace StatikManager.Modules.Werkzeuge
                 if (_seitenBilder.Count == 0)
                 { MessageBox.Show("Kein PDF geladen.", "Rand bearbeiten"); return; }
 
-                int aktSeite = AktiveSeiteIndex();
-                if (aktSeite < 0) return;
-
-                double refH    = aktSeite < _seitenHöhe.Length ? _seitenHöhe[aktSeite] : 1000;
-                double refW    = _seitenBilder[aktSeite].PixelWidth;
+                double refH    = _seitenHöhe.Length > 0 ? _seitenHöhe[0] : 1000;
+                double refW    = _seitenBilder.Count > 0 ? _seitenBilder[0].PixelWidth : RenderBreite;
                 double pxPerMm = _pxPerMm > 0 ? _pxPerMm : 4.0;
 
-                // Originalwerte der aktiven Seite für Cancel-Restore sichern
-                double origOben   = aktSeite < _cropOben.Length   ? _cropOben[aktSeite]   : 0;
-                double origUnten  = aktSeite < _cropUnten.Length  ? _cropUnten[aktSeite]  : 0;
-                double origLinks  = aktSeite < _cropLinks.Length  ? _cropLinks[aktSeite]  : 0;
-                double origRechts = aktSeite < _cropRechts.Length ? _cropRechts[aktSeite] : 0;
-
-                // Beschnittrahmen einblenden damit Live-Aktualisierung sichtbar ist
-                if (BtnRandAnzeigen.IsChecked != true) BtnRandAnzeigen.IsChecked = true;
-
-                // Crop-Fractions -> Pixel -> mm (aktive Seite)
-                double obenMm   = Math.Round(origOben   * refH / pxPerMm, 1);
-                double untenMm  = Math.Round(origUnten  * refH / pxPerMm, 1);
-                double linksMm  = Math.Round(origLinks  * refW / pxPerMm, 1);
-                double rechtsMm = Math.Round(origRechts * refW / pxPerMm, 1);
+                // Crop-Fractions -> Pixel -> mm
+                double obenMm   = Math.Round(_cropOben   * refH / pxPerMm, 1);
+                double untenMm  = Math.Round(_cropUnten  * refH / pxPerMm, 1);
+                double linksMm  = Math.Round(_cropLinks  * refW / pxPerMm, 1);
+                double rechtsMm = Math.Round(_cropRechts * refW / pxPerMm, 1);
 
                 TextBox MkTxt(double v) => new TextBox
                 {
@@ -879,40 +716,13 @@ namespace StatikManager.Modules.Werkzeuge
                 AddRow("Links:",  txtLinks);
                 AddRow("Rechts:", txtRechts);
 
-                // Live-Aktualisierung: Rahmen sofort bei jeder Eingabe verschieben
-                bool TryMm(string t, out double v)
-                    => double.TryParse(t.Trim().Replace(",", "."),
-                           System.Globalization.NumberStyles.Any,
-                           System.Globalization.CultureInfo.InvariantCulture, out v) && v >= 0;
-
-                void AktualisiereLive(object s, TextChangedEventArgs ev)
-                {
-                    if (TryMm(txtOben.Text,   out double lO) && aktSeite < _cropOben.Length)   _cropOben[aktSeite]   = Math.Min(lO * pxPerMm / refH, 0.49);
-                    if (TryMm(txtUnten.Text,  out double lU) && aktSeite < _cropUnten.Length)  _cropUnten[aktSeite]  = Math.Min(lU * pxPerMm / refH, 0.49);
-                    if (TryMm(txtLinks.Text,  out double lL) && aktSeite < _cropLinks.Length)  _cropLinks[aktSeite]  = Math.Min(lL * pxPerMm / refW, 0.49);
-                    if (TryMm(txtRechts.Text, out double lR) && aktSeite < _cropRechts.Length) _cropRechts[aktSeite] = Math.Min(lR * pxPerMm / refW, 0.49);
-                    AktualisiereCropLinien();
-                }
-                txtOben.TextChanged   += AktualisiereLive;
-                txtUnten.TextChanged  += AktualisiereLive;
-                txtLinks.TextChanged  += AktualisiereLive;
-                txtRechts.TextChanged += AktualisiereLive;
-
                 bool ok = false;
                 Window? dlg = null;
                 var btnOk = new Button
                     { Content = "OK", Width = 70, IsDefault = true, Margin = new Thickness(0, 0, 8, 0) };
                 var btnCancel = new Button { Content = "Abbrechen", Width = 80, IsCancel = true };
                 btnOk.Click     += (_, __) => { ok = true; dlg!.Close(); };
-                btnCancel.Click += (_, __) =>
-                {
-                    if (aktSeite < _cropOben.Length)   _cropOben[aktSeite]   = origOben;
-                    if (aktSeite < _cropUnten.Length)  _cropUnten[aktSeite]  = origUnten;
-                    if (aktSeite < _cropLinks.Length)  _cropLinks[aktSeite]  = origLinks;
-                    if (aktSeite < _cropRechts.Length) _cropRechts[aktSeite] = origRechts;
-                    AktualisiereCropLinien();
-                    dlg!.Close();
-                };
+                btnCancel.Click += (_, __) => dlg!.Close();
 
                 var btnRow = new StackPanel
                 {
@@ -926,7 +736,7 @@ namespace StatikManager.Modules.Werkzeuge
 
                 dlg = new Window
                 {
-                    Title = $"Rand bearbeiten – Seite {aktSeite + 1}", Content = sp,
+                    Title = "Rand bearbeiten", Content = sp,
                     SizeToContent = SizeToContent.WidthAndHeight,
                     MinWidth = 260,
                     WindowStartupLocation = WindowStartupLocation.CenterOwner,
@@ -961,10 +771,8 @@ namespace StatikManager.Modules.Werkzeuge
                     return;
                 }
 
-                if (aktSeite < _cropOben.Length)   _cropOben[aktSeite]   = newObenPx  / refH;
-                if (aktSeite < _cropUnten.Length)  _cropUnten[aktSeite]  = newUntenPx / refH;
-                if (aktSeite < _cropLinks.Length)  _cropLinks[aktSeite]  = newLinksPx / refW;
-                if (aktSeite < _cropRechts.Length) _cropRechts[aktSeite] = newRechtsPx / refW;
+                _cropOben  = newObenPx  / refH; _cropUnten  = newUntenPx  / refH;
+                _cropLinks = newLinksPx / refW; _cropRechts = newRechtsPx / refW;
                 _autoRandAktiv = false;
 
                 AktualisiereCropLinien();
@@ -980,86 +788,45 @@ namespace StatikManager.Modules.Werkzeuge
         /// </summary>
         private void ScrollView_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
         {
-            if ((Keyboard.Modifiers & ModifierKeys.Control) == 0)
-            {
-                if (_layoutHorizontal)
-                {
-                    ScrollView.ScrollToHorizontalOffset(ScrollView.HorizontalOffset - e.Delta / 3.0);
-                    e.Handled = true;
-                }
-                return;
-            }
+            if ((Keyboard.Modifiers & ModifierKeys.Control) == 0) return;
             e.Handled = true;
 
             try
             {
-                // Mausposition vor dem Zoom erfassen (Anker für Scroll-Korrektur im Timer)
+                // Mausposition in Canvas-Koordinaten (vor dem Zoom)
                 Point mouseInCanvas = e.GetPosition(PdfCanvas);
+                // Mausposition relativ zum ScrollViewer-Viewport
                 Point mouseInView   = e.GetPosition(ScrollView);
 
-                // Nächste Stufe auf Basis des aktuellen Zielzoom berechnen
-                double faktor    = e.Delta > 0 ? 1.0 + ZoomStep : 1.0 / (1.0 + ZoomStep);
-                double neuerZoom = Math.Max(ZoomMin, Math.Min(ZoomMax, _zielZoom * faktor));
-                if (Math.Abs(neuerZoom - _zielZoom) < 0.001) return;
+                double faktor   = e.Delta > 0 ? 1.0 + ZoomStep : 1.0 / (1.0 + ZoomStep);
+                double neuerZoom = Math.Max(ZoomMin, Math.Min(ZoomMax, _zoomFaktor * faktor));
+                if (Math.Abs(neuerZoom - _zoomFaktor) < 0.001) return;
 
-                // Smooth-Animation starten; Anker wird im Timer pro Frame zur Scroll-Korrektur genutzt
-                SetzeZoom(neuerZoom, mouseInCanvas, mouseInView);
+                SetzeZoom(neuerZoom);
+
+                // Scrollposition so anpassen, dass der Punkt unter dem Mauszeiger stabil bleibt:
+                // newOffset = mouseInCanvas * newZoom - mouseInView
+                Dispatcher.BeginInvoke(
+                    new Action(() =>
+                    {
+                        ScrollView.ScrollToHorizontalOffset(mouseInCanvas.X * neuerZoom - mouseInView.X);
+                        ScrollView.ScrollToVerticalOffset  (mouseInCanvas.Y * neuerZoom - mouseInView.Y);
+                    }),
+                    System.Windows.Threading.DispatcherPriority.Loaded);
             }
             catch (Exception ex) { LogException(ex, "Zoom/MouseWheel"); }
         }
 
         private void BtnZoomMinus_Click(object sender, RoutedEventArgs e)
-            => SafeExecute(() => SetzeZoom(Math.Max(ZoomMin, _zielZoom / (1.0 + ZoomStep))), "ZoomMinus");
+            => SafeExecute(() => SetzeZoom(Math.Max(ZoomMin, _zoomFaktor / (1.0 + ZoomStep))), "ZoomMinus");
 
         private void BtnZoomPlus_Click(object sender, RoutedEventArgs e)
-            => SafeExecute(() => SetzeZoom(Math.Min(ZoomMax, _zielZoom * (1.0 + ZoomStep))), "ZoomPlus");
+            => SafeExecute(() => SetzeZoom(Math.Min(ZoomMax, _zoomFaktor * (1.0 + ZoomStep))), "ZoomPlus");
 
         private void BtnZoomReset_Click(object sender, RoutedEventArgs e)
             => SafeExecute(() => SetzeZoom(1.0), "ZoomReset");
 
-        // Setzt den Zielzoom und startet die Smooth-Animation.
-        // ankerCanvas/ankerView: Mausposition vor dem Zoom (für Scroll-Korrektur pro Frame).
-        private void SetzeZoom(double ziel, Point? ankerCanvas = null, Point? ankerView = null)
-        {
-            _zielZoom = Math.Max(ZoomMin, Math.Min(ZoomMax, ziel));
-            if (ankerCanvas.HasValue) _zoomAnker     = ankerCanvas;
-            if (ankerView.HasValue)   _zoomAnkerView = ankerView;
-
-            if (_zoomTimer == null)
-            {
-                _zoomTimer = new System.Windows.Threading.DispatcherTimer
-                    { Interval = TimeSpan.FromMilliseconds(16) };
-                _zoomTimer.Tick += ZoomTimer_Tick;
-            }
-            if (!_zoomTimer.IsEnabled) _zoomTimer.Start();
-        }
-
-        // Timer-Callback: ein Animations-Frame pro 16 ms.
-        private void ZoomTimer_Tick(object? sender, EventArgs e)
-        {
-            double diff     = _zielZoom - _zoomFaktor;
-            bool   fertig   = Math.Abs(diff) < 0.001;
-            double neuerZoom = fertig ? _zielZoom : _zoomFaktor + diff * 0.35;
-
-            WendeZoomAnSofort(neuerZoom);
-
-            // Scroll-Korrektur: Ankerpunkt unter dem Mauszeiger stabil halten
-            if (_zoomAnker.HasValue && _zoomAnkerView.HasValue)
-            {
-                ScrollView.ScrollToHorizontalOffset(_zoomAnker.Value.X * neuerZoom - _zoomAnkerView.Value.X);
-                ScrollView.ScrollToVerticalOffset  (_zoomAnker.Value.Y * neuerZoom - _zoomAnkerView.Value.Y);
-            }
-
-            if (fertig)
-            {
-                _zoomTimer!.Stop();
-                _zoomAnker     = null;
-                _zoomAnkerView = null;
-            }
-        }
-
-        // Wendet den Zoom sofort visuell an (ScaleTransform + Liniendicken).
-        private void WendeZoomAnSofort(double zoom)
+        private void SetzeZoom(double zoom)
         {
             _zoomFaktor   = zoom;
             CanvasZoom.ScaleX = zoom;
@@ -1081,16 +848,10 @@ namespace StatikManager.Modules.Werkzeuge
         private void BtnZoomFit_Click(object sender, RoutedEventArgs e)
             => SafeExecute(() =>
             {
-                double sichtbarB = ScrollView.ActualWidth;
-                double sichtbarH = ScrollView.ActualHeight;
-                double ersteSeiteBreite = _seitenBilder.Count > 0 ? _seitenBilder[0].PixelWidth : RenderBreite;
-                double ersteSeiteHöhe   = _seitenHöhe.Length   > 0 ? _seitenHöhe[0]             : RenderBreite * 2;
-                double canvBreite = ersteSeiteBreite + 2.0 * SeiteX;
-                double canvHöhe   = ersteSeiteHöhe   + 2.0 * SeiteX;
-                if (canvBreite <= 0 || canvHöhe <= 0 || sichtbarB <= 0 || sichtbarH <= 0) return;
-                double zoomB = sichtbarB / canvBreite;
-                double zoomH = sichtbarH / canvHöhe;
-                SetzeZoom(Math.Max(ZoomMin, Math.Min(ZoomMax, Math.Min(zoomB, zoomH))));
+                double sichtbar  = ScrollView.ActualWidth;
+                double canvBreite = RenderBreite + 2.0 * SeiteX;
+                if (canvBreite <= 0 || sichtbar <= 0) return;
+                SetzeZoom(Math.Max(ZoomMin, Math.Min(ZoomMax, sichtbar / canvBreite)));
             }, "BtnZoomFit_Click");
         private void BtnExport_Click(object sender, RoutedEventArgs e)
             => SafeExecute(ExportierenNachWord, "BtnExport_Click");
@@ -1119,7 +880,7 @@ namespace StatikManager.Modules.Werkzeuge
         private void ExportThreadWorker(
             string zielPfad, string pdfPfad,
             double[] seitenYStart, double[] seitenHöhe,
-            double[] cropLinks, double[] cropRechts, double[] cropOben, double[] cropUnten)
+            double cropLinks, double cropRechts, double cropOben, double cropUnten)
         {
             var alleTemp = new List<string>();
             var sw = System.Diagnostics.Stopwatch.StartNew();
@@ -1131,25 +892,20 @@ namespace StatikManager.Modules.Werkzeuge
                 int exportPixW = Math.Max(1, (int)Math.Round(nativeW_pts / 72.0 * ExportDpi));
                 int exportPixH = Math.Max(1, (int)Math.Round(nativeH_pts / 72.0 * ExportDpi));
 
-                // Für Word-Seitenformat wird Seite 0 als Referenz verwendet
-                double cL0 = cropLinks.Length  > 0 ? cropLinks[0]  : 0;
-                double cR0 = cropRechts.Length > 0 ? cropRechts[0] : 0;
-                double cO0 = cropOben.Length   > 0 ? cropOben[0]   : 0;
-                double cU0 = cropUnten.Length  > 0 ? cropUnten[0]  : 0;
-                double nativeW_eff = nativeW_pts * Math.Max(0.01, 1.0 - cL0 - cR0);
-                double nativeH_eff = nativeH_pts * Math.Max(0.01, 1.0 - cO0 - cU0);
+                double nativeW_eff = nativeW_pts * Math.Max(0.01, 1.0 - cropLinks - cropRechts);
+                double nativeH_eff = nativeH_pts * Math.Max(0.01, 1.0 - cropOben  - cropUnten);
 
                 App.LogFehler("Export/Maße",
                     $"PDF: {nativeW_pts:F1}×{nativeH_pts:F1} pt | " +
                     $"Render: {exportPixW}×{exportPixH} px | DPI={ExportDpi} | " +
                     $"Eff: {nativeW_eff:F1}×{nativeH_eff:F1} pt | " +
-                    $"Crop[0] L:{cL0:P1} R:{cR0:P1} O:{cO0:P1} U:{cU0:P1}");
+                    $"Crop L:{cropLinks:P1} R:{cropRechts:P1} O:{cropOben:P1} U:{cropUnten:P1}");
 
                 // ── 2. Hochauflösend rendern ───────────────────────────────────────
                 Dispatcher.BeginInvoke(new Action(() => TxtInfo.Text = "Rendere in hoher Auflösung …"));
                 long t1 = sw.ElapsedMilliseconds;
                 List<BitmapSource> hochRes;
-                try { hochRes = PdfRenderer.RenderiereAlleSeiten(pdfPfad, exportPixW, exportPixH); }
+                try { hochRes = RenderiereAlleSeiten(pdfPfad, exportPixW, exportPixH); }
                 catch (Exception ex) { LogException(ex, "Export/Render"); hochRes = new List<BitmapSource>(); }
                 App.LogFehler("Export/Timing", $"Rendern: {sw.ElapsedMilliseconds - t1} ms ({hochRes.Count} Seiten, {exportPixW}×{exportPixH} px)");
 
@@ -1564,8 +1320,8 @@ namespace StatikManager.Modules.Werkzeuge
             List<BitmapSource> hochRes,
             double[] seitenYStart, double[] seitenHöhe,
             double yStart, double yEnd,
-            double[]? cropLinks = null, double[]? cropRechts = null,
-            double[]? cropOben = null, double[]? cropUnten = null)
+            double cropLinks = 0, double cropRechts = 0,
+            double cropOben = 0, double cropUnten = 0)
         {
             if (hochRes == null || hochRes.Count == 0) return null;
             if (seitenYStart == null || seitenHöhe  == null) return null;
@@ -1584,15 +1340,9 @@ namespace StatikManager.Modules.Werkzeuge
                     double sTop    = seitenYStart[i];
                     double sBottom = sTop + seitenHöhe[i];
 
-                    // Per-Seite Crop-Werte (null-safe)
-                    double cL = cropLinks?.Length  > i ? cropLinks![i]  : 0;
-                    double cR = cropRechts?.Length > i ? cropRechts![i] : 0;
-                    double cO = cropOben?.Length   > i ? cropOben![i]   : 0;
-                    double cU = cropUnten?.Length  > i ? cropUnten![i]  : 0;
-
                     // Effektive Seitengrenzen nach Beschnitt (in Vorschau-Koordinaten)
-                    double effTop    = sTop    + cO * seitenHöhe[i];
-                    double effBottom = sBottom - cU * seitenHöhe[i];
+                    double effTop    = sTop    + cropOben  * seitenHöhe[i];
+                    double effBottom = sBottom - cropUnten * seitenHöhe[i];
 
                     double übTop = Math.Max(yStart, effTop);
                     double übBot = Math.Min(yEnd,   effBottom);
@@ -1604,8 +1354,8 @@ namespace StatikManager.Modules.Werkzeuge
                     int w      = hochRes[i].PixelWidth;
 
                     // Horizontaler Beschnitt in Export-Pixeln
-                    int cropL_px = (int)Math.Round(cL * w);
-                    int cropR_px = (int)Math.Round(cR * w);
+                    int cropL_px = (int)Math.Round(cropLinks  * w);
+                    int cropR_px = (int)Math.Round(cropRechts * w);
                     int cropW    = Math.Max(1, w - cropL_px - cropR_px);
                     if (cropL_px + cropW > w) cropW = w - cropL_px;
                     if (cropW <= 0) continue;
@@ -1650,16 +1400,5 @@ namespace StatikManager.Modules.Werkzeuge
             }
             catch (Exception ex) { LogException(ex, "RendereBlockHochRes/Render"); return null; }
         }
-
-        // ── Layout-Modus wechseln ─────────────────────────────────────────────
-
-        private void BtnLayoutWechsel_Click(object sender, RoutedEventArgs e)
-            => SafeExecute(() =>
-            {
-                if (_seitenBilder.Count == 0) return;
-                _layoutHorizontal = !_layoutHorizontal;
-
-                ZeicheCanvas();
-            }, "BtnLayoutWechsel_Click");
     }
 }

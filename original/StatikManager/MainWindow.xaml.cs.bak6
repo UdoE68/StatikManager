@@ -1,0 +1,110 @@
+using StatikManager.Core;
+using StatikManager.Modules.Dokumente;
+using System.Windows;
+using System.Windows.Controls;
+
+namespace StatikManager
+{
+    public partial class MainWindow : Window
+    {
+        private readonly ModulManager _modulManager = new();
+
+        public MainWindow()
+        {
+            InitializeComponent();
+
+            // Shell mit AppZustand verbinden
+            AppZustand.Instanz.StatusGeändert  += text => TxtStatus.Text     = text;
+            AppZustand.Instanz.ProjektGeändert += pfad => TxtProjektInfo.Text =
+                pfad != null ? "Projekt: " + System.IO.Path.GetFileName(pfad) : "";
+
+            // ── Module registrieren ──────────────────────────────────────────
+            // Neues Modul hinzufügen: einfach eine weitere Zeile hier.
+            _modulManager.Registrieren(new DokumenteModul());
+
+            // ── Module in die Shell integrieren ─────────────────────────────
+            IntegriereModule();
+        }
+
+        private void IntegriereModule()
+        {
+            int menüIndex = HauptMenü.Items.IndexOf(MenüHilfe);
+
+            foreach (var modul in _modulManager.Module)
+            {
+                // Panel (erstes Modul füllt den Inhaltsbereich)
+                if (HauptInhalt.Content == null)
+                    HauptInhalt.Content = modul.ErstellePanel();
+
+                // Menüeintrag vor "Hilfe" einfügen
+                var menüEintrag = modul.ErzeugeMenüEintrag();
+                if (menüEintrag != null)
+                {
+                    HauptMenü.Items.Insert(menüIndex, menüEintrag);
+                    menüIndex++;
+                }
+
+                // Werkzeugleiste befüllen
+                foreach (var element in modul.ErzeugeWerkzeugleistenEinträge())
+                    WerkzeugLeiste.Children.Add(element);
+            }
+        }
+
+        // ── Menü: Datei ──────────────────────────────────────────────────────
+
+        private void MenüProjektLaden_Click(object sender, RoutedEventArgs e)
+        {
+            // Weiterleitung an das Dokumente-Modul (generisch über Interface möglich,
+            // hier direkt da "Projekt laden" im Datei-Menü Konvention ist)
+            var modul = _modulManager.FindeModul("dokumente") as DokumenteModul;
+            // Alternativ: IModul um eine "AktionAusführen(string)" Methode erweitern
+            // Für jetzt: der Werkzeugleisten-Button des Moduls übernimmt diese Aufgabe.
+            // Dieser Klick delegiert an das Panel des Moduls über den gleichen Weg.
+            if (HauptInhalt.Content is Modules.Dokumente.DokumentePanel panel)
+                panel.ProjektLaden();
+        }
+
+        private void MenüStandardpfad_Click(object sender, RoutedEventArgs e)
+        {
+            var pfad = OrdnerDialog.Zeigen(
+                startPfad: Einstellungen.Instanz.StandardPfad ?? "",
+                titel:     "Standardpfad festlegen – Startordner beim Öffnen von Projekten",
+                besitzer:  this);
+
+            if (string.IsNullOrWhiteSpace(pfad)) return;
+
+            Einstellungen.Instanz.StandardPfad = pfad;
+            Einstellungen.Instanz.Speichern();
+            AppZustand.Instanz.SetzeStatus("Standardpfad: " + pfad);
+        }
+
+        private void MenüBeenden_Click(object sender, RoutedEventArgs e) => Close();
+
+        // ── Menü: Extras ──────────────────────────────────────────────────────
+
+        private void MenüExtras_PdfZuWord_Click(object sender, RoutedEventArgs e)
+        {
+            var dialog = new Modules.Werkzeuge.PdfZuWordDialog { Owner = this };
+            dialog.ShowDialog();
+        }
+
+        // ── Menü: Hilfe ───────────────────────────────────────────────────────
+
+        private void MenüÜber_Click(object sender, RoutedEventArgs e)
+        {
+            MessageBox.Show(
+                "Statik-Manager\nVersion 1.0\n\nDokumentenverwaltung für Statik-Projekte.",
+                "Über Statik-Manager",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+        }
+
+        // ── Aufräumen ─────────────────────────────────────────────────────────
+
+        protected override void OnClosed(System.EventArgs e)
+        {
+            base.OnClosed(e);
+            _modulManager.AllesBereinigen();
+        }
+    }
+}

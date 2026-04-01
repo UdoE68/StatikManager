@@ -1,0 +1,241 @@
+<UserControl x:Class="StatikManager.Modules.Dokumente.DokumentePanel"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:wz="clr-namespace:StatikManager.Modules.Werkzeuge">
+
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="300" MinWidth="180"/>
+            <ColumnDefinition Width="5"/>
+            <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
+
+        <!-- ── Linke Seite: Kopfzeile + Dokumentenliste ─────────────────── -->
+        <DockPanel Grid.Column="0"
+                   Background="{DynamicResource Farbe.Fläche}">
+
+            <!-- Kopfzeile mit Titel und Ansicht-Umschalter -->
+            <Border DockPanel.Dock="Top"
+                    Background="{DynamicResource Farbe.Fläche}"
+                    BorderBrush="{DynamicResource Farbe.Rahmen}"
+                    BorderThickness="0,0,0,1"
+                    Padding="10,7,8,7">
+                <DockPanel>
+                    <TextBlock Text="Dokumente"
+                               FontWeight="SemiBold"
+                               FontSize="13"
+                               VerticalAlignment="Center"/>
+
+                    <!-- Segmented Toggle: Baum / Liste -->
+                    <Border DockPanel.Dock="Right"
+                            HorizontalAlignment="Right"
+                            BorderBrush="{DynamicResource Farbe.Rahmen}"
+                            BorderThickness="1"
+                            CornerRadius="4"
+                            ClipToBounds="True">
+                        <StackPanel Orientation="Horizontal">
+                            <RadioButton x:Name="RbBaum"
+                                         Content="🌳 Baum"
+                                         ToolTip="Baumstruktur (Ordner und Dateien)"
+                                         IsChecked="True"
+                                         GroupName="Ansicht"
+                                         Style="{StaticResource AnsichtToggle}"
+                                         Click="Ansicht_Geändert"/>
+                            <RadioButton x:Name="RbListe"
+                                         Content="📋 Liste"
+                                         ToolTip="Alle Dateien ohne Ordnerstruktur"
+                                         GroupName="Ansicht"
+                                         Style="{StaticResource AnsichtToggle}"
+                                         Click="Ansicht_Geändert"/>
+                        </StackPanel>
+                    </Border>
+                </DockPanel>
+            </Border>
+
+            <!-- Filterleiste + Baumtiefe -->
+            <Border DockPanel.Dock="Top"
+                    Background="{DynamicResource Farbe.Fläche}"
+                    BorderBrush="{DynamicResource Farbe.Rahmen}"
+                    BorderThickness="0,0,0,1"
+                    Padding="10,5,8,5">
+                <DockPanel>
+                    <TextBlock Text="Typ:"
+                               VerticalAlignment="Center"
+                               Margin="0,0,6,0"
+                               FontSize="12"/>
+                    <ComboBox x:Name="CbBaumTiefe"
+                              FontSize="11"
+                              Width="88"
+                              DockPanel.Dock="Right"
+                              Margin="4,0,0,0"
+                              ToolTip="Sichtbare Ebenen im Baum"
+                              SelectionChanged="CbBaumTiefe_SelectionChanged"/>
+                    <TextBlock Text="Ebenen:"
+                               DockPanel.Dock="Right"
+                               VerticalAlignment="Center"
+                               Margin="8,0,4,0"
+                               FontSize="11"/>
+                    <ComboBox x:Name="CbFilter"
+                              FontSize="12"
+                              SelectionChanged="CbFilter_SelectionChanged"/>
+                </DockPanel>
+            </Border>
+
+            <!-- Baumstruktur und flache Liste übereinander (je eins sichtbar) -->
+            <Grid>
+                <TreeView x:Name="DokumentenBaum"
+                          SelectedItemChanged="DokumentenBaum_SelectedItemChanged"
+                          FontSize="13"
+                          ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                          ContextMenuOpening="DokumentenBaum_ContextMenuOpening"
+                          TreeViewItem.RequestBringIntoView="DokumentenBaum_RequestBringIntoView">
+                    <TreeView.ContextMenu>
+                        <ContextMenu/>
+                    </TreeView.ContextMenu>
+                </TreeView>
+
+                <ListView x:Name="DateiListe"
+                          Visibility="Collapsed"
+                          SelectionChanged="DateiListe_SelectionChanged"
+                          FontSize="13"
+                          BorderThickness="0"
+                          ContextMenuOpening="DateiListe_ContextMenuOpening">
+                    <ListView.ContextMenu>
+                        <ContextMenu/>
+                    </ListView.ContextMenu>
+                    <ListView.View>
+                        <GridView>
+                            <GridViewColumn Header="Dateiname"
+                                            Width="165"
+                                            DisplayMemberBinding="{Binding Dateiname}"/>
+                            <GridViewColumn Header="Ordner"
+                                            DisplayMemberBinding="{Binding OrdnerRelativ}"/>
+                        </GridView>
+                    </ListView.View>
+                </ListView>
+            </Grid>
+
+        </DockPanel>
+
+        <!-- ── Teilungsbalken ────────────────────────────────────────────── -->
+        <GridSplitter Grid.Column="1"
+                      Width="5"
+                      HorizontalAlignment="Stretch"/>
+
+        <!-- ── Rechte Seite: Vorschau ─────────────────────────────────────── -->
+        <Grid Grid.Column="2">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+
+            <TextBlock Grid.Row="0"
+                       Text="Vorschau"
+                       FontWeight="SemiBold"
+                       FontSize="13"
+                       Margin="10,10,10,0"/>
+
+            <!-- Abdeckungs-Panel (nur für PDF-Dateien sichtbar) -->
+            <Border x:Name="AbdeckungsPanel"
+                    Grid.Row="1"
+                    Background="{DynamicResource Farbe.Werkzeugleiste}"
+                    BorderBrush="{DynamicResource Farbe.Rahmen}"
+                    BorderThickness="0,1,0,1"
+                    Padding="10,6"
+                    Margin="0,6,0,0"
+                    Visibility="Collapsed">
+                <WrapPanel>
+
+                    <CheckBox x:Name="ChkKopf"
+                              Content="Kopfzeile abdecken"
+                              VerticalAlignment="Center"
+                              Margin="0,0,8,0"
+                              Checked="Abdeckung_Changed"
+                              Unchecked="Abdeckung_Changed"/>
+                    <TextBox x:Name="TxtKopfMm"
+                             Width="44" Text="20"
+                             TextAlignment="Right"
+                             VerticalAlignment="Center"
+                             Margin="0,0,3,0"
+                             TextChanged="Abdeckung_Changed"/>
+                    <TextBlock Text="mm"
+                               VerticalAlignment="Center"
+                               Margin="0,0,24,0"/>
+
+                    <CheckBox x:Name="ChkFuss"
+                              Content="Fußzeile abdecken"
+                              VerticalAlignment="Center"
+                              Margin="0,0,8,0"
+                              Checked="Abdeckung_Changed"
+                              Unchecked="Abdeckung_Changed"/>
+                    <TextBox x:Name="TxtFussMm"
+                             Width="44" Text="20"
+                             TextAlignment="Right"
+                             VerticalAlignment="Center"
+                             Margin="0,0,3,0"
+                             TextChanged="Abdeckung_Changed"/>
+                    <TextBlock Text="mm" VerticalAlignment="Center"/>
+
+                </WrapPanel>
+            </Border>
+
+            <!-- Word-Info-Panel mit Vorschau -->
+            <Border x:Name="WordInfoPanel"
+                    Grid.Row="2"
+                    Background="#F8F9FA"
+                    Visibility="Collapsed">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <!-- Vorschau-Bild (erste Seite) -->
+                    <Border Grid.Row="0"
+                            Margin="16,16,16,8"
+                            Background="White"
+                            BorderBrush="#CCC" BorderThickness="1"
+                            CornerRadius="2">
+                        <Image x:Name="ImgWordVorschau"
+                               Stretch="Uniform"
+                               RenderOptions.BitmapScalingMode="HighQuality"/>
+                    </Border>
+
+                    <!-- Dateiname und Button -->
+                    <StackPanel Grid.Row="1"
+                                HorizontalAlignment="Center"
+                                Margin="16,0,16,16">
+                        <TextBlock x:Name="TxtWordDateiname"
+                                   FontSize="13" FontWeight="SemiBold"
+                                   HorizontalAlignment="Center"
+                                   TextWrapping="Wrap" TextAlignment="Center"
+                                   Margin="0,0,0,4" Foreground="#2b579a"/>
+                        <TextBlock x:Name="TxtWordLadeStatus"
+                                   FontSize="11" Foreground="#888"
+                                   HorizontalAlignment="Center" Margin="0,0,0,10"/>
+                        <Button x:Name="BtnWordÖffnen"
+                                Content="📄 In Microsoft Word öffnen"
+                                Height="32" Padding="16,0"
+                                Background="#2b579a" Foreground="White"
+                                BorderBrush="#1a3f6f" FontWeight="SemiBold"
+                                HorizontalAlignment="Center"
+                                Click="BtnWordÖffnen_Click"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <!-- Bild-Vorschau (für Bilder) -->
+            <WebBrowser x:Name="WordVorschau"
+                        Grid.Row="2"
+                        Visibility="Collapsed"
+                        LoadCompleted="WordVorschau_LoadCompleted"/>
+
+            <!-- PDF-Schnitt-Editor (für .pdf) -->
+            <wz:PdfSchnittEditor x:Name="PdfEditor"
+                                 Grid.Row="2"
+                                 Visibility="Collapsed"/>
+
+        </Grid>
+    </Grid>
+</UserControl>

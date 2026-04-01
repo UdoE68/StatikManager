@@ -1,0 +1,472 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- ══════════════════════════════════════════════════════════════════════
+         FARBPALETTE
+         ══════════════════════════════════════════════════════════════════════ -->
+
+    <!-- Strukturfarben -->
+    <SolidColorBrush x:Key="Farbe.Hintergrund"    Color="#EEF1F5"/>
+    <SolidColorBrush x:Key="Farbe.Fläche"         Color="#FFFFFF"/>
+    <SolidColorBrush x:Key="Farbe.Rahmen"         Color="#C8D0DA"/>
+    <SolidColorBrush x:Key="Farbe.Akzent"         Color="#0078D4"/>
+    <SolidColorBrush x:Key="Farbe.AkzentGedrückt" Color="#005A9E"/>
+    <SolidColorBrush x:Key="Farbe.Text"           Color="#1A1D21"/>
+    <SolidColorBrush x:Key="Farbe.TextSekunder"   Color="#5C6470"/>
+    <SolidColorBrush x:Key="Farbe.Hover"          Color="#D2DFEE"/>
+    <SolidColorBrush x:Key="Farbe.Auswahl"        Color="#B8D0EC"/>
+    <SolidColorBrush x:Key="Farbe.Werkzeugleiste" Color="#EDF0F5"/>
+    <SolidColorBrush x:Key="Farbe.Statusleiste"   Color="#E4E8EF"/>
+
+    <!-- Neutrale Button-Farben -->
+    <SolidColorBrush x:Key="Btn.Hg"          Color="#E2E7EF"/>
+    <SolidColorBrush x:Key="Btn.Rand"        Color="#B4C0CE"/>
+    <SolidColorBrush x:Key="Btn.HoverHg"     Color="#CDD8EA"/>
+    <SolidColorBrush x:Key="Btn.HoverRand"   Color="#7899BC"/>
+    <SolidColorBrush x:Key="Btn.PressedHg"   Color="#B6CBE2"/>
+    <SolidColorBrush x:Key="Btn.PressedRand" Color="#4E7EA8"/>
+
+    <!-- Primär-Button (Blau) -->
+    <SolidColorBrush x:Key="Btn.P.Hg"          Color="#0074CC"/>
+    <SolidColorBrush x:Key="Btn.P.HoverHg"     Color="#0063B0"/>
+    <SolidColorBrush x:Key="Btn.P.PressedHg"   Color="#004E8C"/>
+    <SolidColorBrush x:Key="Btn.P.Rand"        Color="#00509A"/>
+
+    <!-- Erfolg-Button (Grün) -->
+    <SolidColorBrush x:Key="Btn.G.Hg"          Color="#1A8738"/>
+    <SolidColorBrush x:Key="Btn.G.HoverHg"     Color="#13652A"/>
+    <SolidColorBrush x:Key="Btn.G.PressedHg"   Color="#0E4A1E"/>
+    <SolidColorBrush x:Key="Btn.G.Rand"        Color="#11572A"/>
+
+    <!-- Sekundär-Button (Stahlblau) -->
+    <SolidColorBrush x:Key="Btn.S.Hg"          Color="#3A6DA0"/>
+    <SolidColorBrush x:Key="Btn.S.HoverHg"     Color="#2D5880"/>
+    <SolidColorBrush x:Key="Btn.S.PressedHg"   Color="#234264"/>
+    <SolidColorBrush x:Key="Btn.S.Rand"        Color="#284F76"/>
+
+
+    <!-- ══════════════════════════════════════════════════════════════════════
+         FENSTER
+         ══════════════════════════════════════════════════════════════════════ -->
+    <Style TargetType="Window">
+        <Setter Property="Background" Value="{StaticResource Farbe.Hintergrund}"/>
+        <Setter Property="FontFamily" Value="Segoe UI"/>
+        <Setter Property="FontSize"   Value="13"/>
+        <Setter Property="Foreground" Value="{StaticResource Farbe.Text}"/>
+    </Style>
+
+
+    <!-- ══════════════════════════════════════════════════════════════════════
+         MENÜ
+         ══════════════════════════════════════════════════════════════════════ -->
+    <Style TargetType="Menu">
+        <Setter Property="Background"      Value="{StaticResource Farbe.Werkzeugleiste}"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="Padding"         Value="4,2"/>
+        <Setter Property="FontFamily"      Value="Segoe UI"/>
+        <Setter Property="FontSize"        Value="13"/>
+    </Style>
+
+    <Style TargetType="MenuItem">
+        <Setter Property="FontFamily" Value="Segoe UI"/>
+        <Setter Property="FontSize"   Value="13"/>
+        <Setter Property="Padding"    Value="8,4"/>
+    </Style>
+
+
+    <!-- ══════════════════════════════════════════════════════════════════════
+         STANDARD-SCHALTFLÄCHE  (wird von allen Buttons ohne expliziten Style
+         verwendet — d.h. auch von den kleinen Toolbar-Buttons in PDF/Word)
+         ══════════════════════════════════════════════════════════════════════ -->
+    <Style TargetType="Button">
+        <Setter Property="Background"      Value="{StaticResource Btn.Hg}"/>
+        <Setter Property="BorderBrush"     Value="{StaticResource Btn.Rand}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="Padding"         Value="10,5"/>
+        <Setter Property="FontFamily"      Value="Segoe UI"/>
+        <Setter Property="FontSize"        Value="12"/>
+        <Setter Property="Cursor"          Value="Hand"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="bd"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="4"
+                            Padding="{TemplateBinding Padding}"
+                            SnapsToDevicePixels="True">
+                        <ContentPresenter HorizontalAlignment="Center"
+                                          VerticalAlignment="Center"
+                                          SnapsToDevicePixels="True"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="bd" Property="Background"  Value="{StaticResource Btn.HoverHg}"/>
+                            <Setter TargetName="bd" Property="BorderBrush" Value="{StaticResource Btn.HoverRand}"/>
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="bd" Property="Background"  Value="{StaticResource Btn.PressedHg}"/>
+                            <Setter TargetName="bd" Property="BorderBrush" Value="{StaticResource Btn.PressedRand}"/>
+                        </Trigger>
+                        <Trigger Property="IsDefault" Value="True">
+                            <Setter TargetName="bd" Property="Background"  Value="{StaticResource Btn.P.Hg}"/>
+                            <Setter TargetName="bd" Property="BorderBrush" Value="{StaticResource Btn.P.Rand}"/>
+                            <Setter Property="Foreground" Value="White"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.4"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+
+    <!-- ══════════════════════════════════════════════════════════════════════
+         PRIMÄR-SCHALTFLÄCHE  (blau, weiße Schrift)
+         Verwendung: BtnExport, BtnWordÖffnen, BtnRandBearbeiten usw.
+         ══════════════════════════════════════════════════════════════════════ -->
+    <Style x:Key="PrimaryButton" TargetType="Button">
+        <Setter Property="Background"      Value="{StaticResource Btn.P.Hg}"/>
+        <Setter Property="BorderBrush"     Value="{StaticResource Btn.P.Rand}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="Foreground"      Value="White"/>
+        <Setter Property="FontWeight"      Value="SemiBold"/>
+        <Setter Property="Padding"         Value="10,5"/>
+        <Setter Property="FontFamily"      Value="Segoe UI"/>
+        <Setter Property="FontSize"        Value="12"/>
+        <Setter Property="Cursor"          Value="Hand"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="bd"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="4"
+                            Padding="{TemplateBinding Padding}"
+                            SnapsToDevicePixels="True">
+                        <ContentPresenter HorizontalAlignment="Center"
+                                          VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="bd" Property="Background"  Value="{StaticResource Btn.P.HoverHg}"/>
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="bd" Property="Background"  Value="{StaticResource Btn.P.PressedHg}"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.4"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+
+    <!-- ══════════════════════════════════════════════════════════════════════
+         ERFOLG-SCHALTFLÄCHE  (grün, weiße Schrift)
+         Verwendung: BtnRandAuto
+         ══════════════════════════════════════════════════════════════════════ -->
+    <Style x:Key="GreenButton" TargetType="Button">
+        <Setter Property="Background"      Value="{StaticResource Btn.G.Hg}"/>
+        <Setter Property="BorderBrush"     Value="{StaticResource Btn.G.Rand}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="Foreground"      Value="White"/>
+        <Setter Property="FontWeight"      Value="SemiBold"/>
+        <Setter Property="Padding"         Value="10,5"/>
+        <Setter Property="FontFamily"      Value="Segoe UI"/>
+        <Setter Property="FontSize"        Value="12"/>
+        <Setter Property="Cursor"          Value="Hand"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="bd"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="4"
+                            Padding="{TemplateBinding Padding}"
+                            SnapsToDevicePixels="True">
+                        <ContentPresenter HorizontalAlignment="Center"
+                                          VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="bd" Property="Background" Value="{StaticResource Btn.G.HoverHg}"/>
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="bd" Property="Background" Value="{StaticResource Btn.G.PressedHg}"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.4"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+
+    <!-- ══════════════════════════════════════════════════════════════════════
+         TOGGLE-SCHALTFLÄCHE  (Umschalter, z. B. BtnRandAnzeigen)
+         ══════════════════════════════════════════════════════════════════════ -->
+    <Style TargetType="ToggleButton">
+        <Setter Property="Background"      Value="{StaticResource Btn.Hg}"/>
+        <Setter Property="BorderBrush"     Value="{StaticResource Btn.Rand}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="Padding"         Value="8,4"/>
+        <Setter Property="FontFamily"      Value="Segoe UI"/>
+        <Setter Property="FontSize"        Value="12"/>
+        <Setter Property="Cursor"          Value="Hand"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ToggleButton">
+                    <Border x:Name="bd"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="4"
+                            Padding="{TemplateBinding Padding}"
+                            SnapsToDevicePixels="True">
+                        <ContentPresenter HorizontalAlignment="Center"
+                                          VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="bd" Property="Background"  Value="{StaticResource Btn.P.Hg}"/>
+                            <Setter TargetName="bd" Property="BorderBrush" Value="{StaticResource Btn.P.Rand}"/>
+                            <Setter Property="Foreground" Value="White"/>
+                        </Trigger>
+                        <MultiTrigger>
+                            <MultiTrigger.Conditions>
+                                <Condition Property="IsMouseOver" Value="True"/>
+                                <Condition Property="IsChecked"   Value="False"/>
+                            </MultiTrigger.Conditions>
+                            <Setter TargetName="bd" Property="Background"  Value="{StaticResource Btn.HoverHg}"/>
+                            <Setter TargetName="bd" Property="BorderBrush" Value="{StaticResource Btn.HoverRand}"/>
+                        </MultiTrigger>
+                        <MultiTrigger>
+                            <MultiTrigger.Conditions>
+                                <Condition Property="IsMouseOver" Value="True"/>
+                                <Condition Property="IsChecked"   Value="True"/>
+                            </MultiTrigger.Conditions>
+                            <Setter TargetName="bd" Property="Background" Value="{StaticResource Btn.P.HoverHg}"/>
+                        </MultiTrigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.4"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+
+    <!-- ══════════════════════════════════════════════════════════════════════
+         REPEAT-SCHALTFLÄCHE  (z. B. BtnSicherheitMinus/Plus)
+         ══════════════════════════════════════════════════════════════════════ -->
+    <Style TargetType="RepeatButton">
+        <Setter Property="Background"      Value="{StaticResource Btn.Hg}"/>
+        <Setter Property="BorderBrush"     Value="{StaticResource Btn.Rand}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="Padding"         Value="4,2"/>
+        <Setter Property="FontFamily"      Value="Segoe UI"/>
+        <Setter Property="FontSize"        Value="12"/>
+        <Setter Property="FontWeight"      Value="Bold"/>
+        <Setter Property="Cursor"          Value="Hand"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="RepeatButton">
+                    <Border x:Name="bd"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="4"
+                            Padding="{TemplateBinding Padding}"
+                            SnapsToDevicePixels="True">
+                        <ContentPresenter HorizontalAlignment="Center"
+                                          VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="bd" Property="Background"  Value="{StaticResource Btn.HoverHg}"/>
+                            <Setter TargetName="bd" Property="BorderBrush" Value="{StaticResource Btn.HoverRand}"/>
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="bd" Property="Background"  Value="{StaticResource Btn.PressedHg}"/>
+                            <Setter TargetName="bd" Property="BorderBrush" Value="{StaticResource Btn.PressedRand}"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.4"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+
+    <!-- ══════════════════════════════════════════════════════════════════════
+         ANSICHT-UMSCHALTER  (RadioButton als Segment — Baum / Liste)
+         ══════════════════════════════════════════════════════════════════════ -->
+    <Style x:Key="AnsichtToggle" TargetType="RadioButton">
+        <Setter Property="Padding"    Value="10,5"/>
+        <Setter Property="Cursor"     Value="Hand"/>
+        <Setter Property="FontFamily" Value="Segoe UI"/>
+        <Setter Property="FontSize"   Value="12"/>
+        <Setter Property="Foreground" Value="{StaticResource Farbe.TextSekunder}"/>
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="RadioButton">
+                    <Border x:Name="bd"
+                            Background="{TemplateBinding Background}"
+                            Padding="{TemplateBinding Padding}"
+                            SnapsToDevicePixels="True">
+                        <ContentPresenter HorizontalAlignment="Center"
+                                          VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="bd" Property="Background" Value="{StaticResource Btn.P.Hg}"/>
+                            <Setter Property="Foreground" Value="White"/>
+                        </Trigger>
+                        <MultiTrigger>
+                            <MultiTrigger.Conditions>
+                                <Condition Property="IsMouseOver" Value="True"/>
+                                <Condition Property="IsChecked"   Value="False"/>
+                            </MultiTrigger.Conditions>
+                            <Setter TargetName="bd" Property="Background" Value="{StaticResource Btn.HoverHg}"/>
+                        </MultiTrigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+
+    <!-- ══════════════════════════════════════════════════════════════════════
+         WERKZEUGLEISTEN-SCHALTFLÄCHE  (Hauptleiste oben, mit Hintergrundfarbe)
+         ══════════════════════════════════════════════════════════════════════ -->
+    <Style x:Key="WerkzeugleistenButton" TargetType="Button">
+        <Setter Property="Background"        Value="{StaticResource Btn.Hg}"/>
+        <Setter Property="BorderBrush"       Value="{StaticResource Btn.Rand}"/>
+        <Setter Property="BorderThickness"   Value="1"/>
+        <Setter Property="Padding"           Value="10,5"/>
+        <Setter Property="Margin"            Value="2,1"/>
+        <Setter Property="FontFamily"        Value="Segoe UI"/>
+        <Setter Property="FontSize"          Value="12"/>
+        <Setter Property="Cursor"            Value="Hand"/>
+        <Setter Property="VerticalAlignment" Value="Center"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="bd"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="4"
+                            Padding="{TemplateBinding Padding}"
+                            SnapsToDevicePixels="True">
+                        <ContentPresenter HorizontalAlignment="Center"
+                                          VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="bd" Property="Background"  Value="{StaticResource Btn.HoverHg}"/>
+                            <Setter TargetName="bd" Property="BorderBrush" Value="{StaticResource Btn.HoverRand}"/>
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="bd" Property="Background"  Value="{StaticResource Btn.PressedHg}"/>
+                            <Setter TargetName="bd" Property="BorderBrush" Value="{StaticResource Btn.PressedRand}"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.4"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+
+    <!-- ══════════════════════════════════════════════════════════════════════
+         STATUSLEISTE
+         ══════════════════════════════════════════════════════════════════════ -->
+    <Style TargetType="StatusBar">
+        <Setter Property="Background"      Value="{StaticResource Farbe.Statusleiste}"/>
+        <Setter Property="BorderBrush"     Value="{StaticResource Farbe.Rahmen}"/>
+        <Setter Property="BorderThickness" Value="0,1,0,0"/>
+        <Setter Property="Padding"         Value="4,2"/>
+        <Setter Property="FontFamily"      Value="Segoe UI"/>
+        <Setter Property="FontSize"        Value="12"/>
+        <Setter Property="Foreground"      Value="{StaticResource Farbe.TextSekunder}"/>
+    </Style>
+
+
+    <!-- ══════════════════════════════════════════════════════════════════════
+         BAUMANSICHT
+         ══════════════════════════════════════════════════════════════════════ -->
+    <Style TargetType="TreeView">
+        <Setter Property="Background"      Value="{StaticResource Farbe.Fläche}"/>
+        <Setter Property="BorderBrush"     Value="{StaticResource Farbe.Rahmen}"/>
+        <Setter Property="BorderThickness" Value="0,0,1,0"/>
+        <Setter Property="FontFamily"      Value="Segoe UI"/>
+        <Setter Property="FontSize"        Value="13"/>
+        <Setter Property="Padding"         Value="2"/>
+    </Style>
+
+    <Style TargetType="TreeViewItem">
+        <Setter Property="Padding"                    Value="4,3"/>
+        <Setter Property="IsExpanded"                 Value="True"/>
+        <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+        <Style.Triggers>
+            <Trigger Property="IsSelected" Value="True">
+                <Setter Property="Background" Value="{StaticResource Farbe.Auswahl}"/>
+                <Setter Property="Foreground" Value="{StaticResource Farbe.Text}"/>
+            </Trigger>
+            <MultiTrigger>
+                <MultiTrigger.Conditions>
+                    <Condition Property="IsSelected"        Value="True"/>
+                    <Condition Property="IsSelectionActive" Value="False"/>
+                </MultiTrigger.Conditions>
+                <Setter Property="Background" Value="{StaticResource Farbe.Rahmen}"/>
+            </MultiTrigger>
+        </Style.Triggers>
+    </Style>
+
+
+    <!-- ══════════════════════════════════════════════════════════════════════
+         TRENNLINIE / TEXTEINGABE / CHECKBOX
+         ══════════════════════════════════════════════════════════════════════ -->
+    <Style TargetType="GridSplitter">
+        <Setter Property="Background" Value="{StaticResource Farbe.Rahmen}"/>
+    </Style>
+
+    <Style TargetType="TextBox">
+        <Setter Property="BorderBrush"     Value="{StaticResource Farbe.Rahmen}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="Padding"         Value="4,2"/>
+        <Setter Property="FontFamily"      Value="Segoe UI"/>
+        <Setter Property="FontSize"        Value="13"/>
+        <Setter Property="Background"      Value="{StaticResource Farbe.Fläche}"/>
+        <Style.Triggers>
+            <Trigger Property="IsFocused" Value="True">
+                <Setter Property="BorderBrush" Value="{StaticResource Farbe.Akzent}"/>
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+
+    <Style TargetType="CheckBox">
+        <Setter Property="FontFamily"               Value="Segoe UI"/>
+        <Setter Property="FontSize"                 Value="13"/>
+        <Setter Property="Foreground"               Value="{StaticResource Farbe.Text}"/>
+        <Setter Property="VerticalContentAlignment" Value="Center"/>
+    </Style>
+
+</ResourceDictionary>
