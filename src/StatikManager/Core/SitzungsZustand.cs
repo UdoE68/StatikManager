@@ -42,6 +42,12 @@ namespace StatikManager.Core
             public int    Id     { get; set; }
             public string Name   { get; set; } = "";
             public int[]  Seiten { get; set; } = Array.Empty<int>();
+
+            // Gruppeneigene Randwerte (Bruchteil 0..0.49)
+            public double CropLinks  { get; set; }
+            public double CropRechts { get; set; }
+            public double CropOben   { get; set; }
+            public double CropUnten  { get; set; }
         }
 
         // ── Default-Crop ──────────────────────────────────────────────────────

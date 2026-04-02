@@ -76,12 +76,6 @@ namespace StatikManager.Modules.Werkzeuge
             public int       Id     { get; set; }
             public string    Name   { get; set; } = "";
             public List<int> Seiten { get; set; } = new List<int>();
-
-            // Gruppeneigene Randwerte (Bruchteil 0..0.49, relativ zu Seitenmaßen)
-            public double CropLinks  { get; set; }
-            public double CropRechts { get; set; }
-            public double CropOben   { get; set; }
-            public double CropUnten  { get; set; }
         }
         private static readonly Color[] GruppenFarben =
         {
@@ -170,13 +164,9 @@ namespace StatikManager.Modules.Werkzeuge
                 AktiveGruppeId     = _aktGruppeId,
                 CropGruppen        = _gruppen.Select(g => new Core.SitzungsZustand.GruppeSitzung
                                      {
-                                         Id         = g.Id,
-                                         Name       = g.Name,
-                                         Seiten     = g.Seiten.ToArray(),
-                                         CropLinks  = g.CropLinks,
-                                         CropRechts = g.CropRechts,
-                                         CropOben   = g.CropOben,
-                                         CropUnten  = g.CropUnten,
+                                         Id     = g.Id,
+                                         Name   = g.Name,
+                                         Seiten = g.Seiten.ToArray()
                                      }).ToArray(),
                 DefaultCropGesetzt = _defaultCrop.HasValue,
                 CropLinks          = (double[])_cropLinks.Clone(),
@@ -292,13 +282,9 @@ namespace StatikManager.Modules.Werkzeuge
                             {
                                 gl.Add(new CropGruppe
                                 {
-                                    Id         = gs.Id,
-                                    Name       = string.IsNullOrWhiteSpace(gs.Name) ? $"Gruppe {gs.Id}" : gs.Name,
-                                    Seiten     = gs.Seiten?.Where(s => s >= 0 && s < n).ToList() ?? new List<int>(),
-                                    CropLinks  = gs.CropLinks,
-                                    CropRechts = gs.CropRechts,
-                                    CropOben   = gs.CropOben,
-                                    CropUnten  = gs.CropUnten,
+                                    Id     = gs.Id,
+                                    Name   = string.IsNullOrWhiteSpace(gs.Name) ? $"Gruppe {gs.Id}" : gs.Name,
+                                    Seiten = gs.Seiten?.Where(s => s >= 0 && s < n).ToList() ?? new List<int>()
                                 });
                             }
                             if (gl.Count > 0)
@@ -1201,24 +1187,7 @@ namespace StatikManager.Modules.Werkzeuge
             if (_gruppeWahlLäuft) return;
             int selIdx = CmbGruppe?.SelectedIndex ?? -1;
             if (selIdx < 0 || selIdx >= _gruppen.Count) return;
-            var gruppe = _gruppen[selIdx];
-            _aktGruppeId = gruppe.Id;
-
-            // Wenn Gruppe eigene Randwerte hat, sofort auf alle Seiten der Gruppe anwenden
-            if (_cropLinks.Length > 0
-                && (gruppe.CropLinks != 0 || gruppe.CropRechts != 0
-                    || gruppe.CropOben != 0 || gruppe.CropUnten != 0))
-            {
-                foreach (int s in gruppe.Seiten)
-                {
-                    if (s < _cropLinks.Length)  _cropLinks[s]  = gruppe.CropLinks;
-                    if (s < _cropRechts.Length) _cropRechts[s] = gruppe.CropRechts;
-                    if (s < _cropOben.Length)   _cropOben[s]   = gruppe.CropOben;
-                    if (s < _cropUnten.Length)  _cropUnten[s]  = gruppe.CropUnten;
-                }
-                AktualisiereCropLinien();
-            }
-
+            _aktGruppeId = _gruppen[selIdx].Id;
             AktualisiereAuswahlAnzeige();
         }
 
@@ -1250,8 +1219,8 @@ namespace StatikManager.Modules.Werkzeuge
             SafeExecute(() =>
             {
                 int id   = _nächsteId++;
-                int pos  = _gruppen.Count;   // Gruppe 0 ist immer vorhanden; pos=1 → "Gruppe 1"
-                var name = $"Gruppe {pos}";
+                int pos  = _gruppen.Count;
+                var name = $"Gruppe {pos + 1}";
                 _gruppen.Add(new CropGruppe { Id = id, Name = name });
                 _aktGruppeId = id;
                 AktualisiereGruppenComboBox();
@@ -1263,14 +1232,10 @@ namespace StatikManager.Modules.Werkzeuge
         {
             SafeExecute(() =>
             {
-                // Defensiv: _aktGruppeId aus ComboBox-Auswahl synchronisieren
-                int selIdx = CmbGruppe?.SelectedIndex ?? -1;
-                if (selIdx >= 0 && selIdx < _gruppen.Count)
-                    _aktGruppeId = _gruppen[selIdx].Id;
-
                 var aktGruppe = AktiveGruppe();
                 if (aktGruppe == null) return;
                 if (aktGruppe.Id == 0) return; // Gruppe 0 ist unverlöschbar
+                if (_gruppen.Count <= 1) return;
 
                 // Seiten der gelöschten Gruppe → Gruppe 0
                 var gruppe0 = _gruppen.FirstOrDefault(g => g.Id == 0);
@@ -1446,17 +1411,11 @@ namespace StatikManager.Modules.Werkzeuge
                 double refW    = _seitenBilder[aktSeite].PixelWidth;
                 double pxPerMm = _pxPerMm > 0 ? _pxPerMm : 4.0;
 
-                // Aktive Gruppe ermitteln – bei Modus "Ausgewählt" Gruppenrandwerte bevorzugen
-                var dialogGruppe = (_cropModus == CropAnwendungsModus.Ausgewählt) ? AktiveGruppe() : null;
-                bool hatGruppenCrop = dialogGruppe != null
-                    && (dialogGruppe.CropLinks != 0 || dialogGruppe.CropRechts != 0
-                        || dialogGruppe.CropOben != 0 || dialogGruppe.CropUnten != 0);
-
-                // Originalwerte: aus aktiver Gruppe (wenn vorhanden), sonst aus aktiver Seite
-                double origOben   = hatGruppenCrop ? dialogGruppe!.CropOben   : (aktSeite < _cropOben.Length   ? _cropOben[aktSeite]   : 0);
-                double origUnten  = hatGruppenCrop ? dialogGruppe!.CropUnten  : (aktSeite < _cropUnten.Length  ? _cropUnten[aktSeite]  : 0);
-                double origLinks  = hatGruppenCrop ? dialogGruppe!.CropLinks  : (aktSeite < _cropLinks.Length  ? _cropLinks[aktSeite]  : 0);
-                double origRechts = hatGruppenCrop ? dialogGruppe!.CropRechts : (aktSeite < _cropRechts.Length ? _cropRechts[aktSeite] : 0);
+                // Originalwerte der aktiven Seite für Cancel-Restore sichern
+                double origOben   = aktSeite < _cropOben.Length   ? _cropOben[aktSeite]   : 0;
+                double origUnten  = aktSeite < _cropUnten.Length  ? _cropUnten[aktSeite]  : 0;
+                double origLinks  = aktSeite < _cropLinks.Length  ? _cropLinks[aktSeite]  : 0;
+                double origRechts = aktSeite < _cropRechts.Length ? _cropRechts[aktSeite] : 0;
 
                 // Beschnittrahmen einblenden damit Live-Aktualisierung sichtbar ist
                 if (BtnRandAnzeigen.IsChecked != true) BtnRandAnzeigen.IsChecked = true;
@@ -1651,16 +1610,6 @@ namespace StatikManager.Modules.Werkzeuge
                     if (idx < _cropLinks.Length)  _cropLinks[idx]  = Math.Min(newLinksPx / iRefW, 0.49);
                     if (idx < _cropRechts.Length) _cropRechts[idx] = Math.Min(newRechtsPx / iRefW, 0.49);
                 }
-
-                // Bei "Ausgewählte Seiten": Werte auch in der Gruppe speichern (Bruchteil der Referenzseite)
-                if (rbAuswahl.IsChecked == true && dialogGruppe != null)
-                {
-                    dialogGruppe.CropLinks  = Math.Min(newLinksPx  / refW, 0.49);
-                    dialogGruppe.CropRechts = Math.Min(newRechtsPx / refW, 0.49);
-                    dialogGruppe.CropOben   = Math.Min(newObenPx   / refH, 0.49);
-                    dialogGruppe.CropUnten  = Math.Min(newUntenPx  / refH, 0.49);
-                }
-
                 _autoRandAktiv = false;
 
                 AktualisiereCropLinien();
