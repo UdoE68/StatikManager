@@ -533,10 +533,16 @@ namespace StatikManager.Modules.Werkzeuge
                 else
                 {
                     _cropAuswahlSeiten.Add(seitenIdx);
-                    // Crop-Werte der aktiven Seite sofort auf die neu hinzugefügte Seite übertragen
+                    // Crop-Werte der aktiven Seite sofort auf die neu hinzugefügte Seite übertragen.
+                    // WICHTIG: AktiveSeiteIndex() ist ungeeignet — der User betrachtet i.d.R. gerade
+                    // die angeklickte Seite (seitenIdx), womit quellIdx == seitenIdx und keine Werte
+                    // kopiert werden. Stattdessen: erste bereits ausgewählte Seite als Quelle nehmen.
                     try
                     {
-                        int quellIdx = AktiveSeiteIndex();
+                        int quellIdx = -1;
+                        foreach (int x in _cropAuswahlSeiten)
+                            if (x != seitenIdx) { quellIdx = x; break; }
+                        if (quellIdx < 0) quellIdx = AktiveSeiteIndex();
                         if (quellIdx >= 0 && quellIdx != seitenIdx
                             && quellIdx < _seitenBilder.Count && seitenIdx < _seitenBilder.Count)
                         {
