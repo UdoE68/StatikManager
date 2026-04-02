@@ -390,7 +390,14 @@ namespace StatikManager.Modules.Werkzeuge
             // Ab hier gesperrt
             _exportLäuft = true;
             BtnExport.IsEnabled = false;
-            TxtInfo.Text = "Export gestartet …";
+
+            string? vorlagePfad = WähleVorlage();
+
+            // ── Diagnose: sofort sichtbares Feedback welchen Pfad wir nehmen ──
+            if (vorlagePfad != null)
+                TxtInfo.Text = $"Word-Export gestartet  •  Vorlage erkannt: {IO.Path.GetFileName(vorlagePfad)}";
+            else
+                TxtInfo.Text = "Word-Export gestartet  •  Keine Vorlage konfiguriert (Standard-Export)";
 
             var yStartK  = (double[])_seitenYStart.Clone();
             var höheK    = (double[])_seitenHöhe.Clone();
@@ -399,8 +406,6 @@ namespace StatikManager.Modules.Werkzeuge
             var cropRK = (double[])_cropRechts.Clone();
             var cropOK = (double[])_cropOben.Clone();
             var cropUK = (double[])_cropUnten.Clone();
-
-            string? vorlagePfad = WähleVorlage();
 
             var thread = new Thread(() =>
                 ExportThreadWorker(zielPfad, pdfK, yStartK, höheK, cropLK, cropRK, cropOK, cropUK, vorlagePfad))
@@ -2220,12 +2225,36 @@ namespace StatikManager.Modules.Werkzeuge
                     wordApp = new Word.Application { Visible = false };
                     wordApp.DisplayAlerts = Word.WdAlertLevel.wdAlertsNone;
 
-                    Word.Range? einfügePunkt = null;
+                    Word.Range? einfügePunkt    = null;
+                    bool        textmarkeGefunden = false;
                     if (vorlagePfad != null)
                     {
+                        // ── Diagnose: Neuer Vorlagen-Pfad aktiv ────────────────
+                        Dispatcher.Invoke(new Action(() => MessageBox.Show(
+                            $"Neuer Vorlagen-Exportpfad aktiv.\n\nVorlage:\n{vorlagePfad}",
+                            "Export-Diagnose", MessageBoxButton.OK, MessageBoxImage.Information)));
+
                         wordDoc = ÖffneVorlage(wordApp, vorlagePfad);
                         NormiereAbsatzstil(wordDoc);
+
+                        // Bookmark-Status VOR dem Löschen prüfen
+                        textmarkeGefunden = wordDoc.Bookmarks.Exists("BILD_BEREICH");
                         einfügePunkt = HoleEinfügePunkt(wordDoc);
+
+                        // ── Diagnose: Textmarke-Status ──────────────────────────
+                        string bmStatus = textmarkeGefunden
+                            ? "Textmarke BILD_BEREICH gefunden – Einfügung an Textmarken-Position"
+                            : "⚠ Textmarke BILD_BEREICH NICHT gefunden – Einfügung am Dokumentende";
+                        Dispatcher.Invoke(new Action(() =>
+                        {
+                            TxtInfo.Text = bmStatus;
+                            if (!textmarkeGefunden)
+                                MessageBox.Show(
+                                    "Die Textmarke \"BILD_BEREICH\" wurde in der Vorlage nicht gefunden.\n\n" +
+                                    "Das Bild wird am Ende des Dokuments eingefügt.\n" +
+                                    "Bitte Textmarke in der Vorlage anlegen.",
+                                    "Textmarke fehlt", MessageBoxButton.OK, MessageBoxImage.Warning);
+                        }));
                     }
                     else
                     {
@@ -2255,6 +2284,12 @@ namespace StatikManager.Modules.Werkzeuge
                         $"Vorlage: {availW_pt:F1} × {availH_pt:F1} pt | " +
                         $"Druckbereich: {nativeW_eff:F1} × {nativeH_eff:F1} pt");
 
+                    // ── Diagnose: Zielbereich und Bildgröße ─────────────────────
+                    Dispatcher.Invoke(new Action(() =>
+                        TxtInfo.Text =
+                            $"Zielbereich: {availW_pt:F0} × {availH_pt:F0} pt  |  " +
+                            $"Bild: {nativeW_eff:F0} × {nativeH_eff:F0} pt"));
+
                     double scaleW      = nativeW_eff > 0 ? availW_pt / nativeW_eff : 1.0;
                     double scaleH      = nativeH_eff > 0 ? availH_pt / nativeH_eff : 1.0;
                     double globalScale = Math.Min(1.0, Math.Min(scaleW, scaleH));
@@ -2269,6 +2304,11 @@ namespace StatikManager.Modules.Werkzeuge
                     if (globalScale < 0.99)
                     {
                         int prozent = (int)Math.Round(globalScale * 100.0);
+                        // ── Diagnose: Bild passt nicht ──────────────────────────
+                        Dispatcher.Invoke(new Action(() =>
+                            TxtInfo.Text =
+                                $"Bild passt nicht  •  Erforderliche Skalierung: {prozent} %  •  Skalierungsdialog wird geöffnet …"));
+
                         SkalierungWahl wahl = SkalierungWahl.Abbrechen;
                         Dispatcher.Invoke(new Action(() =>
                         {
@@ -2293,6 +2333,10 @@ namespace StatikManager.Modules.Werkzeuge
                     else
                     {
                         globalScale = 1.0;
+                        // ── Diagnose: Bild passt ────────────────────────────────
+                        Dispatcher.BeginInvoke(new Action(() =>
+                            TxtInfo.Text =
+                                $"Bild passt vollständig  •  Zielbereich: {availW_pt:F0} × {availH_pt:F0} pt  •  Bild: {nativeW_eff:F0} × {nativeH_eff:F0} pt"));
                     }
 
                     App.LogFehler("Export/Skalierung",
