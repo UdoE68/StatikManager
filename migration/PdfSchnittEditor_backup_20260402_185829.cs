@@ -2271,10 +2271,9 @@ namespace StatikManager.Modules.Werkzeuge
                     var (availW_pt, availH_pt) = HoleSchreibbereich(wordDoc);
 
                     // Für Template: nutzbaren Bereich aus Tabellenstruktur ermitteln
-                    double? zellenB = null, zellenH = null;
                     if (vorlagePfad != null && einfügePunkt != null)
                     {
-                        (zellenB, zellenH) = HoleZellenMasse(einfügePunkt);
+                        var (zellenB, zellenH) = HoleZellenMasse(einfügePunkt);
                         if (zellenB.HasValue)
                         {
                             App.LogFehler("Export/Schreibbereich", $"Tabellenbreite: {zellenB.Value:F1} pt");
@@ -2290,28 +2289,11 @@ namespace StatikManager.Modules.Werkzeuge
                         $"Vorlage: {availW_pt:F1} × {availH_pt:F1} pt | " +
                         $"Druckbereich: {nativeW_eff:F1} × {nativeH_eff:F1} pt");
 
-                    // ── DIAGNOSE: Zielbereich-Breakdown als MessageBox ───────────
-                    {
-                        var ps2     = wordDoc!.PageSetup;
-                        string quelleB = zellenB.HasValue ? "Tabellenbreite" : "Satzspiegel";
-                        string quelleH = zellenH.HasValue ? "Zeilenhöhe fix" : "Satzspiegel";
-                        Dispatcher.Invoke(new Action(() =>
-                            MessageBox.Show(
-                                $"── Seitenmaße ──────────────────\n" +
-                                $"Seitenhöhe:     {ps2.PageHeight:F1} pt\n" +
-                                $"TopMargin:      {ps2.TopMargin:F1} pt\n" +
-                                $"BottomMargin:   {ps2.BottomMargin:F1} pt\n" +
-                                $"HeaderDistance: {ps2.HeaderDistance:F1} pt\n" +
-                                $"FooterDistance: {ps2.FooterDistance:F1} pt\n\n" +
-                                $"── Zielbereich ─────────────────\n" +
-                                $"Breite: {availW_pt:F0} pt  (Quelle: {quelleB})\n" +
-                                $"Höhe:   {availH_pt:F0} pt  (Quelle: {quelleH})\n\n" +
-                                $"── Bild ────────────────────────\n" +
-                                $"Breite: {nativeW_eff:F0} pt\n" +
-                                $"Höhe:   {nativeH_eff:F0} pt",
-                                "DIAGNOSE – Zielbereich",
-                                MessageBoxButton.OK, MessageBoxImage.Information)));
-                    }
+                    // ── Diagnose: Zielbereich und Bildgröße ─────────────────────
+                    Dispatcher.Invoke(new Action(() =>
+                        TxtInfo.Text =
+                            $"Zielbereich: {availW_pt:F0} × {availH_pt:F0} pt  |  " +
+                            $"Bild: {nativeW_eff:F0} × {nativeH_eff:F0} pt"));
 
                     double scaleW      = nativeW_eff > 0 ? availW_pt / nativeW_eff : 1.0;
                     double scaleH      = nativeH_eff > 0 ? availH_pt / nativeH_eff : 1.0;
@@ -2541,10 +2523,13 @@ namespace StatikManager.Modules.Werkzeuge
         ///   Breite = PageWidth − LeftMargin − RightMargin
         ///   Höhe   = PageHeight − TopMargin − BottomMargin
         ///
-        /// In Word enthält TopMargin bereits den Kopfzeilen-Bereich
+        /// TopMargin enthält in Word bereits den Kopfzeilen-Bereich
         /// (Kopfzeile liegt zwischen HeaderDistance und TopMargin).
         /// BottomMargin enthält entsprechend den Fußzeilen-Bereich.
-        /// Diese Formel liefert den tatsächlichen Körper-Bereich (Satzspiegel).
+        ///
+        /// Zusätzliche Prüfung: Falls Kopf-/Fußzeile mehr Raum beanspruchen
+        /// als ihr zugewiesen ist (= überhohe Inhalte), wird h entsprechend
+        /// weiter reduziert.
         ///
         /// Rückgabe in Points (72 pt = 1 inch).
         /// Fallback: A4 mit 2,5 cm Rand ≈ 451 × 694 pt.
@@ -2557,10 +2542,50 @@ namespace StatikManager.Modules.Werkzeuge
                 double w = ps.PageWidth  - ps.LeftMargin - ps.RightMargin;
                 double h = ps.PageHeight - ps.TopMargin  - ps.BottomMargin;
 
-                App.LogFehler("HoleSchreibbereich",
-                    $"PageH={ps.PageHeight:F1} | TopM={ps.TopMargin:F1} | BotM={ps.BottomMargin:F1} " +
-                    $"| HeaderDist={ps.HeaderDistance:F1} | FooterDist={ps.FooterDistance:F1} " +
-                    $"| W={w:F1} | H={h:F1}");
+                // ── Kopf-/Fußzeile: falls Inhalt über zugewiesenen Rand hinausgeht ──
+                try
+                {
+                    var section = doc.Sections[1];
+
+                    // Kopfzeile: reservierter Bereich = TopMargin − HeaderDistance
+                    double headerReserviert = ps.TopMargin - ps.HeaderDistance;
+                    double headerHöhe       = SchätzeHfHöhe(
+                        section.Headers[Word.WdHeaderFooterIndex.wdHeaderFooterPrimary]);
+                    if (headerHöhe > headerReserviert + 2.0)
+                    {
+                        double überstand = headerHöhe - headerReserviert;
+                        h -= überstand;
+                        App.LogFehler("HoleSchreibbereich",
+                            $"Kopfzeile: ~{headerHöhe:F0} pt > reserviert {headerReserviert:F0} pt " +
+                            $"→ h um {überstand:F0} pt reduziert");
+                    }
+                    else
+                    {
+                        App.LogFehler("HoleSchreibbereich",
+                            $"Kopfzeile: ~{headerHöhe:F0} pt ≤ reserviert {headerReserviert:F0} pt " +
+                            $"(HeaderDist={ps.HeaderDistance:F0}, TopMargin={ps.TopMargin:F0}) → kein Abzug");
+                    }
+
+                    // Fußzeile: reservierter Bereich = BottomMargin − FooterDistance
+                    double footerReserviert = ps.BottomMargin - ps.FooterDistance;
+                    double footerHöhe       = SchätzeHfHöhe(
+                        section.Footers[Word.WdHeaderFooterIndex.wdHeaderFooterPrimary]);
+                    if (footerHöhe > footerReserviert + 2.0)
+                    {
+                        double überstand = footerHöhe - footerReserviert;
+                        h -= überstand;
+                        App.LogFehler("HoleSchreibbereich",
+                            $"Fußzeile: ~{footerHöhe:F0} pt > reserviert {footerReserviert:F0} pt " +
+                            $"→ h um {überstand:F0} pt reduziert");
+                    }
+                    else
+                    {
+                        App.LogFehler("HoleSchreibbereich",
+                            $"Fußzeile: ~{footerHöhe:F0} pt ≤ reserviert {footerReserviert:F0} pt " +
+                            $"(FooterDist={ps.FooterDistance:F0}, BottomMargin={ps.BottomMargin:F0}) → kein Abzug");
+                    }
+                }
+                catch (Exception ex) { LogException(ex, "HoleSchreibbereich/HF"); }
 
                 return (Math.Max(10.0, w), Math.Max(10.0, h));
             }
@@ -2569,6 +2594,44 @@ namespace StatikManager.Modules.Werkzeuge
                 LogException(ex, "HoleSchreibbereich");
                 return (451.0, 694.0); // A4, 2,5 cm Rand
             }
+        }
+
+        /// <summary>
+        /// Schätzt die Gesamthöhe einer Kopf- oder Fußzeile in Points.
+        /// Summiert pro Absatz: SpaceBefore + Zeilenhöhe + SpaceAfter.
+        /// Gibt 0 zurück wenn keine Zeile existiert oder leer ist.
+        /// </summary>
+        private static double SchätzeHfHöhe(Word.HeaderFooter hf)
+        {
+            try
+            {
+                if (!hf.Exists) return 0;
+                double gesamt = 0;
+                foreach (Word.Paragraph p in hf.Range.Paragraphs)
+                {
+                    // Schriftgröße: ungültige/Mixed-Werte (z.B. 9999999) auf Fallback
+                    float fs = p.Range.Font.Size;
+                    if (fs < 1 || fs > 999) fs = 11f;
+
+                    // Zeilenhöhe: bei fester/Mindesthöhe direkt, sonst Schriftgröße × 1.2
+                    double lineH = fs * 1.2;
+                    try
+                    {
+                        if (p.LineSpacingRule == Word.WdLineSpacing.wdLineSpaceExactly ||
+                            p.LineSpacingRule == Word.WdLineSpacing.wdLineSpaceAtLeast)
+                        {
+                            if (p.LineSpacing > 0) lineH = p.LineSpacing;
+                        }
+                    }
+                    catch { }
+
+                    float sb = p.SpaceBefore; if (sb < 0) sb = 0;
+                    float sa = p.SpaceAfter;  if (sa < 0) sa = 0;
+                    gesamt += sb + lineH + sa;
+                }
+                return gesamt;
+            }
+            catch { return 0; }
         }
 
         // ── Vorlagen-Hilfsmethoden ────────────────────────────────────────────
@@ -2630,9 +2693,10 @@ namespace StatikManager.Modules.Werkzeuge
         /// Gibt Breite und Höhe der Tabellenzelle zurück, in der sich die Range befindet.
         /// Gibt (null, null) zurück wenn die Range nicht in einer Tabelle liegt.
         ///
-        /// Höhe: nur bei explizit gesetzter fester/Mindesthöhe (HeightRule ≠ Auto).
-        /// Bei Auto-Höhe wird null zurückgegeben → Fallback auf HoleSchreibbereich.
-        /// (wdVerticalPositionRelativeToPage ist bei Visible=false unzuverlässig.)
+        /// Höhe-Strategie (in Reihenfolge):
+        ///   1. Feste/Mindesthöhe gesetzt (HeightRule ≠ Auto)  → row.Height
+        ///   2. Auto-Höhe  → verbleibender Seitenraum ab Y-Position der Range
+        ///      (wdVerticalPositionRelativeToPage: Abstand in pt vom Seitenanfang)
         ///
         /// Rückgabe in Points.
         /// </summary>
@@ -2650,18 +2714,29 @@ namespace StatikManager.Modules.Werkzeuge
                     try
                     {
                         var row = cell.Row;
-                        if (row.HeightRule != Word.WdRowHeightRule.wdRowHeightAuto && row.Height > 10)
+                        if (row.HeightRule != Word.WdRowHeightRule.wdRowHeightAuto)
                         {
-                            // Feste oder Mindesthöhe → direkt verwenden
-                            höhe = row.Height;
-                            App.LogFehler("Export/ZellenHöhe",
-                                $"Feste Zeilenhöhe: {row.Height:F1} pt (Rule={row.HeightRule})");
+                            // Feste oder Mindesthöhe – direkt verwenden
+                            if (row.Height > 10)
+                                höhe = row.Height;
                         }
                         else
                         {
-                            // Auto-Höhe → null, Fallback auf Satzspiegel-Höhe (HoleSchreibbereich)
+                            // Auto-Höhe: verbleibender Raum ab Y-Position der Range
+                            // wdVerticalPositionRelativeToPage liefert pt vom oberen Seitenrand
+                            var    yRaw = r.Information[Word.WdInformation.wdVerticalPositionRelativeToPage];
+                            double y    = yRaw is double yd ? yd
+                                        : yRaw is float  yf ? (double)yf
+                                        : yRaw is int    yi ? (double)yi
+                                        : yRaw is long   yl ? (double)yl
+                                        : 0.0;
+                            var ps   = r.Sections[1].PageSetup;
+                            double remaining = ps.PageHeight - ps.BottomMargin - y;
                             App.LogFehler("Export/ZellenHöhe",
-                                "Auto-Zeilenhöhe → Höhe aus Satzspiegel (HoleSchreibbereich)");
+                                $"Auto-Zeile: Y={y:F1} pt | PageH={ps.PageHeight:F1} pt | " +
+                                $"BottomMargin={ps.BottomMargin:F1} pt | Verbleibend={remaining:F1} pt");
+                            if (remaining > 10)
+                                höhe = remaining;
                         }
                     }
                     catch { }
