@@ -63,9 +63,6 @@ namespace StatikManager.Modules.Werkzeuge
         private double[] _cropOben   = Array.Empty<double>();
         private double[] _cropUnten  = Array.Empty<double>();
 
-        // Default-Crop: wird beim Laden neuer PDFs angewendet, sofern gesetzt; null = kein Standard
-        private (double Links, double Rechts, double Oben, double Unten)? _defaultCrop;
-
         // Sicherheitsabstand für automatische Rand-Erkennung (Vorschau-Pixel, min 0, max 50)
         private double _cropSicherheitMm  = 2.0;   // Sicherheitsabstand fuer Auto-Rand (mm)
         private double _pxPerMm           = 4.0;   // Pixel pro mm (beim PDF-Laden berechnet)
@@ -271,24 +268,12 @@ namespace StatikManager.Modules.Werkzeuge
         // ── Crop-Linien ───────────────────────────────────────────────────────
 
         // Initialisiert alle Crop-Arrays auf 0, Länge = Seitenanzahl.
-        // Wenn _defaultCrop gesetzt ist, wird er auf alle Seiten angewendet.
         private void InitCropArrays(int n)
         {
             _cropLinks  = new double[n];
             _cropRechts = new double[n];
             _cropOben   = new double[n];
             _cropUnten  = new double[n];
-            if (_defaultCrop.HasValue)
-            {
-                var d = _defaultCrop.Value;
-                for (int i = 0; i < n; i++)
-                {
-                    _cropLinks[i]  = d.Links;
-                    _cropRechts[i] = d.Rechts;
-                    _cropOben[i]   = d.Oben;
-                    _cropUnten[i]  = d.Unten;
-                }
-            }
         }
 
         // Gibt den Index der Seite zurück, die aktuell am stärksten sichtbar ist.
@@ -894,26 +879,6 @@ namespace StatikManager.Modules.Werkzeuge
                 AddRow("Links:",  txtLinks);
                 AddRow("Rechts:", txtRechts);
 
-                // Anwenden-auf-Modus
-                sp.Children.Add(new Separator { Margin = new Thickness(0, 8, 0, 6) });
-                sp.Children.Add(new TextBlock
-                {
-                    Text = "Anwenden auf:",
-                    FontWeight = FontWeights.SemiBold,
-                    Margin = new Thickness(0, 0, 0, 4)
-                });
-                var rbNurDiese = new RadioButton
-                    { Content = $"Nur diese Seite (Seite {aktSeite + 1})", IsChecked = true, Margin = new Thickness(0, 2, 0, 2) };
-                var rbAlle     = new RadioButton
-                    { Content = "Alle Seiten", Margin = new Thickness(0, 2, 0, 2) };
-                var rbAuswahl  = new RadioButton
-                    { Content = "Ausgew\u00e4hlte Seiten \u2026", Margin = new Thickness(0, 2, 0, 2) };
-                var rbStandard = new RadioButton
-                    { Content = "Als Standard speichern", Margin = new Thickness(0, 2, 0, 2) };
-                sp.Children.Add(rbNurDiese);
-                if (_seitenBilder.Count > 1) { sp.Children.Add(rbAlle); sp.Children.Add(rbAuswahl); }
-                sp.Children.Add(rbStandard);
-
                 // Live-Aktualisierung: Rahmen sofort bei jeder Eingabe verschieben
                 bool TryMm(string t, out double v)
                     => double.TryParse(t.Trim().Replace(",", "."),
@@ -996,148 +961,15 @@ namespace StatikManager.Modules.Werkzeuge
                     return;
                 }
 
-                // Modus auswerten
-                if (rbStandard.IsChecked == true)
-                {
-                    // Als Standard speichern – Live-Preview auf aktSeite rückgängig machen
-                    _defaultCrop = (newLinksPx / refW, newRechtsPx / refW, newObenPx / refH, newUntenPx / refH);
-                    if (aktSeite < _cropOben.Length)   _cropOben[aktSeite]   = origOben;
-                    if (aktSeite < _cropUnten.Length)  _cropUnten[aktSeite]  = origUnten;
-                    if (aktSeite < _cropLinks.Length)  _cropLinks[aktSeite]  = origLinks;
-                    if (aktSeite < _cropRechts.Length) _cropRechts[aktSeite] = origRechts;
-                    AktualisiereCropLinien();
-                    TxtInfo.Text = "Standard-Rand gespeichert (wird beim n\u00e4chsten PDF-Laden angewendet).";
-                    return;
-                }
-
-                List<int> zielSeiten;
-                if (rbAlle.IsChecked == true)
-                {
-                    zielSeiten = Enumerable.Range(0, _seitenBilder.Count).ToList();
-                }
-                else if (rbAuswahl.IsChecked == true)
-                {
-                    zielSeiten = WähleSeiten(aktSeite, Window.GetWindow(this));
-                    if (zielSeiten.Count == 0)
-                    {
-                        // Abgebrochen oder keine Seite gewählt – Live-Preview rückgängig machen
-                        if (aktSeite < _cropOben.Length)   _cropOben[aktSeite]   = origOben;
-                        if (aktSeite < _cropUnten.Length)  _cropUnten[aktSeite]  = origUnten;
-                        if (aktSeite < _cropLinks.Length)  _cropLinks[aktSeite]  = origLinks;
-                        if (aktSeite < _cropRechts.Length) _cropRechts[aktSeite] = origRechts;
-                        AktualisiereCropLinien();
-                        return;
-                    }
-                }
-                else
-                {
-                    zielSeiten = new List<int> { aktSeite };
-                }
-
-                // Werte auf Zielseiten anwenden (mm → Bruchteil der jeweiligen Seitengröße)
-                foreach (int idx in zielSeiten)
-                {
-                    double iRefH = idx < _seitenHöhe.Length  ? _seitenHöhe[idx]               : refH;
-                    double iRefW = idx < _seitenBilder.Count ? _seitenBilder[idx].PixelWidth   : refW;
-                    if (idx < _cropOben.Length)   _cropOben[idx]   = Math.Min(newObenPx  / iRefH, 0.49);
-                    if (idx < _cropUnten.Length)  _cropUnten[idx]  = Math.Min(newUntenPx / iRefH, 0.49);
-                    if (idx < _cropLinks.Length)  _cropLinks[idx]  = Math.Min(newLinksPx / iRefW, 0.49);
-                    if (idx < _cropRechts.Length) _cropRechts[idx] = Math.Min(newRechtsPx / iRefW, 0.49);
-                }
+                if (aktSeite < _cropOben.Length)   _cropOben[aktSeite]   = newObenPx  / refH;
+                if (aktSeite < _cropUnten.Length)  _cropUnten[aktSeite]  = newUntenPx / refH;
+                if (aktSeite < _cropLinks.Length)  _cropLinks[aktSeite]  = newLinksPx / refW;
+                if (aktSeite < _cropRechts.Length) _cropRechts[aktSeite] = newRechtsPx / refW;
                 _autoRandAktiv = false;
 
                 AktualisiereCropLinien();
                 if (BtnRandAnzeigen.IsChecked != true) BtnRandAnzeigen.IsChecked = true;
             }, "BtnRandBearbeiten_Click");
-        }
-
-        // ── Seitenauswahl-Dialog ──────────────────────────────────────────────
-
-        // Zeigt einen Dialog mit Checkboxen für alle Seiten.
-        // Gibt die Indizes der gewählten Seiten zurück; leere Liste = Abbruch.
-        private List<int> WähleSeiten(int aktSeite, Window? owner = null)
-        {
-            int n = _seitenBilder.Count;
-
-            var cSp = new StackPanel();
-            var checkboxen = new CheckBox[n];
-            for (int i = 0; i < n; i++)
-            {
-                checkboxen[i] = new CheckBox
-                {
-                    Content   = $"Seite {i + 1}",
-                    IsChecked = (i == aktSeite),
-                    Margin    = new Thickness(0, 2, 0, 2)
-                };
-                cSp.Children.Add(checkboxen[i]);
-            }
-
-            var sv = new ScrollViewer
-            {
-                MaxHeight = 260,
-                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-                Content = cSp,
-                Margin  = new Thickness(0, 0, 0, 6)
-            };
-
-            var btnAlle  = new Button { Content = "Alle",  Width = 58, Margin = new Thickness(0, 0, 6, 0) };
-            var btnKeine = new Button { Content = "Keine", Width = 58 };
-            btnAlle.Click  += (_, __) => { foreach (var cb in checkboxen) cb.IsChecked = true;  };
-            btnKeine.Click += (_, __) => { foreach (var cb in checkboxen) cb.IsChecked = false; };
-            var selRow = new StackPanel
-            {
-                Orientation = Orientation.Horizontal,
-                Margin      = new Thickness(0, 0, 0, 8)
-            };
-            selRow.Children.Add(btnAlle);
-            selRow.Children.Add(btnKeine);
-
-            bool ok = false;
-            Window? dlg = null;
-            var btnOk     = new Button { Content = "OK",        Width = 70, IsDefault = true, Margin = new Thickness(0, 0, 8, 0) };
-            var btnCancel = new Button { Content = "Abbrechen", Width = 80, IsCancel  = true };
-            btnOk.Click     += (_, __) => { ok = true; dlg!.Close(); };
-            btnCancel.Click += (_, __) => dlg!.Close();
-            var btnRow = new StackPanel
-            {
-                Orientation         = Orientation.Horizontal,
-                HorizontalAlignment = HorizontalAlignment.Right,
-                Margin              = new Thickness(0, 4, 0, 0)
-            };
-            btnRow.Children.Add(btnOk);
-            btnRow.Children.Add(btnCancel);
-
-            var sp = new StackPanel { Margin = new Thickness(14) };
-            sp.Children.Add(new TextBlock
-            {
-                Text       = "Seiten ausw\u00e4hlen:",
-                FontWeight = FontWeights.SemiBold,
-                Margin     = new Thickness(0, 0, 0, 6)
-            });
-            sp.Children.Add(sv);
-            sp.Children.Add(selRow);
-            sp.Children.Add(btnRow);
-
-            dlg = new Window
-            {
-                Title                 = "Seiten ausw\u00e4hlen",
-                Content               = sp,
-                SizeToContent         = SizeToContent.WidthAndHeight,
-                MinWidth              = 200,
-                WindowStartupLocation = WindowStartupLocation.CenterOwner,
-                Owner                 = owner,
-                ResizeMode            = ResizeMode.NoResize,
-                ShowInTaskbar         = false
-            };
-            dlg.ShowDialog();
-
-            if (!ok) return new List<int>();
-
-            var result = new List<int>();
-            for (int i = 0; i < n; i++)
-                if (checkboxen[i].IsChecked == true)
-                    result.Add(i);
-            return result;
         }
 
         // ── Zoom ──────────────────────────────────────────────────────────────
