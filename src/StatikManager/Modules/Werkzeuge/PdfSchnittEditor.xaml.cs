@@ -2523,8 +2523,20 @@ namespace StatikManager.Modules.Werkzeuge
         }
 
         /// <summary>
-        /// Liest den tatsächlich verfügbaren Schreibbereich des Word-Dokuments
-        /// aus den vorhandenen Seiteneinstellungen (Ränder bleiben unverändert).
+        /// Liest den tatsächlich verfügbaren Schreibbereich des Word-Dokuments.
+        ///
+        /// Berechnung:
+        ///   Breite = PageWidth − LeftMargin − RightMargin
+        ///   Höhe   = PageHeight − TopMargin − BottomMargin
+        ///
+        /// TopMargin enthält in Word bereits den Kopfzeilen-Bereich
+        /// (Kopfzeile liegt zwischen HeaderDistance und TopMargin).
+        /// BottomMargin enthält entsprechend den Fußzeilen-Bereich.
+        ///
+        /// Zusätzliche Prüfung: Falls Kopf-/Fußzeile mehr Raum beanspruchen
+        /// als ihr zugewiesen ist (= überhohe Inhalte), wird h entsprechend
+        /// weiter reduziert.
+        ///
         /// Rückgabe in Points (72 pt = 1 inch).
         /// Fallback: A4 mit 2,5 cm Rand ≈ 451 × 694 pt.
         /// </summary>
@@ -2535,6 +2547,52 @@ namespace StatikManager.Modules.Werkzeuge
                 var ps = doc.PageSetup;
                 double w = ps.PageWidth  - ps.LeftMargin - ps.RightMargin;
                 double h = ps.PageHeight - ps.TopMargin  - ps.BottomMargin;
+
+                // ── Kopf-/Fußzeile: falls Inhalt über zugewiesenen Rand hinausgeht ──
+                try
+                {
+                    var section = doc.Sections[1];
+
+                    // Kopfzeile: reservierter Bereich = TopMargin − HeaderDistance
+                    double headerReserviert = ps.TopMargin - ps.HeaderDistance;
+                    double headerHöhe       = SchätzeHfHöhe(
+                        section.Headers[Word.WdHeaderFooterIndex.wdHeaderFooterPrimary]);
+                    if (headerHöhe > headerReserviert + 2.0)
+                    {
+                        double überstand = headerHöhe - headerReserviert;
+                        h -= überstand;
+                        App.LogFehler("HoleSchreibbereich",
+                            $"Kopfzeile: ~{headerHöhe:F0} pt > reserviert {headerReserviert:F0} pt " +
+                            $"→ h um {überstand:F0} pt reduziert");
+                    }
+                    else
+                    {
+                        App.LogFehler("HoleSchreibbereich",
+                            $"Kopfzeile: ~{headerHöhe:F0} pt ≤ reserviert {headerReserviert:F0} pt " +
+                            $"(HeaderDist={ps.HeaderDistance:F0}, TopMargin={ps.TopMargin:F0}) → kein Abzug");
+                    }
+
+                    // Fußzeile: reservierter Bereich = BottomMargin − FooterDistance
+                    double footerReserviert = ps.BottomMargin - ps.FooterDistance;
+                    double footerHöhe       = SchätzeHfHöhe(
+                        section.Footers[Word.WdHeaderFooterIndex.wdHeaderFooterPrimary]);
+                    if (footerHöhe > footerReserviert + 2.0)
+                    {
+                        double überstand = footerHöhe - footerReserviert;
+                        h -= überstand;
+                        App.LogFehler("HoleSchreibbereich",
+                            $"Fußzeile: ~{footerHöhe:F0} pt > reserviert {footerReserviert:F0} pt " +
+                            $"→ h um {überstand:F0} pt reduziert");
+                    }
+                    else
+                    {
+                        App.LogFehler("HoleSchreibbereich",
+                            $"Fußzeile: ~{footerHöhe:F0} pt ≤ reserviert {footerReserviert:F0} pt " +
+                            $"(FooterDist={ps.FooterDistance:F0}, BottomMargin={ps.BottomMargin:F0}) → kein Abzug");
+                    }
+                }
+                catch (Exception ex) { LogException(ex, "HoleSchreibbereich/HF"); }
+
                 return (Math.Max(10.0, w), Math.Max(10.0, h));
             }
             catch (Exception ex)
@@ -2542,6 +2600,44 @@ namespace StatikManager.Modules.Werkzeuge
                 LogException(ex, "HoleSchreibbereich");
                 return (451.0, 694.0); // A4, 2,5 cm Rand
             }
+        }
+
+        /// <summary>
+        /// Schätzt die Gesamthöhe einer Kopf- oder Fußzeile in Points.
+        /// Summiert pro Absatz: SpaceBefore + Zeilenhöhe + SpaceAfter.
+        /// Gibt 0 zurück wenn keine Zeile existiert oder leer ist.
+        /// </summary>
+        private static double SchätzeHfHöhe(Word.HeaderFooter hf)
+        {
+            try
+            {
+                if (!hf.Exists) return 0;
+                double gesamt = 0;
+                foreach (Word.Paragraph p in hf.Range.Paragraphs)
+                {
+                    // Schriftgröße: ungültige/Mixed-Werte (z.B. 9999999) auf Fallback
+                    float fs = p.Range.Font.Size;
+                    if (fs < 1 || fs > 999) fs = 11f;
+
+                    // Zeilenhöhe: bei fester/Mindesthöhe direkt, sonst Schriftgröße × 1.2
+                    double lineH = fs * 1.2;
+                    try
+                    {
+                        if (p.LineSpacingRule == Word.WdLineSpacing.wdLineSpaceExactly ||
+                            p.LineSpacingRule == Word.WdLineSpacing.wdLineSpaceAtLeast)
+                        {
+                            if (p.LineSpacing > 0) lineH = p.LineSpacing;
+                        }
+                    }
+                    catch { }
+
+                    float sb = p.SpaceBefore; if (sb < 0) sb = 0;
+                    float sa = p.SpaceAfter;  if (sa < 0) sa = 0;
+                    gesamt += sb + lineH + sa;
+                }
+                return gesamt;
+            }
+            catch { return 0; }
         }
 
         // ── Vorlagen-Hilfsmethoden ────────────────────────────────────────────
