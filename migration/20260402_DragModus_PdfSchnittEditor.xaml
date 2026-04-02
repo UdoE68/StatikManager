@@ -67,25 +67,10 @@
                 <Button x:Name="BtnRandBearbeiten"
                         Content="&#x270F; Werte"
                         Height="26" Padding="6,0"
-                        Margin="0,0,8,0"
+                        Margin="0,0,6,0"
                         Style="{StaticResource PrimaryButton}"
                         ToolTip="Rand in mm numerisch eingeben"
                         Click="BtnRandBearbeiten_Click"/>
-
-                <!-- ── Anwendungsmodus ───────────────────────────────────── -->
-                <TextBlock Text="Anwenden auf:" VerticalAlignment="Center"
-                           Margin="0,0,4,0" FontSize="11"
-                           ToolTip="Auf welche Seiten werden Rand-&#196;nderungen angewendet (Drag, Dialog, Auto-Rand)"/>
-                <ComboBox x:Name="CmbCropModus"
-                          Height="24" MinWidth="130"
-                          Margin="0,0,8,0" FontSize="11"
-                          ToolTip="Auf welche Seiten werden Rand-&#196;nderungen angewendet"
-                          SelectionChanged="CmbCropModus_SelectionChanged">
-                    <ComboBoxItem Content="Nur diese Seite" IsSelected="True"/>
-                    <ComboBoxItem Content="Alle Seiten"/>
-                    <ComboBoxItem Content="Ausgew&#228;hlte Seiten &#8230;"/>
-                    <ComboBoxItem Content="Als Standard"/>
-                </ComboBox>
 
                 <!-- ── Sicherheitsabstand für Auto-Rand ──────────────────── -->
                 <TextBlock Text="Abstand:"

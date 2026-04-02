@@ -66,12 +66,6 @@ namespace StatikManager.Modules.Werkzeuge
         // Default-Crop: wird beim Laden neuer PDFs angewendet, sofern gesetzt; null = kein Standard
         private (double Links, double Rechts, double Oben, double Unten)? _defaultCrop;
 
-        // Einheitlicher Anwendungsmodus für Drag, Dialog und Auto-Rand
-        private enum CropAnwendungsModus { NurDiese = 0, Alle = 1, Ausgewählt = 2, AlsStandard = 3 }
-        private CropAnwendungsModus _cropModus         = CropAnwendungsModus.NurDiese;
-        private List<int>           _cropAuswahlSeiten = new List<int>();
-        private bool                _modusWahlLäuft;   // Re-Entranz-Schutz für CmbCropModus_SelectionChanged
-
         // Sicherheitsabstand für automatische Rand-Erkennung (Vorschau-Pixel, min 0, max 50)
         private double _cropSicherheitMm  = 2.0;   // Sicherheitsabstand fuer Auto-Rand (mm)
         private double _pxPerMm           = 4.0;   // Pixel pro mm (beim PDF-Laden berechnet)
@@ -750,11 +744,6 @@ namespace StatikManager.Modules.Werkzeuge
                 PdfCanvas.ReleaseMouseCapture();
                 PdfCanvas.MouseMove         -= CropCanvas_MouseMove;
                 PdfCanvas.MouseLeftButtonUp -= CropCanvas_MouseUp;
-
-                // Modus-Propagierung: finalen Wert der gezogenen Seite auf Zielseiten übertragen
-                int dragIdx = HoleSeitenIndexAusTag(_gezogeneCropSeite);
-                if (dragIdx >= 0) WendeCropModusAnNachDrag(dragIdx);
-
                 _gezogeneCropSeite = null;
                 e.Handled = true;
             }
@@ -762,30 +751,6 @@ namespace StatikManager.Modules.Werkzeuge
         }
 
         // ── Toolbar-Handler: Rand ─────────────────────────────────────────────
-
-        private void CmbCropModus_SelectionChanged(object sender, SelectionChangedEventArgs e)
-        {
-            if (_modusWahlLäuft) return;
-            int idx = CmbCropModus?.SelectedIndex ?? -1;
-            if (idx < 0) return;
-
-            if (idx == 2) // "Ausgewählte Seiten …"
-            {
-                if (_seitenBilder.Count == 0)
-                {
-                    _modusWahlLäuft = true; CmbCropModus!.SelectedIndex = (int)_cropModus; _modusWahlLäuft = false;
-                    return;
-                }
-                var sel = WähleSeiten(AktiveSeiteIndex(), Window.GetWindow(this));
-                if (sel.Count == 0)
-                {
-                    _modusWahlLäuft = true; CmbCropModus!.SelectedIndex = (int)_cropModus; _modusWahlLäuft = false;
-                    return;
-                }
-                _cropAuswahlSeiten = sel;
-            }
-            _cropModus = (CropAnwendungsModus)Math.Min(idx, 3);
-        }
 
         private void BtnRandAnzeigen_Checked(object sender, RoutedEventArgs e)
             => SafeExecute(() =>
@@ -849,41 +814,12 @@ namespace StatikManager.Modules.Werkzeuge
                 Dispatcher.BeginInvoke(new Action(() =>
                 {
                     if (token.IsCancellationRequested) { AppZustand.Instanz.ResetProgress(); return; }
-
-                    // Anwendung gemäß aktuellem Modus
-                    IEnumerable<int> zielIdxs;
-                    int aktIdx = AktiveSeiteIndex();
-                    switch (_cropModus)
-                    {
-                        case CropAnwendungsModus.AlsStandard:
-                            if (aktIdx >= 0 && aktIdx < n)
-                                _defaultCrop = (perL[aktIdx], perR[aktIdx], perO[aktIdx], perU[aktIdx]);
-                            TxtInfo.Text = "Auto-Rand als Standard gespeichert.";
-                            AppZustand.Instanz.ResetProgress();
-                            return;
-                        case CropAnwendungsModus.NurDiese:
-                            zielIdxs = aktIdx >= 0 ? new[] { aktIdx } : Enumerable.Empty<int>();
-                            break;
-                        case CropAnwendungsModus.Ausgewählt:
-                            zielIdxs = _cropAuswahlSeiten.Count > 0
-                                ? _cropAuswahlSeiten
-                                : (aktIdx >= 0 ? new[] { aktIdx } : Enumerable.Empty<int>());
-                            break;
-                        default: // Alle
-                            zielIdxs = Enumerable.Range(0, n);
-                            break;
-                    }
-                    foreach (int i in zielIdxs)
-                    {
-                        if (i < n) { _cropLinks[i] = perL[i]; _cropRechts[i] = perR[i];
-                                     _cropOben[i]  = perO[i]; _cropUnten[i]  = perU[i]; }
-                    }
+                    _cropLinks = perL; _cropRechts = perR; _cropOben = perO; _cropUnten = perU;
                     AktualisiereCropLinien();
                     if (BtnRandAnzeigen.IsChecked != true) BtnRandAnzeigen.IsChecked = true;
-                    int anz = zielIdxs.Count();
-                    TxtInfo.Text = anz == 1 && aktIdx >= 0
-                        ? $"Rand · L:{perL[aktIdx]*100:F1}%  O:{perO[aktIdx]*100:F1}%  R:{perR[aktIdx]*100:F1}%  U:{perU[aktIdx]*100:F1}%"
-                        : $"Auto-Rand für {anz} Seite(n) erkannt.";
+                    TxtInfo.Text = n == 1
+                        ? $"Rand · L:{perL[0]*100:F1}%  O:{perO[0]*100:F1}%  R:{perR[0]*100:F1}%  U:{perU[0]*100:F1}%"
+                        : $"Auto-Rand für {n} Seiten erkannt.";
                     AppZustand.Instanz.ResetProgress();
                 }));
             });
@@ -1092,8 +1028,6 @@ namespace StatikManager.Modules.Werkzeuge
                         AktualisiereCropLinien();
                         return;
                     }
-                    // Selektion für künftige Drag-Operationen übernehmen
-                    _cropAuswahlSeiten = zielSeiten;
                 }
                 else
                 {
@@ -1204,66 +1138,6 @@ namespace StatikManager.Modules.Werkzeuge
                 if (checkboxen[i].IsChecked == true)
                     result.Add(i);
             return result;
-        }
-
-        // ── Crop-Modus Propagierung ───────────────────────────────────────────
-
-        // Extrahiert Seiten-Index aus Tag-String, z.B. "CROP_LINKS_2" → 2.
-        private static int HoleSeitenIndexAusTag(string tag)
-        {
-            int lastUs = tag.LastIndexOf('_');
-            return lastUs >= 0 && int.TryParse(tag.Substring(lastUs + 1), out int idx) ? idx : -1;
-        }
-
-        // Kopiert die Crop-Werte der Quellseite auf alle Zielseiten.
-        // Skalierung: gleiche physische mm-Menge, auf die jeweilige Seitengröße der Zielseite umgerechnet.
-        private void KopiereCropAufSeiten(
-            int quellIdx, double qL, double qR, double qO, double qU, IEnumerable<int> ziele)
-        {
-            double qRefW = quellIdx < _seitenBilder.Count ? _seitenBilder[quellIdx].PixelWidth : 1;
-            double qRefH = quellIdx < _seitenHöhe.Length  ? _seitenHöhe[quellIdx]              : 1;
-            foreach (int idx in ziele)
-            {
-                if (idx == quellIdx) continue;
-                double iRefW = idx < _seitenBilder.Count ? _seitenBilder[idx].PixelWidth : qRefW;
-                double iRefH = idx < _seitenHöhe.Length  ? _seitenHöhe[idx]              : qRefH;
-                if (idx < _cropLinks.Length)  _cropLinks[idx]  = Math.Min(qL * qRefW / iRefW, 0.49);
-                if (idx < _cropRechts.Length) _cropRechts[idx] = Math.Min(qR * qRefW / iRefW, 0.49);
-                if (idx < _cropOben.Length)   _cropOben[idx]   = Math.Min(qO * qRefH / iRefH, 0.49);
-                if (idx < _cropUnten.Length)  _cropUnten[idx]  = Math.Min(qU * qRefH / iRefH, 0.49);
-            }
-            AktualisiereCropLinien();
-        }
-
-        // Wendet _cropModus nach Abschluss eines Drag-Vorgangs an.
-        // Drag-Preview hat bereits quellIdx aktualisiert; diese Methode verteilt den Wert.
-        private void WendeCropModusAnNachDrag(int quellIdx)
-        {
-            if (quellIdx < 0 || quellIdx >= _seitenBilder.Count) return;
-            double qL = quellIdx < _cropLinks.Length  ? _cropLinks[quellIdx]  : 0;
-            double qR = quellIdx < _cropRechts.Length ? _cropRechts[quellIdx] : 0;
-            double qO = quellIdx < _cropOben.Length   ? _cropOben[quellIdx]   : 0;
-            double qU = quellIdx < _cropUnten.Length  ? _cropUnten[quellIdx]  : 0;
-
-            switch (_cropModus)
-            {
-                case CropAnwendungsModus.NurDiese:
-                    // bereits durch MouseMove gesetzt – nichts weiter zu tun
-                    break;
-                case CropAnwendungsModus.AlsStandard:
-                    // Wert bleibt auf Quellseite sichtbar; zusätzlich als Standard speichern
-                    _defaultCrop = (qL, qR, qO, qU);
-                    TxtInfo.Text = "Standard-Rand gespeichert.";
-                    break;
-                case CropAnwendungsModus.Alle:
-                    KopiereCropAufSeiten(quellIdx, qL, qR, qO, qU,
-                        Enumerable.Range(0, _seitenBilder.Count));
-                    break;
-                case CropAnwendungsModus.Ausgewählt:
-                    if (_cropAuswahlSeiten.Count == 0) break;
-                    KopiereCropAufSeiten(quellIdx, qL, qR, qO, qU, _cropAuswahlSeiten);
-                    break;
-            }
         }
 
         // ── Zoom ──────────────────────────────────────────────────────────────
