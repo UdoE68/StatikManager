@@ -901,29 +901,36 @@ namespace StatikManager.Modules.Werkzeuge
             int idx = CmbCropModus?.SelectedIndex ?? -1;
             if (idx < 0) return;
 
-            if (idx == 2) // "Ausgewählte Seiten …"
-            {
-                if (_seitenBilder.Count == 0)
-                {
-                    _modusWahlLäuft = true; CmbCropModus!.SelectedIndex = (int)_cropModus; _modusWahlLäuft = false;
-                    return;
-                }
-                var sel = WähleSeiten(AktiveSeiteIndex(), Window.GetWindow(this));
-                if (sel.Count == 0)
-                {
-                    _modusWahlLäuft = true; CmbCropModus!.SelectedIndex = (int)_cropModus; _modusWahlLäuft = false;
-                    return;
-                }
-                _cropAuswahlSeiten = sel;
-            }
             _cropModus = (CropAnwendungsModus)Math.Min(idx, 3);
 
-            // ToggleButton aktivierbar nur im Modus "Ausgewählte Seiten"
+            // Im Modus "Ausgewählte Seiten": kein automatischer Dialog.
+            // Vorauswahl: aktive Seite, falls noch nichts ausgewählt ist.
+            if (_cropModus == CropAnwendungsModus.Ausgewählt &&
+                _cropAuswahlSeiten.Count == 0 && _seitenBilder.Count > 0)
+            {
+                int aktSeite = AktiveSeiteIndex();
+                if (aktSeite >= 0) _cropAuswahlSeiten.Add(aktSeite);
+            }
+
+            // ToggleButton + Dialog-Button aktivierbar nur im Modus "Ausgewählte Seiten"
             bool istAuswahlModus = _cropModus == CropAnwendungsModus.Ausgewählt;
-            BtnAuswahlmodus.IsEnabled = istAuswahlModus;
+            BtnAuswahlmodus.IsEnabled    = istAuswahlModus;
+            BtnAuswahlDialog.IsEnabled   = istAuswahlModus;
             if (!istAuswahlModus) BtnAuswahlmodus.IsChecked = false;
 
             AktualisiereAuswahlAnzeige();
+        }
+
+        private void BtnAuswahlDialog_Click(object sender, RoutedEventArgs e)
+        {
+            SafeExecute(() =>
+            {
+                if (_seitenBilder.Count == 0) return;
+                var sel = WähleSeiten(AktiveSeiteIndex(), Window.GetWindow(this));
+                if (sel.Count == 0) return;
+                _cropAuswahlSeiten = sel;
+                AktualisiereAuswahlAnzeige();
+            }, "BtnAuswahlDialog_Click");
         }
 
         private void BtnRandAnzeigen_Checked(object sender, RoutedEventArgs e)

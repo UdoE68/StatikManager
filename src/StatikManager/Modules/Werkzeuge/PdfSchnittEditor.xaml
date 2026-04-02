@@ -89,9 +89,16 @@
                 <ToggleButton x:Name="BtnAuswahlmodus"
                               Content="&#x2714; Seiten w&#228;hlen"
                               Height="26" Padding="6,0"
-                              Margin="0,0,8,0"
+                              Margin="0,0,2,0"
                               IsEnabled="False"
                               ToolTip="Klicke direkt auf Seiten im Viewer, um sie auszuw&#228;hlen / abzuw&#228;hlen (alternativ: Shift + Klick)"/>
+                <Button x:Name="BtnAuswahlDialog"
+                        Content="&#x2026;"
+                        Width="26" Height="26"
+                        Margin="0,0,8,0"
+                        IsEnabled="False"
+                        ToolTip="Auswahl-Dialog &#246;ffnen (optional, zur Feinkorrektur)"
+                        Click="BtnAuswahlDialog_Click"/>
 
                 <!-- ── Sicherheitsabstand für Auto-Rand ──────────────────── -->
                 <TextBlock Text="Abstand:"
