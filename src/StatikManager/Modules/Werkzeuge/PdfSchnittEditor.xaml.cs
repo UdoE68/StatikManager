@@ -534,25 +534,30 @@ namespace StatikManager.Modules.Werkzeuge
                 {
                     _cropAuswahlSeiten.Add(seitenIdx);
                     // Crop-Werte der aktiven Seite sofort auf die neu hinzugefügte Seite übertragen
-                    int quellIdx = AktiveSeiteIndex();
-                    if (quellIdx >= 0 && quellIdx != seitenIdx
-                        && quellIdx < _seitenBilder.Count && seitenIdx < _seitenBilder.Count)
+                    try
                     {
-                        double qRefW = _seitenBilder[quellIdx].PixelWidth;
-                        double qRefH = quellIdx < _seitenHöhe.Length ? _seitenHöhe[quellIdx] : 1;
-                        double iRefW = _seitenBilder[seitenIdx].PixelWidth;
-                        double iRefH = seitenIdx < _seitenHöhe.Length ? _seitenHöhe[seitenIdx] : 1;
-                        double qL = quellIdx < _cropLinks.Length  ? _cropLinks[quellIdx]  : 0;
-                        double qR = quellIdx < _cropRechts.Length ? _cropRechts[quellIdx] : 0;
-                        double qO = quellIdx < _cropOben.Length   ? _cropOben[quellIdx]   : 0;
-                        double qU = quellIdx < _cropUnten.Length  ? _cropUnten[quellIdx]  : 0;
-                        if (seitenIdx < _cropLinks.Length)  _cropLinks[seitenIdx]  = Math.Min(qL * qRefW / iRefW, 0.49);
-                        if (seitenIdx < _cropRechts.Length) _cropRechts[seitenIdx] = Math.Min(qR * qRefW / iRefW, 0.49);
-                        if (seitenIdx < _cropOben.Length)   _cropOben[seitenIdx]   = Math.Min(qO * qRefH / iRefH, 0.49);
-                        if (seitenIdx < _cropUnten.Length)  _cropUnten[seitenIdx]  = Math.Min(qU * qRefH / iRefH, 0.49);
-                        AktualisiereCropLinien();
-                        if (BtnRandAnzeigen.IsChecked != true) BtnRandAnzeigen.IsChecked = true;
+                        int quellIdx = AktiveSeiteIndex();
+                        if (quellIdx >= 0 && quellIdx != seitenIdx
+                            && quellIdx < _seitenBilder.Count && seitenIdx < _seitenBilder.Count)
+                        {
+                            double qRefW = _seitenBilder[quellIdx].PixelWidth;
+                            double qRefH = quellIdx < _seitenHöhe.Length ? _seitenHöhe[quellIdx] : 1;
+                            double iRefW = _seitenBilder[seitenIdx].PixelWidth;
+                            double iRefH = seitenIdx < _seitenHöhe.Length ? _seitenHöhe[seitenIdx] : 1;
+                            double qL = quellIdx < _cropLinks.Length  ? _cropLinks[quellIdx]  : 0;
+                            double qR = quellIdx < _cropRechts.Length ? _cropRechts[quellIdx] : 0;
+                            double qO = quellIdx < _cropOben.Length   ? _cropOben[quellIdx]   : 0;
+                            double qU = quellIdx < _cropUnten.Length  ? _cropUnten[quellIdx]  : 0;
+                            if (seitenIdx < _cropLinks.Length)  _cropLinks[seitenIdx]  = Math.Min(qL * qRefW / iRefW, 0.49);
+                            if (seitenIdx < _cropRechts.Length) _cropRechts[seitenIdx] = Math.Min(qR * qRefW / iRefW, 0.49);
+                            if (seitenIdx < _cropOben.Length)   _cropOben[seitenIdx]   = Math.Min(qO * qRefH / iRefH, 0.49);
+                            if (seitenIdx < _cropUnten.Length)  _cropUnten[seitenIdx]  = Math.Min(qU * qRefH / iRefH, 0.49);
+                        }
                     }
+                    catch (Exception ex) { LogException(ex, "Seite hinzufügen/CropKopie"); }
+                    // UI immer aktualisieren – unabhängig davon ob und wie Werte kopiert wurden
+                    AktualisiereCropLinien();
+                    if (BtnRandAnzeigen.IsChecked != true) BtnRandAnzeigen.IsChecked = true;
                 }
                 AktualisiereAuswahlAnzeige();
                 ev.Handled = true;
