@@ -211,8 +211,9 @@ namespace StatikManager.Modules.Werkzeuge
             _seitenYStart = Array.Empty<double>();
             _seitenHöhe   = Array.Empty<double>();
             _cropLinks = _cropRechts = _cropOben = _cropUnten = Array.Empty<double>();
-            TxtInfo.Text        = "Lade PDF …";
-            BtnExport.IsEnabled = false;
+            TxtInfo.Text              = "Lade PDF …";
+            BtnExport.IsEnabled       = false;
+            BtnAuswahlmodus.IsEnabled = false;
 
             LogException(new Exception($"[DEBUG] Starte PDF-Laden: {IO.Path.GetFileName(pfad)}"), "LadePdf");
 
@@ -315,7 +316,8 @@ namespace StatikManager.Modules.Werkzeuge
                             var (wPts, _) = HolePdfSeitenGrösse(_pdfPfad);
                             _pxPerMm = wPts > 0 ? bilder![0].PixelWidth / (wPts / 72.0 * 25.4) : 4.0;
                         }
-                        BtnExport.IsEnabled = true;
+                        BtnExport.IsEnabled      = true;
+                        BtnAuswahlmodus.IsEnabled = true;
                         TxtInfo.Text = $"{bilder!.Count} Seite(n) geladen";
 
                         // Zoom und Scroll aus Sitzung anwenden
@@ -1152,11 +1154,6 @@ namespace StatikManager.Modules.Werkzeuge
             if (idx < 0) return;
 
             _cropModus = (CropAnwendungsModus)Math.Min(idx, 3);
-
-            // ToggleButton aktivierbar nur im Modus "Ausgewählte Seiten"
-            bool istAuswahlModus = _cropModus == CropAnwendungsModus.Ausgewählt;
-            BtnAuswahlmodus.IsEnabled = istAuswahlModus;
-            if (!istAuswahlModus) BtnAuswahlmodus.IsChecked = false;
 
             AktualisiereAuswahlAnzeige();
         }
