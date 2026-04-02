@@ -752,9 +752,26 @@ namespace StatikManager.Modules.Werkzeuge
 
                 // Toggle in _tempSeiten — permanente Gruppenstruktur bleibt unberührt
                 if (_tempSeiten.Contains(seitenIdx))
+                {
                     _tempSeiten.Remove(seitenIdx);
+                }
                 else
+                {
+                    // Warnung wenn Seite aktuell einer anderen Gruppe zugeordnet ist
+                    var alteGruppe = GruppeVonSeite(seitenIdx);
+                    var aktGruppe  = AktiveGruppe();
+                    if (alteGruppe != null && aktGruppe != null && alteGruppe.Id != aktGruppe.Id)
+                    {
+                        var antwort = MessageBox.Show(
+                            $"Seite {seitenIdx + 1} gehört bereits zu \"{alteGruppe.Name}\".\n\n" +
+                            $"Soll sie aus dieser Gruppe entfernt und der aktuellen Gruppe \"{aktGruppe.Name}\" zugeordnet werden?",
+                            "Gruppe wechseln",
+                            MessageBoxButton.YesNo,
+                            MessageBoxImage.Question);
+                        if (antwort != MessageBoxResult.Yes) { ev.Handled = true; return; }
+                    }
                     _tempSeiten.Add(seitenIdx);
+                }
                 AktualisiereTempInfo();
                 AktualisiereAuswahlAnzeige();
                 ev.Handled = true;
