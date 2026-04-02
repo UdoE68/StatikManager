@@ -454,6 +454,7 @@ namespace StatikManager.Modules.Werkzeuge
         // Alle anderen Modi: einheitlich Opacity 1.0, grauer Rahmen.
         private void AktualisiereAuswahlAnzeige()
         {
+            if (PdfCanvas == null) return;
             bool auswahlModus = _cropModus == CropAnwendungsModus.Ausgewählt;
             foreach (UIElement child in PdfCanvas.Children)
             {
@@ -898,6 +899,9 @@ namespace StatikManager.Modules.Werkzeuge
         private void CmbCropModus_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
             if (_modusWahlLäuft) return;
+            // Null-Guard: Handler kann während InitializeComponent() feuern,
+            // bevor BtnAuswahlmodus/BtnAuswahlDialog via Connect() gesetzt wurden.
+            if (BtnAuswahlmodus == null || BtnAuswahlDialog == null) return;
             int idx = CmbCropModus?.SelectedIndex ?? -1;
             if (idx < 0) return;
 
