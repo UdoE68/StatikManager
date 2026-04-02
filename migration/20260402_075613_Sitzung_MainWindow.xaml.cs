@@ -65,14 +65,6 @@ namespace StatikManager
 
             // ── Module in die Shell integrieren ─────────────────────────────
             IntegriereModule();
-
-            // ── Sitzung nach vollständiger UI-Initialisierung laden ──────────
-            Loaded += (_, _) =>
-            {
-                var sitzung = Core.SitzungsZustand.Laden();
-                if (HauptInhalt.Content is Modules.Dokumente.DokumentePanel panel)
-                    panel.SitzungWiederherstellen(sitzung);
-            };
         }
 
         private void IntegriereModule()
@@ -185,10 +177,6 @@ namespace StatikManager
 
         protected override void OnClosed(System.EventArgs e)
         {
-            // Sitzung speichern bevor Ressourcen freigegeben werden
-            if (HauptInhalt.Content is Modules.Dokumente.DokumentePanel panel)
-                Core.SitzungsZustand.Speichern(panel.SitzungSpeichern());
-
             base.OnClosed(e);
             _modulManager.AllesBereinigen();
         }

@@ -90,9 +90,6 @@ namespace StatikManager.Modules.Werkzeuge
         // Generationszähler: verhindert, dass veraltete Dispatcher-Callbacks UI überschreiben
         private volatile int _ladeGeneration;
 
-        // Sitzungszustand der nach dem nächsten PDF-Laden angewendet wird (null = kein Restore)
-        private Core.SitzungsZustand? _pendingSitzung;
-
         // ── Fehler-Hilfsmethoden ──────────────────────────────────────────────
 
         private static void LogException(Exception ex, string kontext)
@@ -105,55 +102,6 @@ namespace StatikManager.Modules.Werkzeuge
         }
 
         // ── Öffentliche API ───────────────────────────────────────────────────
-
-        /// <summary>
-        /// Bereitet die Wiederherstellung eines Sitzungszustands vor.
-        /// Muss VOR LadePdf() aufgerufen werden; Crop/Scroll werden nach dem Laden angewendet.
-        /// </summary>
-        public void SitzungVorbereiten(Core.SitzungsZustand sitzung)
-        {
-            _pendingSitzung    = sitzung;
-            _layoutHorizontal  = sitzung.LayoutHorizontal;
-            _cropModus         = (CropAnwendungsModus)Math.Max(0, Math.Min(3, sitzung.CropModus));
-            _cropAuswahlSeiten = sitzung.CropAuswahlSeiten?.ToList() ?? new List<int>();
-            _defaultCrop       = sitzung.DefaultCropGesetzt
-                ? (sitzung.DefaultCropLinks, sitzung.DefaultCropRechts,
-                   sitzung.DefaultCropOben,  sitzung.DefaultCropUnten)
-                : (null as (double, double, double, double)?);
-            // ComboBox synchronisieren
-            _modusWahlLäuft = true;
-            CmbCropModus.SelectedIndex = (int)_cropModus;
-            _modusWahlLäuft = false;
-        }
-
-        /// <summary>
-        /// Liest den aktuellen Zustand des Editors für die Sitzungsspeicherung.
-        /// </summary>
-        public Core.SitzungsZustand SitzungSpeichern()
-        {
-            var s = new Core.SitzungsZustand
-            {
-                ZoomFaktor         = _zoomFaktor,
-                LayoutHorizontal   = _layoutHorizontal,
-                CropModus          = (int)_cropModus,
-                CropAuswahlSeiten  = _cropAuswahlSeiten.ToArray(),
-                DefaultCropGesetzt = _defaultCrop.HasValue,
-                CropLinks          = (double[])_cropLinks.Clone(),
-                CropRechts         = (double[])_cropRechts.Clone(),
-                CropOben           = (double[])_cropOben.Clone(),
-                CropUnten          = (double[])_cropUnten.Clone(),
-                ScrollH            = ScrollView.HorizontalOffset,
-                ScrollV            = ScrollView.VerticalOffset,
-            };
-            if (_defaultCrop.HasValue)
-            {
-                s.DefaultCropLinks  = _defaultCrop.Value.Links;
-                s.DefaultCropRechts = _defaultCrop.Value.Rechts;
-                s.DefaultCropOben   = _defaultCrop.Value.Oben;
-                s.DefaultCropUnten  = _defaultCrop.Value.Unten;
-            }
-            return s;
-        }
 
         public void LadePdf(string pfad)
         {
@@ -230,21 +178,6 @@ namespace StatikManager.Modules.Werkzeuge
                         _seitenYStart = yStart!;
                         _seitenHöhe   = höhe!;
                         InitCropArrays(_seitenBilder.Count);
-
-                        // Sitzungs-Crop wiederherstellen (überschreibt Default-Crop wenn Länge passt)
-                        var ps = _pendingSitzung;
-                        _pendingSitzung = null;
-                        if (ps?.CropLinks?.Length == _seitenBilder.Count)
-                        {
-                            _cropLinks  = (double[])ps.CropLinks.Clone();
-                            _cropRechts = (double[])ps.CropRechts.Clone();
-                            _cropOben   = (double[])ps.CropOben.Clone();
-                            _cropUnten  = (double[])ps.CropUnten.Clone();
-                        }
-                        double pendingZoom    = ps != null ? Math.Max(ZoomMin, Math.Min(ZoomMax, ps.ZoomFaktor)) : _zoomFaktor;
-                        double pendingScrollH = ps?.ScrollH ?? 0;
-                        double pendingScrollV = ps?.ScrollV ?? 0;
-
                         ZeicheCanvas();
                         // Pixel-pro-mm fuer Sicherheitsabstand-Konvertierung
                         if (_pdfPfad != null && bilder!.Count > 0)
@@ -254,22 +187,6 @@ namespace StatikManager.Modules.Werkzeuge
                         }
                         BtnExport.IsEnabled = true;
                         TxtInfo.Text = $"{bilder!.Count} Seite(n) geladen";
-
-                        // Zoom und Scroll aus Sitzung anwenden
-                        if (ps != null)
-                        {
-                            WendeZoomAnSofort(pendingZoom);
-                            _zielZoom = pendingZoom;
-                            if (pendingScrollH > 0 || pendingScrollV > 0)
-                            {
-                                double sH = pendingScrollH, sV = pendingScrollV;
-                                Dispatcher.BeginInvoke(new Action(() =>
-                                {
-                                    ScrollView.ScrollToHorizontalOffset(sH);
-                                    ScrollView.ScrollToVerticalOffset(sV);
-                                }), System.Windows.Threading.DispatcherPriority.Loaded);
-                            }
-                        }
                     }
                     catch (Exception ex) { LogException(ex, "LadePdf/UI"); }
                     finally { AppZustand.Instanz.SetzeLaden(false); }

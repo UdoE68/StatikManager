@@ -107,52 +107,6 @@ namespace StatikManager.Modules.Dokumente
 
         // ── Öffentliche Aktionen ──────────────────────────────────────────────
 
-        /// <summary>
-        /// Speichert den aktuellen Sitzungszustand (Projekt, Datei, Editor-Zustand).
-        /// </summary>
-        public Core.SitzungsZustand SitzungSpeichern()
-        {
-            // Editor-Zustand wenn PDF-Vorschau aktiv
-            var s = PdfEditor.Visibility == System.Windows.Visibility.Visible
-                ? PdfEditor.SitzungSpeichern()
-                : new Core.SitzungsZustand();
-            s.ProjektPfad = _projektPfad;
-            s.AktiveDatei = _aktiverDateipfad;
-            return s;
-        }
-
-        /// <summary>
-        /// Stellt einen gespeicherten Sitzungszustand wieder her (ohne Dialog).
-        /// Projekt wird direkt geladen, zuletzt aktive Datei wird neu geöffnet.
-        /// </summary>
-        public void SitzungWiederherstellen(Core.SitzungsZustand sitzung)
-        {
-            if (sitzung == null) return;
-
-            // Projekt laden (ohne Dialog, Existenz prüfen)
-            if (!string.IsNullOrEmpty(sitzung.ProjektPfad) &&
-                System.IO.Directory.Exists(sitzung.ProjektPfad))
-            {
-                _projektPfad = sitzung.ProjektPfad;
-                var hash  = ((uint)sitzung.ProjektPfad!.ToLowerInvariant().GetHashCode()).ToString("X8");
-                _cacheDir = System.IO.Path.Combine(Infrastructure.PdfCache.CacheBasis, hash);
-                System.IO.Directory.CreateDirectory(_cacheDir);
-                AppZustand.Instanz.SetzeProjekt(_projektPfad);
-                AktualisiereDokumentListe();
-                // Keine Vorkonvertierung beim Session-Restore (würde Startzeit verlängern)
-            }
-
-            // Editor-Zustand vorbereiten BEVOR die Datei geladen wird
-            PdfEditor.SitzungVorbereiten(sitzung);
-
-            // Aktive Datei laden (Existenz prüfen)
-            if (!string.IsNullOrEmpty(sitzung.AktiveDatei) &&
-                System.IO.File.Exists(sitzung.AktiveDatei))
-            {
-                LadeVorschau(sitzung.AktiveDatei!);
-            }
-        }
-
         public void ProjektLaden()
         {
             var pfad = OrdnerDialog.Zeigen(
