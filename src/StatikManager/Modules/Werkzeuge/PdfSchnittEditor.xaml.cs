@@ -757,10 +757,13 @@ namespace StatikManager.Modules.Werkzeuge
                 }
                 else
                 {
-                    // Warnung wenn Seite aktuell einer anderen Gruppe zugeordnet ist
+                    // Warnung nur wenn Seite einer echten (nicht-0) anderen Gruppe zugeordnet ist.
+                    // Gruppe 0 ist der unzugewiesene Standard-Fallback → keine Bestätigung nötig.
                     var alteGruppe = GruppeVonSeite(seitenIdx);
                     var aktGruppe  = AktiveGruppe();
-                    if (alteGruppe != null && aktGruppe != null && alteGruppe.Id != aktGruppe.Id)
+                    if (alteGruppe != null && aktGruppe != null
+                        && alteGruppe.Id != aktGruppe.Id
+                        && alteGruppe.Id != 0)
                     {
                         var antwort = MessageBox.Show(
                             $"Seite {seitenIdx + 1} gehört bereits zu \"{alteGruppe.Name}\".\n\n" +
