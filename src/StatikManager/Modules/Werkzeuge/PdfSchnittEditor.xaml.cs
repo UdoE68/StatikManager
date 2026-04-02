@@ -1227,20 +1227,13 @@ namespace StatikManager.Modules.Werkzeuge
                 }
                 else if (rbAuswahl.IsChecked == true)
                 {
-                    zielSeiten = WähleSeiten(aktSeite, Window.GetWindow(this));
-                    if (zielSeiten.Count == 0)
-                    {
-                        // Abgebrochen oder keine Seite gewählt – Live-Preview rückgängig machen
-                        if (aktSeite < _cropOben.Length)   _cropOben[aktSeite]   = origOben;
-                        if (aktSeite < _cropUnten.Length)  _cropUnten[aktSeite]  = origUnten;
-                        if (aktSeite < _cropLinks.Length)  _cropLinks[aktSeite]  = origLinks;
-                        if (aktSeite < _cropRechts.Length) _cropRechts[aktSeite] = origRechts;
-                        AktualisiereCropLinien();
-                        return;
-                    }
-                    // Selektion für künftige Drag-Operationen übernehmen
-                    _cropAuswahlSeiten = zielSeiten;
-                    AktualisiereAuswahlAnzeige();
+                    // Kein automatischer Dialog – aktuelle Canvas-Auswahl verwenden.
+                    // Fallback: aktive Seite, wenn noch nichts ausgewählt ist.
+                    if (_cropAuswahlSeiten.Count == 0 && aktSeite >= 0)
+                        _cropAuswahlSeiten.Add(aktSeite);
+                    zielSeiten = _cropAuswahlSeiten.Count > 0
+                        ? new List<int>(_cropAuswahlSeiten)
+                        : new List<int> { aktSeite };
                 }
                 else
                 {
