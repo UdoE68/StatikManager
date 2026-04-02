@@ -2254,12 +2254,18 @@ namespace StatikManager.Modules.Werkzeuge
                         textmarkeGefunden = wordDoc.Bookmarks.Exists("BILD_BEREICH");
                         einfügePunkt = HoleEinfügePunkt(wordDoc);
 
-                        // Status-Anzeige: Textmarke gefunden oder Fallback aktiv
-                        string bmInfo = textmarkeGefunden
-                            ? "Textmarke BILD_BEREICH gefunden"
-                            : "Keine Textmarke – automatischer Seitenbereich verwendet";
-                        Dispatcher.BeginInvoke(new Action(() => TxtInfo.Text = bmInfo));
-                        App.LogFehler("Export/Textmarke", bmInfo);
+                        // ── DIAGNOSE (testweise): Textmarke-Status ──────────────
+                        Dispatcher.Invoke(new Action(() =>
+                        {
+                            if (textmarkeGefunden)
+                                MessageBox.Show(
+                                    "Textmarke BILD_BEREICH gefunden.",
+                                    "DIAGNOSE – Textmarke", MessageBoxButton.OK, MessageBoxImage.Information);
+                            else
+                                MessageBox.Show(
+                                    "Textmarke BILD_BEREICH NICHT gefunden.\n\nBitte in der Vorlage anlegen.",
+                                    "DIAGNOSE – Textmarke fehlt", MessageBoxButton.OK, MessageBoxImage.Warning);
+                        }));
                     }
                     else
                     {
@@ -2663,8 +2669,7 @@ namespace StatikManager.Modules.Werkzeuge
 
         /// <summary>
         /// Sucht die Textmarke "BILD_BEREICH" und gibt deren Range zurück (Inhalt wird gelöscht).
-        /// Fallback (keine Textmarke): Anfang des Dokuments = oben links im Satzspiegel.
-        /// Der Export bricht bei fehlender Textmarke NICHT ab.
+        /// Fallback: Ende des Dokuments.
         /// </summary>
         private static Word.Range HoleEinfügePunkt(Word.Document doc)
         {
@@ -2678,14 +2683,12 @@ namespace StatikManager.Modules.Werkzeuge
                     App.LogFehler("Export/Textmarke", "Textmarke BILD_BEREICH gefunden und geleert");
                     return r;
                 }
-                App.LogFehler("Export/Textmarke",
-                    "Textmarke BILD_BEREICH nicht gefunden – Fallback: Anfang des Satzspiegels");
+                App.LogFehler("Export/Textmarke", "Textmarke BILD_BEREICH nicht gefunden – Fallback: Dokumentende");
             }
             catch (Exception ex) { LogException(ex, "HoleEinfügePunkt"); }
 
-            // Kein Bookmark → oben links im Satzspiegel (Anfang des Body-Inhalts)
             var fallback = doc.Content;
-            fallback.Collapse(Word.WdCollapseDirection.wdCollapseStart);
+            fallback.Collapse(Word.WdCollapseDirection.wdCollapseEnd);
             return fallback;
         }
 
