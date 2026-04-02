@@ -545,9 +545,10 @@ namespace StatikManager.Modules.Werkzeuge
             _bearbeitungsModus  = true;
             BorderBearbeitungsModus.Visibility = Visibility.Visible;
             // Gruppe und Crop-Modus während Bearbeitung sperren
+            // (Löschen bleibt verfügbar: Gruppe 0 nicht löschbar, alle anderen schon)
             CmbGruppe.IsEnabled        = false;
             BtnGruppeNeu.IsEnabled     = false;
-            BtnGruppeLöschen.IsEnabled = false;
+            BtnGruppeLöschen.IsEnabled = AktiveGruppe()?.Id != 0;
             CmbCropModus.IsEnabled     = false;
             if (TxtSeitenBereich != null) TxtSeitenBereich.Clear();
             AktualisiereTempInfo();
