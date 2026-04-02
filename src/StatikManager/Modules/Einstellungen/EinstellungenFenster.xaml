@@ -1,0 +1,171 @@
+<Window x:Class="StatikManager.Modules.EinstellungsDialog.EinstellungenFenster"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Einstellungen"
+        Width="720" Height="480"
+        MinWidth="580" MinHeight="380"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="CanResize"
+        ShowInTaskbar="False">
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- ── Navigationsleiste + Inhaltsbereich ──────────────────────────── -->
+        <Grid Grid.Row="0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="155"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- Linke Navigation -->
+            <Border Grid.Column="0"
+                    Background="#F0F0F0"
+                    BorderBrush="#CCCCCC"
+                    BorderThickness="0,0,1,0">
+                <ListBox x:Name="LstNav"
+                         BorderThickness="0"
+                         Background="Transparent"
+                         SelectionMode="Single"
+                         Margin="0,6,0,0"
+                         SelectionChanged="LstNav_SelectionChanged">
+                    <ListBoxItem Content="Allgemein"     Tag="Allgemein"     Padding="12,7"/>
+                    <ListBoxItem Content="Word-Vorlagen" Tag="WordVorlagen"  Padding="12,7"/>
+                    <ListBoxItem Content="Export"        Tag="Export"        Padding="12,7"/>
+                    <ListBoxItem Content="Anzeige"       Tag="Anzeige"       Padding="12,7"/>
+                </ListBox>
+            </Border>
+
+            <!-- Rechter Inhaltsbereich -->
+            <Grid Grid.Column="1" Margin="14,10,14,10">
+
+                <!-- Platzhalter für nicht implementierte Bereiche -->
+                <TextBlock x:Name="PanelPlatzhalter"
+                           Text="Dieser Bereich ist noch nicht verfügbar."
+                           VerticalAlignment="Center"
+                           HorizontalAlignment="Center"
+                           Foreground="Gray"
+                           FontStyle="Italic"
+                           Visibility="Collapsed"/>
+
+                <!-- ── Bereich: Word-Vorlagen ─────────────────────────────── -->
+                <Grid x:Name="PanelWordVorlagen" Visibility="Collapsed">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <!-- Vorlagen-Tabelle -->
+                    <DataGrid x:Name="DgVorlagen"
+                              Grid.Row="0"
+                              AutoGenerateColumns="False"
+                              CanUserAddRows="False"
+                              CanUserDeleteRows="False"
+                              CanUserReorderColumns="False"
+                              CanUserResizeRows="False"
+                              HeadersVisibility="Column"
+                              SelectionMode="Single"
+                              SelectionUnit="FullRow"
+                              RowHeaderWidth="0"
+                              GridLinesVisibility="Horizontal"
+                              BorderThickness="1"
+                              BorderBrush="#CCCCCC">
+
+                        <DataGrid.Columns>
+
+                            <!-- Spalte 1: Name (direkt editierbar) -->
+                            <DataGridTextColumn Header="Name"
+                                               Width="160"
+                                               Binding="{Binding Name, UpdateSourceTrigger=PropertyChanged}"/>
+
+                            <!-- Spalte 2: Pfad + Dateiauswahl-Button -->
+                            <DataGridTemplateColumn Header="Vorlage (.dotx / .docx)" Width="*">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <DockPanel Margin="1,1,1,1">
+                                            <Button DockPanel.Dock="Right"
+                                                    Content="…"
+                                                    Width="26"
+                                                    Margin="2,0,0,0"
+                                                    VerticalAlignment="Stretch"
+                                                    ToolTip="Vorlagendatei auswählen"
+                                                    Click="BtnDateiWählen_Click"/>
+                                            <TextBox Text="{Binding Pfad, UpdateSourceTrigger=LostFocus}"
+                                                     VerticalContentAlignment="Center"
+                                                     Padding="3,0">
+                                                <TextBox.Style>
+                                                    <Style TargetType="TextBox">
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding PfadGültig}" Value="False">
+                                                                <Setter Property="BorderBrush" Value="#CC0000"/>
+                                                                <Setter Property="Background"  Value="#FFF0F0"/>
+                                                                <Setter Property="ToolTip"     Value="Datei nicht gefunden"/>
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBox.Style>
+                                            </TextBox>
+                                        </DockPanel>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+
+                            <!-- Spalte 3: Standard-Checkbox (exklusiv – nur eine aktiv) -->
+                            <DataGridTemplateColumn Header="Standard" Width="72">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <CheckBox IsChecked="{Binding Standard, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                  HorizontalAlignment="Center"
+                                                  VerticalAlignment="Center"
+                                                  Checked="ChkStandard_Checked"/>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+
+                        </DataGrid.Columns>
+                    </DataGrid>
+
+                    <!-- Aktionsbuttons -->
+                    <StackPanel Grid.Row="1"
+                                Orientation="Horizontal"
+                                Margin="0,6,0,0">
+                        <Button Content="+ Vorlage hinzufügen"
+                                Padding="8,4"
+                                Margin="0,0,6,0"
+                                Click="BtnVorlageHinzufügen_Click"/>
+                        <Button x:Name="BtnVorageLöschen"
+                                Content="– Vorlage löschen"
+                                Padding="8,4"
+                                IsEnabled="False"
+                                Click="BtnVorageLöschen_Click"/>
+                    </StackPanel>
+
+                </Grid>
+
+            </Grid>
+        </Grid>
+
+        <!-- ── OK / Abbrechen ──────────────────────────────────────────────── -->
+        <Border Grid.Row="1"
+                BorderBrush="#CCCCCC"
+                BorderThickness="0,1,0,0"
+                Padding="8,7">
+            <StackPanel Orientation="Horizontal"
+                        HorizontalAlignment="Right">
+                <Button Content="OK"
+                        Width="80"
+                        Margin="0,0,6,0"
+                        IsDefault="True"
+                        Click="BtnOk_Click"/>
+                <Button Content="Abbrechen"
+                        Width="80"
+                        IsCancel="True"
+                        Click="BtnAbbrechen_Click"/>
+            </StackPanel>
+        </Border>
+
+    </Grid>
+</Window>

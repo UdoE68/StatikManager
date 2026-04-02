@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.IO;
 using System.Xml.Serialization;
 
@@ -27,11 +26,6 @@ namespace StatikManager.Core
 
         /// <summary>Anzeigemodus der Dokumentenliste (Baumstruktur oder flache Liste).</summary>
         public AnsichtModus DokumentAnsicht { get; set; } = AnsichtModus.Baum;
-
-        /// <summary>Liste der konfigurierten Word-Vorlagen für den Export.</summary>
-        [XmlArray("WordVorlagen")]
-        [XmlArrayItem("Vorlage")]
-        public List<WordVorlage> WordVorlagen { get; set; } = new List<WordVorlage>();
 
         // ── Persistenz ────────────────────────────────────────────────────────
 

@@ -154,12 +154,6 @@ namespace StatikManager
                 panel.ProjektLaden();
         }
 
-        private void MenüEinstellungen_Click(object sender, RoutedEventArgs e)
-        {
-            var dlg = new Modules.EinstellungsDialog.EinstellungenFenster { Owner = this };
-            dlg.ShowDialog();
-        }
-
         private void MenüStandardpfad_Click(object sender, RoutedEventArgs e)
         {
             var pfad = OrdnerDialog.Zeigen(

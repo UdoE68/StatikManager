@@ -24,10 +24,6 @@
                               Click="MenüStandardpfad_Click"
                               ToolTip="Standardordner für den Projekt-öffnen-Dialog festlegen"/>
                     <Separator/>
-                    <MenuItem Header="Einstellungen …"
-                              Click="MenüEinstellungen_Click"
-                              ToolTip="Vorlagen, Standardpfad und weitere Optionen"/>
-                    <Separator/>
                     <MenuItem Header="Beenden"
                               Click="MenüBeenden_Click"/>
                 </MenuItem>
