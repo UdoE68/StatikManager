@@ -393,11 +393,24 @@ namespace StatikManager.Modules.Werkzeuge
 
             string? vorlagePfad = WähleVorlage();
 
-            // ── Diagnose: sofort sichtbares Feedback welchen Pfad wir nehmen ──
+            // ── DIAGNOSE (testweise) ─────────────────────────────────────────────
             if (vorlagePfad != null)
-                TxtInfo.Text = $"Word-Export gestartet  •  Vorlage erkannt: {IO.Path.GetFileName(vorlagePfad)}";
+            {
+                TxtInfo.Text = $"Vorlage erkannt: {IO.Path.GetFileName(vorlagePfad)}";
+                MessageBox.Show("Vorlage erkannt:\n" + vorlagePfad,
+                    "DIAGNOSE – Vorlage", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
             else
-                TxtInfo.Text = "Word-Export gestartet  •  Keine Vorlage konfiguriert (Standard-Export)";
+            {
+                TxtInfo.Text = "Keine Vorlage konfiguriert – Standard-Export";
+                MessageBox.Show(
+                    "Keine gültige Vorlage gefunden.\n\n" +
+                    "Konfigurierte Vorlagen in den Einstellungen:\n" +
+                    string.Join("\n", Core.Einstellungen.Instanz.WordVorlagen
+                        .Select(v => $"  {v.Name}: {v.Pfad} (existiert={IO.File.Exists(v.Pfad ?? "")})")),
+                    "DIAGNOSE – Keine Vorlage", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+            // ── DIAGNOSE ENDE ────────────────────────────────────────────────────
 
             var yStartK  = (double[])_seitenYStart.Clone();
             var höheK    = (double[])_seitenHöhe.Clone();
@@ -2241,19 +2254,17 @@ namespace StatikManager.Modules.Werkzeuge
                         textmarkeGefunden = wordDoc.Bookmarks.Exists("BILD_BEREICH");
                         einfügePunkt = HoleEinfügePunkt(wordDoc);
 
-                        // ── Diagnose: Textmarke-Status ──────────────────────────
-                        string bmStatus = textmarkeGefunden
-                            ? "Textmarke BILD_BEREICH gefunden – Einfügung an Textmarken-Position"
-                            : "⚠ Textmarke BILD_BEREICH NICHT gefunden – Einfügung am Dokumentende";
+                        // ── DIAGNOSE (testweise): Textmarke-Status ──────────────
                         Dispatcher.Invoke(new Action(() =>
                         {
-                            TxtInfo.Text = bmStatus;
-                            if (!textmarkeGefunden)
+                            if (textmarkeGefunden)
                                 MessageBox.Show(
-                                    "Die Textmarke \"BILD_BEREICH\" wurde in der Vorlage nicht gefunden.\n\n" +
-                                    "Das Bild wird am Ende des Dokuments eingefügt.\n" +
-                                    "Bitte Textmarke in der Vorlage anlegen.",
-                                    "Textmarke fehlt", MessageBoxButton.OK, MessageBoxImage.Warning);
+                                    "Textmarke BILD_BEREICH gefunden.",
+                                    "DIAGNOSE – Textmarke", MessageBoxButton.OK, MessageBoxImage.Information);
+                            else
+                                MessageBox.Show(
+                                    "Textmarke BILD_BEREICH NICHT gefunden.\n\nBitte in der Vorlage anlegen.",
+                                    "DIAGNOSE – Textmarke fehlt", MessageBoxButton.OK, MessageBoxImage.Warning);
                         }));
                     }
                     else
@@ -2304,10 +2315,11 @@ namespace StatikManager.Modules.Werkzeuge
                     if (globalScale < 0.99)
                     {
                         int prozent = (int)Math.Round(globalScale * 100.0);
-                        // ── Diagnose: Bild passt nicht ──────────────────────────
+                        // ── DIAGNOSE (testweise): Bild passt nicht ──────────────
                         Dispatcher.Invoke(new Action(() =>
-                            TxtInfo.Text =
-                                $"Bild passt nicht  •  Erforderliche Skalierung: {prozent} %  •  Skalierungsdialog wird geöffnet …"));
+                            MessageBox.Show(
+                                $"Bild passt nicht.\nErforderliche Skalierung: {prozent} %\nSkalierungsdialog folgt.",
+                                "DIAGNOSE – Bild zu groß", MessageBoxButton.OK, MessageBoxImage.Information)));
 
                         SkalierungWahl wahl = SkalierungWahl.Abbrechen;
                         Dispatcher.Invoke(new Action(() =>
