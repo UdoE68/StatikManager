@@ -561,9 +561,18 @@ namespace StatikManager.Modules.Werkzeuge
                         }
                     }
                     catch (Exception ex) { LogException(ex, "Seite hinzufügen/CropKopie"); }
-                    // UI immer aktualisieren – unabhängig davon ob und wie Werte kopiert wurden
-                    AktualisiereCropLinien();
-                    if (BtnRandAnzeigen.IsChecked != true) BtnRandAnzeigen.IsChecked = true;
+                    // Visuellen Refresh NACH dem aktuellen MouseDown-Handler ausführen.
+                    // In MouseLeftButtonDown hält WPF die Render-Pipeline zurück, bis die
+                    // Maus-Geste beendet ist – DependencyProperty-Änderungen werden erst im
+                    // nächsten Frame sichtbar. Über BeginInvoke(Loaded) läuft der Refresh
+                    // nach dem aktuellen Input-Event (Prio 5) aber vor dem Render-Frame (Prio 7).
+                    Dispatcher.BeginInvoke(
+                        System.Windows.Threading.DispatcherPriority.Loaded,
+                        new Action(() =>
+                        {
+                            if (BtnRandAnzeigen.IsChecked != true) BtnRandAnzeigen.IsChecked = true;
+                            AktualisiereCropLinien();
+                        }));
                 }
                 AktualisiereAuswahlAnzeige();
                 ev.Handled = true;
