@@ -2543,12 +2543,7 @@ namespace StatikManager.Modules.Werkzeuge
         /// <summary>
         /// Gibt Breite und Höhe der Tabellenzelle zurück, in der sich die Range befindet.
         /// Gibt (null, null) zurück wenn die Range nicht in einer Tabelle liegt.
-        ///
-        /// Höhe-Strategie (in Reihenfolge):
-        ///   1. Feste/Mindesthöhe gesetzt (HeightRule ≠ Auto)  → row.Height
-        ///   2. Auto-Höhe  → verbleibender Seitenraum ab Y-Position der Range
-        ///      (wdVerticalPositionRelativeToPage: Abstand in pt vom Seitenanfang)
-        ///
+        /// Höhe wird nur zurückgegeben wenn die Zeile eine feste/Mindesthöhe hat.
         /// Rückgabe in Points.
         /// </summary>
         private static (double? Breite, double? Höhe) HoleZellenMasse(Word.Range r)
@@ -2559,36 +2554,14 @@ namespace StatikManager.Modules.Werkzeuge
                 bool istInTabelle = inTable is bool b ? b : (inTable is int iv && iv != 0);
                 if (istInTabelle)
                 {
-                    var cell  = r.Cells[1];
-                    double?   breite = cell.Width > 10 ? cell.Width : (double?)null;
-                    double?   höhe   = null;
+                    var cell   = r.Cells[1];
+                    double?    breite = cell.Width > 10 ? cell.Width : (double?)null;
+                    double?    höhe   = null;
                     try
                     {
                         var row = cell.Row;
                         if (row.HeightRule != Word.WdRowHeightRule.wdRowHeightAuto)
-                        {
-                            // Feste oder Mindesthöhe – direkt verwenden
-                            if (row.Height > 10)
-                                höhe = row.Height;
-                        }
-                        else
-                        {
-                            // Auto-Höhe: verbleibender Raum ab Y-Position der Range
-                            // wdVerticalPositionRelativeToPage liefert pt vom oberen Seitenrand
-                            var    yRaw = r.Information[Word.WdInformation.wdVerticalPositionRelativeToPage];
-                            double y    = yRaw is double yd ? yd
-                                        : yRaw is float  yf ? (double)yf
-                                        : yRaw is int    yi ? (double)yi
-                                        : yRaw is long   yl ? (double)yl
-                                        : 0.0;
-                            var ps   = r.Sections[1].PageSetup;
-                            double remaining = ps.PageHeight - ps.BottomMargin - y;
-                            App.LogFehler("Export/ZellenHöhe",
-                                $"Auto-Zeile: Y={y:F1} pt | PageH={ps.PageHeight:F1} pt | " +
-                                $"BottomMargin={ps.BottomMargin:F1} pt | Verbleibend={remaining:F1} pt");
-                            if (remaining > 10)
-                                höhe = remaining;
-                        }
+                            höhe = row.Height > 10 ? row.Height : (double?)null;
                     }
                     catch { }
                     return (breite, höhe);
