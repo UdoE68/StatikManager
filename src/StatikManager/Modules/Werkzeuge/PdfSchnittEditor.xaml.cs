@@ -68,9 +68,29 @@ namespace StatikManager.Modules.Werkzeuge
 
         // Einheitlicher Anwendungsmodus für Drag, Dialog und Auto-Rand
         private enum CropAnwendungsModus { NurDiese = 0, Alle = 1, Ausgewählt = 2, AlsStandard = 3 }
-        private CropAnwendungsModus _cropModus         = CropAnwendungsModus.NurDiese;
-        private List<int>           _cropAuswahlSeiten = new List<int>();
-        private bool                _modusWahlLäuft;   // Re-Entranz-Schutz für CmbCropModus_SelectionChanged
+        private CropAnwendungsModus _cropModus = CropAnwendungsModus.NurDiese;
+
+        // ── Gruppen-System ────────────────────────────────────────────────────
+        private sealed class CropGruppe
+        {
+            public int       Id     { get; set; }
+            public string    Name   { get; set; } = "";
+            public List<int> Seiten { get; set; } = new List<int>();
+        }
+        private static readonly Color[] GruppenFarben =
+        {
+            Color.FromRgb(  0, 120, 215),  // Blau
+            Color.FromRgb( 16, 124,  16),  // Grün
+            Color.FromRgb(202,  80,  16),  // Orange
+            Color.FromRgb(136,  23, 152),  // Lila
+            Color.FromRgb(196,  43,  28),  // Rot
+            Color.FromRgb(  0, 153, 153),  // Türkis
+        };
+        private List<CropGruppe> _gruppen     = new List<CropGruppe>();
+        private int              _aktGruppeId = 1;
+        private int              _nächsteId   = 2;
+        private bool             _modusWahlLäuft;   // Re-Entranz-Schutz für CmbCropModus_SelectionChanged
+        private bool             _gruppeWahlLäuft;  // Re-Entranz-Schutz für CmbGruppe_SelectionChanged
 
         // Sicherheitsabstand für automatische Rand-Erkennung (Vorschau-Pixel, min 0, max 50)
         private double _cropSicherheitMm  = 2.0;   // Sicherheitsabstand fuer Auto-Rand (mm)
@@ -115,7 +135,6 @@ namespace StatikManager.Modules.Werkzeuge
             _pendingSitzung    = sitzung;
             _layoutHorizontal  = sitzung.LayoutHorizontal;
             _cropModus         = (CropAnwendungsModus)Math.Max(0, Math.Min(3, sitzung.CropModus));
-            _cropAuswahlSeiten = sitzung.CropAuswahlSeiten?.ToList() ?? new List<int>();
             _defaultCrop       = sitzung.DefaultCropGesetzt
                 ? (sitzung.DefaultCropLinks, sitzung.DefaultCropRechts,
                    sitzung.DefaultCropOben,  sitzung.DefaultCropUnten)
@@ -136,7 +155,13 @@ namespace StatikManager.Modules.Werkzeuge
                 ZoomFaktor         = _zoomFaktor,
                 LayoutHorizontal   = _layoutHorizontal,
                 CropModus          = (int)_cropModus,
-                CropAuswahlSeiten  = _cropAuswahlSeiten.ToArray(),
+                AktiveGruppeId     = _aktGruppeId,
+                CropGruppen        = _gruppen.Select(g => new Core.SitzungsZustand.GruppeSitzung
+                                     {
+                                         Id     = g.Id,
+                                         Name   = g.Name,
+                                         Seiten = g.Seiten.ToArray()
+                                     }).ToArray(),
                 DefaultCropGesetzt = _defaultCrop.HasValue,
                 CropLinks          = (double[])_cropLinks.Clone(),
                 CropRechts         = (double[])_cropRechts.Clone(),
@@ -240,6 +265,32 @@ namespace StatikManager.Modules.Werkzeuge
                             _cropRechts = (double[])ps.CropRechts.Clone();
                             _cropOben   = (double[])ps.CropOben.Clone();
                             _cropUnten  = (double[])ps.CropUnten.Clone();
+                        }
+                        // Gruppen aus Sitzung wiederherstellen
+                        if (ps?.CropGruppen?.Length > 0)
+                        {
+                            int n = _seitenBilder.Count;
+                            var gl = new List<CropGruppe>();
+                            foreach (var gs in ps.CropGruppen)
+                            {
+                                gl.Add(new CropGruppe
+                                {
+                                    Id     = gs.Id,
+                                    Name   = string.IsNullOrWhiteSpace(gs.Name) ? $"Gruppe {gs.Id}" : gs.Name,
+                                    Seiten = gs.Seiten?.Where(s => s >= 0 && s < n).ToList() ?? new List<int>()
+                                });
+                            }
+                            if (gl.Count > 0)
+                            {
+                                // Seiten ohne Gruppe → erste Gruppe
+                                var zugewiesen = new HashSet<int>(gl.SelectMany(g => g.Seiten));
+                                for (int si = 0; si < n; si++)
+                                    if (!zugewiesen.Contains(si)) gl[0].Seiten.Add(si);
+                                _gruppen     = gl;
+                                _aktGruppeId = ps.AktiveGruppeId;
+                                if (!_gruppen.Any(g => g.Id == _aktGruppeId)) _aktGruppeId = _gruppen[0].Id;
+                                _nächsteId   = _gruppen.Max(g => g.Id) + 1;
+                            }
                         }
                         double pendingZoom    = ps != null ? Math.Max(ZoomMin, Math.Min(ZoomMax, ps.ZoomFaktor)) : _zoomFaktor;
                         double pendingScrollH = ps?.ScrollH ?? 0;
@@ -378,6 +429,13 @@ namespace StatikManager.Modules.Werkzeuge
                     _cropUnten[i]  = d.Unten;
                 }
             }
+            // Gruppen zurücksetzen: eine Standardgruppe mit allen Seiten
+            _gruppen = new List<CropGruppe>
+            {
+                new CropGruppe { Id = 1, Name = "Gruppe 1", Seiten = Enumerable.Range(0, n).ToList() }
+            };
+            _aktGruppeId = 1;
+            _nächsteId   = 2;
         }
 
         // Gibt den Index der Seite zurück, die aktuell am stärksten sichtbar ist.
@@ -409,6 +467,42 @@ namespace StatikManager.Modules.Werkzeuge
                 if (ovl > bestOvl) { bestOvl = ovl; best = i; }
             }
             return best;
+        }
+
+        // ── Gruppen-Hilfsmethoden ─────────────────────────────────────────────
+
+        private CropGruppe? AktiveGruppe() => _gruppen.FirstOrDefault(g => g.Id == _aktGruppeId);
+
+        private CropGruppe? GruppeVonSeite(int idx) => _gruppen.FirstOrDefault(g => g.Seiten.Contains(idx));
+
+        private Color FarbeVonGruppe(CropGruppe g)
+        {
+            int pos = _gruppen.IndexOf(g);
+            return GruppenFarben[(pos < 0 ? 0 : pos) % GruppenFarben.Length];
+        }
+
+        private void WeiseSeiteZu(int seitenIdx, CropGruppe ziel)
+        {
+            foreach (var g in _gruppen) g.Seiten.Remove(seitenIdx);
+            if (!ziel.Seiten.Contains(seitenIdx)) ziel.Seiten.Add(seitenIdx);
+        }
+
+        // Synchronisiert CmbGruppe mit der aktuellen Gruppenliste.
+        private void AktualisiereGruppenComboBox()
+        {
+            if (CmbGruppe == null) return;
+            _gruppeWahlLäuft = true;
+            try
+            {
+                CmbGruppe.Items.Clear();
+                foreach (var g in _gruppen)
+                    CmbGruppe.Items.Add(g.Name);
+                int aktIdx = _gruppen.FindIndex(g => g.Id == _aktGruppeId);
+                CmbGruppe.SelectedIndex = aktIdx >= 0 ? aktIdx : 0;
+                if (aktIdx >= 0) CmbGruppe.Text = _gruppen[aktIdx].Name;
+                BtnGruppeLöschen.IsEnabled = _gruppen.Count > 1;
+            }
+            finally { _gruppeWahlLäuft = false; }
         }
 
         // ── Canvas zeichnen ───────────────────────────────────────────────────
@@ -445,6 +539,7 @@ namespace StatikManager.Modules.Werkzeuge
 
                 ZeicheCropLinien();
                 AktualisiereAuswahlAnzeige();
+                AktualisiereGruppenComboBox();
             }
             catch (Exception ex) { LogException(ex, "ZeicheCanvas"); }
         }
@@ -464,12 +559,12 @@ namespace StatikManager.Modules.Werkzeuge
 
                 if (auswahlModus)
                 {
-                    bool gewählt = _cropAuswahlSeiten.Contains(idx);
-                    b.Opacity       = gewählt ? 1.0 : 0.6;
-                    b.BorderBrush   = gewählt
-                        ? new SolidColorBrush(Color.FromRgb(0, 120, 215))   // Blau = ausgewählt
-                        : new SolidColorBrush(Color.FromRgb(160, 160, 160)); // Grau = nicht gewählt
-                    b.BorderThickness = new Thickness(2);
+                    var gruppe = GruppeVonSeite(idx);
+                    bool istAktiv = gruppe != null && gruppe.Id == _aktGruppeId;
+                    Color farbe   = gruppe != null ? FarbeVonGruppe(gruppe) : GruppenFarben[0];
+                    b.Opacity         = istAktiv ? 1.0 : 0.75;
+                    b.BorderBrush     = new SolidColorBrush(farbe);
+                    b.BorderThickness = new Thickness(istAktiv ? 3 : 1);
                 }
                 else
                 {
@@ -518,7 +613,7 @@ namespace StatikManager.Modules.Werkzeuge
                 SnapsToDevicePixels = true
             };
 
-            // Direktauswahl per Klick: nur im Modus "Ausgewählte Seiten" + Shift oder ToggleButton
+            // Seitenzuweisung per Klick: nur im Modus "Ausgewählte Seiten" + Shift oder ToggleButton
             int seitenIdx = i; // capture für Lambda
             blatt.MouseLeftButtonDown += (_, ev) =>
             {
@@ -526,54 +621,53 @@ namespace StatikManager.Modules.Werkzeuge
                 bool auswahlAktiv = BtnAuswahlmodus?.IsChecked == true
                                  || (Keyboard.Modifiers & ModifierKeys.Shift) != 0;
                 if (!auswahlAktiv) return;
-                if (_cropAuswahlSeiten.Contains(seitenIdx))
+
+                var aktGruppe = AktiveGruppe();
+                if (aktGruppe == null) { ev.Handled = true; return; }
+
+                var alteGruppe = GruppeVonSeite(seitenIdx);
+                if (alteGruppe?.Id == aktGruppe.Id) { ev.Handled = true; return; } // bereits in aktiver Gruppe
+
+                // Crop-Werte der aktiven Gruppe (erste Seite) als Quelle nehmen
+                try
                 {
-                    _cropAuswahlSeiten.Remove(seitenIdx);
-                }
-                else
-                {
-                    _cropAuswahlSeiten.Add(seitenIdx);
-                    // Crop-Werte der aktiven Seite sofort auf die neu hinzugefügte Seite übertragen.
-                    // WICHTIG: AktiveSeiteIndex() ist ungeeignet — der User betrachtet i.d.R. gerade
-                    // die angeklickte Seite (seitenIdx), womit quellIdx == seitenIdx und keine Werte
-                    // kopiert werden. Stattdessen: erste bereits ausgewählte Seite als Quelle nehmen.
-                    try
+                    int quellIdx = aktGruppe.Seiten.Count > 0 ? aktGruppe.Seiten[0] : -1;
+                    if (quellIdx < 0) quellIdx = AktiveSeiteIndex();
+
+                    WeiseSeiteZu(seitenIdx, aktGruppe);
+
+                    if (quellIdx >= 0 && quellIdx != seitenIdx
+                        && quellIdx < _seitenBilder.Count && seitenIdx < _seitenBilder.Count)
                     {
-                        int quellIdx = -1;
-                        foreach (int x in _cropAuswahlSeiten)
-                            if (x != seitenIdx) { quellIdx = x; break; }
-                        if (quellIdx < 0) quellIdx = AktiveSeiteIndex();
-                        if (quellIdx >= 0 && quellIdx != seitenIdx
-                            && quellIdx < _seitenBilder.Count && seitenIdx < _seitenBilder.Count)
-                        {
-                            double qRefW = _seitenBilder[quellIdx].PixelWidth;
-                            double qRefH = quellIdx < _seitenHöhe.Length ? _seitenHöhe[quellIdx] : 1;
-                            double iRefW = _seitenBilder[seitenIdx].PixelWidth;
-                            double iRefH = seitenIdx < _seitenHöhe.Length ? _seitenHöhe[seitenIdx] : 1;
-                            double qL = quellIdx < _cropLinks.Length  ? _cropLinks[quellIdx]  : 0;
-                            double qR = quellIdx < _cropRechts.Length ? _cropRechts[quellIdx] : 0;
-                            double qO = quellIdx < _cropOben.Length   ? _cropOben[quellIdx]   : 0;
-                            double qU = quellIdx < _cropUnten.Length  ? _cropUnten[quellIdx]  : 0;
-                            if (seitenIdx < _cropLinks.Length)  _cropLinks[seitenIdx]  = Math.Min(qL * qRefW / iRefW, 0.49);
-                            if (seitenIdx < _cropRechts.Length) _cropRechts[seitenIdx] = Math.Min(qR * qRefW / iRefW, 0.49);
-                            if (seitenIdx < _cropOben.Length)   _cropOben[seitenIdx]   = Math.Min(qO * qRefH / iRefH, 0.49);
-                            if (seitenIdx < _cropUnten.Length)  _cropUnten[seitenIdx]  = Math.Min(qU * qRefH / iRefH, 0.49);
-                        }
+                        double qRefW = _seitenBilder[quellIdx].PixelWidth;
+                        double qRefH = quellIdx < _seitenHöhe.Length ? _seitenHöhe[quellIdx] : 1;
+                        double iRefW = _seitenBilder[seitenIdx].PixelWidth;
+                        double iRefH = seitenIdx < _seitenHöhe.Length ? _seitenHöhe[seitenIdx] : 1;
+                        double qL = quellIdx < _cropLinks.Length  ? _cropLinks[quellIdx]  : 0;
+                        double qR = quellIdx < _cropRechts.Length ? _cropRechts[quellIdx] : 0;
+                        double qO = quellIdx < _cropOben.Length   ? _cropOben[quellIdx]   : 0;
+                        double qU = quellIdx < _cropUnten.Length  ? _cropUnten[quellIdx]  : 0;
+                        if (seitenIdx < _cropLinks.Length)  _cropLinks[seitenIdx]  = Math.Min(qL * qRefW / iRefW, 0.49);
+                        if (seitenIdx < _cropRechts.Length) _cropRechts[seitenIdx] = Math.Min(qR * qRefW / iRefW, 0.49);
+                        if (seitenIdx < _cropOben.Length)   _cropOben[seitenIdx]   = Math.Min(qO * qRefH / iRefH, 0.49);
+                        if (seitenIdx < _cropUnten.Length)  _cropUnten[seitenIdx]  = Math.Min(qU * qRefH / iRefH, 0.49);
                     }
-                    catch (Exception ex) { LogException(ex, "Seite hinzufügen/CropKopie"); }
-                    // Visuellen Refresh NACH dem aktuellen MouseDown-Handler ausführen.
-                    // In MouseLeftButtonDown hält WPF die Render-Pipeline zurück, bis die
-                    // Maus-Geste beendet ist – DependencyProperty-Änderungen werden erst im
-                    // nächsten Frame sichtbar. Über BeginInvoke(Loaded) läuft der Refresh
-                    // nach dem aktuellen Input-Event (Prio 5) aber vor dem Render-Frame (Prio 7).
-                    Dispatcher.BeginInvoke(
-                        System.Windows.Threading.DispatcherPriority.Loaded,
-                        new Action(() =>
-                        {
-                            if (BtnRandAnzeigen.IsChecked != true) BtnRandAnzeigen.IsChecked = true;
-                            AktualisiereCropLinien();
-                        }));
                 }
+                catch (Exception ex) { LogException(ex, "Seite zuweisen/CropKopie"); }
+
+                // Visuellen Refresh NACH dem aktuellen MouseDown-Handler ausführen.
+                // In MouseLeftButtonDown hält WPF die Render-Pipeline zurück, bis die
+                // Maus-Geste beendet ist – DependencyProperty-Änderungen werden erst im
+                // nächsten Frame sichtbar. Über BeginInvoke(Loaded) läuft der Refresh
+                // nach dem aktuellen Input-Event (Prio 5) aber vor dem Render-Frame (Prio 7).
+                Dispatcher.BeginInvoke(
+                    System.Windows.Threading.DispatcherPriority.Loaded,
+                    new Action(() =>
+                    {
+                        if (BtnRandAnzeigen.IsChecked != true) BtnRandAnzeigen.IsChecked = true;
+                        AktualisiereCropLinien();
+                    }));
+
                 AktualisiereAuswahlAnzeige();
                 ev.Handled = true;
             };
@@ -944,41 +1038,88 @@ namespace StatikManager.Modules.Werkzeuge
         {
             if (_modusWahlLäuft) return;
             // Null-Guard: Handler kann während InitializeComponent() feuern,
-            // bevor BtnAuswahlmodus/BtnAuswahlDialog via Connect() gesetzt wurden.
-            if (BtnAuswahlmodus == null || BtnAuswahlDialog == null) return;
+            // bevor BtnAuswahlmodus via Connect() gesetzt wurde.
+            if (BtnAuswahlmodus == null) return;
             int idx = CmbCropModus?.SelectedIndex ?? -1;
             if (idx < 0) return;
 
             _cropModus = (CropAnwendungsModus)Math.Min(idx, 3);
 
-            // Im Modus "Ausgewählte Seiten": kein automatischer Dialog.
-            // Vorauswahl: aktive Seite, falls noch nichts ausgewählt ist.
-            if (_cropModus == CropAnwendungsModus.Ausgewählt &&
-                _cropAuswahlSeiten.Count == 0 && _seitenBilder.Count > 0)
-            {
-                int aktSeite = AktiveSeiteIndex();
-                if (aktSeite >= 0) _cropAuswahlSeiten.Add(aktSeite);
-            }
-
-            // ToggleButton + Dialog-Button aktivierbar nur im Modus "Ausgewählte Seiten"
+            // ToggleButton aktivierbar nur im Modus "Ausgewählte Seiten"
             bool istAuswahlModus = _cropModus == CropAnwendungsModus.Ausgewählt;
-            BtnAuswahlmodus.IsEnabled    = istAuswahlModus;
-            BtnAuswahlDialog.IsEnabled   = istAuswahlModus;
+            BtnAuswahlmodus.IsEnabled = istAuswahlModus;
             if (!istAuswahlModus) BtnAuswahlmodus.IsChecked = false;
 
             AktualisiereAuswahlAnzeige();
         }
 
-        private void BtnAuswahlDialog_Click(object sender, RoutedEventArgs e)
+        // ── Gruppen-Handler ───────────────────────────────────────────────────
+
+        private void CmbGruppe_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (_gruppeWahlLäuft) return;
+            int selIdx = CmbGruppe?.SelectedIndex ?? -1;
+            if (selIdx < 0 || selIdx >= _gruppen.Count) return;
+            _aktGruppeId = _gruppen[selIdx].Id;
+            AktualisiereAuswahlAnzeige();
+        }
+
+        private void CmbGruppe_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key != Key.Return) return;
+            BenennGruppeUm();
+            e.Handled = true;
+        }
+
+        private void CmbGruppe_LostFocus(object sender, RoutedEventArgs e)
+        {
+            BenennGruppeUm();
+        }
+
+        private void BenennGruppeUm()
+        {
+            if (_gruppeWahlLäuft || CmbGruppe == null) return;
+            var aktGruppe = AktiveGruppe();
+            if (aktGruppe == null) return;
+            string neuerName = (CmbGruppe.Text ?? "").Trim();
+            if (string.IsNullOrWhiteSpace(neuerName) || neuerName == aktGruppe.Name) return;
+            aktGruppe.Name = neuerName;
+            AktualisiereGruppenComboBox();
+        }
+
+        private void BtnGruppeNeu_Click(object sender, RoutedEventArgs e)
         {
             SafeExecute(() =>
             {
-                if (_seitenBilder.Count == 0) return;
-                var sel = WähleSeiten(AktiveSeiteIndex(), Window.GetWindow(this));
-                if (sel.Count == 0) return;
-                _cropAuswahlSeiten = sel;
+                int id   = _nächsteId++;
+                int pos  = _gruppen.Count;
+                var name = $"Gruppe {pos + 1}";
+                _gruppen.Add(new CropGruppe { Id = id, Name = name });
+                _aktGruppeId = id;
+                AktualisiereGruppenComboBox();
                 AktualisiereAuswahlAnzeige();
-            }, "BtnAuswahlDialog_Click");
+            }, "BtnGruppeNeu_Click");
+        }
+
+        private void BtnGruppeLöschen_Click(object sender, RoutedEventArgs e)
+        {
+            SafeExecute(() =>
+            {
+                if (_gruppen.Count <= 1) return; // letzte Gruppe bleibt
+                var aktGruppe = AktiveGruppe();
+                if (aktGruppe == null) return;
+
+                // Seiten der gelöschten Gruppe → erste verbleibende Gruppe
+                var ziel = _gruppen.FirstOrDefault(g => g.Id != aktGruppe.Id);
+                if (ziel != null)
+                    foreach (int s in aktGruppe.Seiten)
+                        if (!ziel.Seiten.Contains(s)) ziel.Seiten.Add(s);
+
+                _gruppen.Remove(aktGruppe);
+                _aktGruppeId = _gruppen[0].Id;
+                AktualisiereGruppenComboBox();
+                AktualisiereAuswahlAnzeige();
+            }, "BtnGruppeLöschen_Click");
         }
 
         private void BtnRandAnzeigen_Checked(object sender, RoutedEventArgs e)
@@ -1059,8 +1200,9 @@ namespace StatikManager.Modules.Werkzeuge
                             zielIdxs = aktIdx >= 0 ? new[] { aktIdx } : Enumerable.Empty<int>();
                             break;
                         case CropAnwendungsModus.Ausgewählt:
-                            zielIdxs = _cropAuswahlSeiten.Count > 0
-                                ? _cropAuswahlSeiten
+                            var agAuto = AktiveGruppe();
+                            zielIdxs = agAuto?.Seiten.Count > 0
+                                ? agAuto.Seiten
                                 : (aktIdx >= 0 ? new[] { aktIdx } : Enumerable.Empty<int>());
                             break;
                         default: // Alle
@@ -1275,12 +1417,10 @@ namespace StatikManager.Modules.Werkzeuge
                 }
                 else if (rbAuswahl.IsChecked == true)
                 {
-                    // Kein automatischer Dialog – aktuelle Canvas-Auswahl verwenden.
-                    // Fallback: aktive Seite, wenn noch nichts ausgewählt ist.
-                    if (_cropAuswahlSeiten.Count == 0 && aktSeite >= 0)
-                        _cropAuswahlSeiten.Add(aktSeite);
-                    zielSeiten = _cropAuswahlSeiten.Count > 0
-                        ? new List<int>(_cropAuswahlSeiten)
+                    // Aktive Gruppe verwenden; Fallback: aktive Seite
+                    var agDialog = AktiveGruppe();
+                    zielSeiten = agDialog?.Seiten.Count > 0
+                        ? new List<int>(agDialog.Seiten)
                         : new List<int> { aktSeite };
                 }
                 else
@@ -1636,8 +1776,9 @@ namespace StatikManager.Modules.Werkzeuge
                         Enumerable.Range(0, _seitenBilder.Count));
                     break;
                 case CropAnwendungsModus.Ausgewählt:
-                    if (_cropAuswahlSeiten.Count == 0) break;
-                    KopiereCropAufSeiten(quellIdx, qL, qR, qO, qU, _cropAuswahlSeiten);
+                    var agDrag = AktiveGruppe();
+                    if (agDrag?.Seiten.Count > 0)
+                        KopiereCropAufSeiten(quellIdx, qL, qR, qO, qU, agDrag.Seiten);
                     break;
             }
         }

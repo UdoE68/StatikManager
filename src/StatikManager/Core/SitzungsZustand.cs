@@ -30,8 +30,19 @@ namespace StatikManager.Core
         // ── Crop-Anwendungsmodus ──────────────────────────────────────────────
 
         /// <summary>0 = NurDiese, 1 = Alle, 2 = Ausgewählt, 3 = AlsStandard</summary>
-        public int   CropModus        { get; set; }
-        public int[] CropAuswahlSeiten { get; set; } = Array.Empty<int>();
+        public int CropModus { get; set; }
+
+        // ── Gruppen-System ────────────────────────────────────────────────────
+
+        public int              AktiveGruppeId { get; set; } = 1;
+        public GruppeSitzung[]  CropGruppen    { get; set; } = Array.Empty<GruppeSitzung>();
+
+        public sealed class GruppeSitzung
+        {
+            public int    Id     { get; set; }
+            public string Name   { get; set; } = "";
+            public int[]  Seiten { get; set; } = Array.Empty<int>();
+        }
 
         // ── Default-Crop ──────────────────────────────────────────────────────
 

@@ -87,18 +87,37 @@
                     <ComboBoxItem Content="Als Standard"/>
                 </ComboBox>
                 <ToggleButton x:Name="BtnAuswahlmodus"
-                              Content="&#x2714; Seiten w&#228;hlen"
+                              Content="&#x2714; Seiten zuweisen"
                               Height="26" Padding="6,0"
-                              Margin="0,0,2,0"
+                              Margin="0,0,8,0"
                               IsEnabled="False"
-                              ToolTip="Klicke direkt auf Seiten im Viewer, um sie auszuw&#228;hlen / abzuw&#228;hlen (alternativ: Shift + Klick)"/>
-                <Button x:Name="BtnAuswahlDialog"
-                        Content="&#x2026;"
+                              ToolTip="Klicke auf Seiten im Viewer, um sie der aktiven Gruppe zuzuweisen (alternativ: Shift + Klick)"/>
+
+                <!-- ── Gruppen ──────────────────────────────────────────────── -->
+                <TextBlock Text="Gruppe:" VerticalAlignment="Center"
+                           Margin="0,0,4,0" FontSize="11"/>
+                <ComboBox x:Name="CmbGruppe"
+                          Height="26" MinWidth="110"
+                          Margin="0,0,2,0" FontSize="11"
+                          IsEditable="True"
+                          ToolTip="Aktive Gruppe ausw&#228;hlen oder umbenennen (Enter best&#228;tigt)"
+                          SelectionChanged="CmbGruppe_SelectionChanged"
+                          KeyDown="CmbGruppe_KeyDown"
+                          LostFocus="CmbGruppe_LostFocus"/>
+                <Button x:Name="BtnGruppeNeu"
+                        Content="+"
+                        Width="26" Height="26"
+                        Margin="0,0,2,0"
+                        FontSize="14" FontWeight="Bold"
+                        ToolTip="Neue Gruppe anlegen"
+                        Click="BtnGruppeNeu_Click"/>
+                <Button x:Name="BtnGruppeLöschen"
+                        Content="&#x00D7;"
                         Width="26" Height="26"
                         Margin="0,0,8,0"
-                        IsEnabled="False"
-                        ToolTip="Auswahl-Dialog &#246;ffnen (optional, zur Feinkorrektur)"
-                        Click="BtnAuswahlDialog_Click"/>
+                        FontSize="14"
+                        ToolTip="Aktive Gruppe l&#246;schen (letzte Gruppe kann nicht gel&#246;scht werden)"
+                        Click="BtnGruppeLöschen_Click"/>
 
                 <!-- ── Sicherheitsabstand für Auto-Rand ──────────────────── -->
                 <TextBlock Text="Abstand:"
