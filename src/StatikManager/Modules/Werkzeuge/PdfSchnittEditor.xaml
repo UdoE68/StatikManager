@@ -88,11 +88,11 @@
                     <ComboBoxItem Content="Als Standard"/>
                 </ComboBox>
                 <ToggleButton x:Name="BtnAuswahlmodus"
-                              Content="&#x270E; Seiten bearbeiten"
+                              Content="&#x270E; Gruppe bearbeiten"
                               Height="26" Padding="6,0"
                               Margin="0,0,8,0"
                               IsEnabled="False"
-                              ToolTip="Bearbeitungsmodus starten: Seiten der aktiven Gruppe per Klick zuweisen / entfernen"
+                              ToolTip="Bearbeitungsmodus: Seiten der aktiven Gruppe per Klick hinzufügen / entfernen"
                               Checked="BtnAuswahlmodus_Checked"
                               Unchecked="BtnAuswahlmodus_Unchecked"/>
 

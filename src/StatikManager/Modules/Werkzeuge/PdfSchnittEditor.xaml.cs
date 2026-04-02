@@ -288,13 +288,19 @@ namespace StatikManager.Modules.Werkzeuge
                             }
                             if (gl.Count > 0)
                             {
-                                // Seiten ohne Gruppe → erste Gruppe
+                                // Gruppe 0 muss immer existieren
+                                if (!gl.Any(g => g.Id == 0))
+                                    gl.Insert(0, new CropGruppe { Id = 0, Name = "Gruppe 0" });
+
+                                // Seiten ohne Gruppe → Gruppe 0
+                                var gruppe0 = gl.First(g => g.Id == 0);
                                 var zugewiesen = new HashSet<int>(gl.SelectMany(g => g.Seiten));
                                 for (int si = 0; si < n; si++)
-                                    if (!zugewiesen.Contains(si)) gl[0].Seiten.Add(si);
+                                    if (!zugewiesen.Contains(si)) gruppe0.Seiten.Add(si);
+
                                 _gruppen     = gl;
                                 _aktGruppeId = ps.AktiveGruppeId;
-                                if (!_gruppen.Any(g => g.Id == _aktGruppeId)) _aktGruppeId = _gruppen[0].Id;
+                                if (!_gruppen.Any(g => g.Id == _aktGruppeId)) _aktGruppeId = 0;
                                 _nächsteId   = _gruppen.Max(g => g.Id) + 1;
                             }
                         }
@@ -435,13 +441,13 @@ namespace StatikManager.Modules.Werkzeuge
                     _cropUnten[i]  = d.Unten;
                 }
             }
-            // Gruppen zurücksetzen: eine Standardgruppe mit allen Seiten
+            // Gruppen zurücksetzen: Gruppe 0 (unverlöschbar) enthält alle Seiten
             _gruppen = new List<CropGruppe>
             {
-                new CropGruppe { Id = 1, Name = "Gruppe 1", Seiten = Enumerable.Range(0, n).ToList() }
+                new CropGruppe { Id = 0, Name = "Gruppe 0", Seiten = Enumerable.Range(0, n).ToList() }
             };
-            _aktGruppeId = 1;
-            _nächsteId   = 2;
+            _aktGruppeId = 0;
+            _nächsteId   = 1;
         }
 
         // Gibt den Index der Seite zurück, die aktuell am stärksten sichtbar ist.
@@ -506,7 +512,9 @@ namespace StatikManager.Modules.Werkzeuge
                 int aktIdx = _gruppen.FindIndex(g => g.Id == _aktGruppeId);
                 CmbGruppe.SelectedIndex = aktIdx >= 0 ? aktIdx : 0;
                 if (aktIdx >= 0) CmbGruppe.Text = _gruppen[aktIdx].Name;
-                BtnGruppeLöschen.IsEnabled = _gruppen.Count > 1;
+                // Gruppe 0 ist unverlöschbar; außerdem muss mindestens 1 weitere Gruppe existieren
+                int aktId = _gruppen.Count > 0 && aktIdx >= 0 ? _gruppen[aktIdx].Id : -1;
+                BtnGruppeLöschen.IsEnabled = _gruppen.Count > 1 && aktId != 0;
             }
             finally { _gruppeWahlLäuft = false; }
         }
@@ -541,17 +549,18 @@ namespace StatikManager.Modules.Werkzeuge
                     foreach (int s in hinzugekommen)
                         WeiseSeiteZu(s, aktGruppe);
 
-                    // Entfernte Seiten: erste andere Gruppe als Ziel
+                    // Entfernte Seiten → Gruppe 0 (Fallback); wenn aktive Gruppe IS Gruppe 0 → bleiben dort
                     if (entfernt.Count > 0)
                     {
-                        var ziel = _gruppen.FirstOrDefault(g => g.Id != aktGruppe.Id);
+                        var gruppe0 = _gruppen.FirstOrDefault(g => g.Id == 0);
+                        var ziel    = aktGruppe.Id != 0 ? gruppe0 : null; // bei Gruppe-0-Bearbeitung: kein Fallback
                         foreach (int s in entfernt)
                         {
                             aktGruppe.Seiten.Remove(s);
                             if (ziel != null && !ziel.Seiten.Contains(s))
                                 ziel.Seiten.Add(s);
                             else if (ziel == null)
-                                aktGruppe.Seiten.Add(s); // einzige Gruppe: Seite bleibt
+                                aktGruppe.Seiten.Add(s); // aktive Gruppe ist Gruppe 0 → Seite bleibt
                         }
                     }
                 }
@@ -733,75 +742,20 @@ namespace StatikManager.Modules.Werkzeuge
                 SnapsToDevicePixels = true
             };
 
-            // Seitenzuweisung per Klick: nur im Modus "Ausgewählte Seiten" + Shift oder ToggleButton
+            // Seitenzuweisung per Klick: NUR im aktiven Bearbeitungsmodus
             int seitenIdx = i; // capture für Lambda
             blatt.MouseLeftButtonDown += (_, ev) =>
             {
+                // Außerhalb Bearbeitungsmodus: keine Gruppenänderung, normale Navigation
+                if (!_bearbeitungsModus) return;
                 if (_cropModus != CropAnwendungsModus.Ausgewählt) return;
 
-                // ── Bearbeitungsmodus: Toggle in _tempSeiten, keine permanente Änderung ──
-                if (_bearbeitungsModus)
-                {
-                    if (_tempSeiten.Contains(seitenIdx))
-                        _tempSeiten.Remove(seitenIdx);
-                    else
-                        _tempSeiten.Add(seitenIdx);
-                    AktualisiereTempInfo();
-                    AktualisiereAuswahlAnzeige();
-                    ev.Handled = true;
-                    return;
-                }
-
-                bool auswahlAktiv = BtnAuswahlmodus?.IsChecked == true
-                                 || (Keyboard.Modifiers & ModifierKeys.Shift) != 0;
-                if (!auswahlAktiv) return;
-
-                var aktGruppe = AktiveGruppe();
-                if (aktGruppe == null) { ev.Handled = true; return; }
-
-                var alteGruppe = GruppeVonSeite(seitenIdx);
-                if (alteGruppe?.Id == aktGruppe.Id) { ev.Handled = true; return; } // bereits in aktiver Gruppe
-
-                // Crop-Werte der aktiven Gruppe (erste Seite) als Quelle nehmen
-                try
-                {
-                    int quellIdx = aktGruppe.Seiten.Count > 0 ? aktGruppe.Seiten[0] : -1;
-                    if (quellIdx < 0) quellIdx = AktiveSeiteIndex();
-
-                    WeiseSeiteZu(seitenIdx, aktGruppe);
-
-                    if (quellIdx >= 0 && quellIdx != seitenIdx
-                        && quellIdx < _seitenBilder.Count && seitenIdx < _seitenBilder.Count)
-                    {
-                        double qRefW = _seitenBilder[quellIdx].PixelWidth;
-                        double qRefH = quellIdx < _seitenHöhe.Length ? _seitenHöhe[quellIdx] : 1;
-                        double iRefW = _seitenBilder[seitenIdx].PixelWidth;
-                        double iRefH = seitenIdx < _seitenHöhe.Length ? _seitenHöhe[seitenIdx] : 1;
-                        double qL = quellIdx < _cropLinks.Length  ? _cropLinks[quellIdx]  : 0;
-                        double qR = quellIdx < _cropRechts.Length ? _cropRechts[quellIdx] : 0;
-                        double qO = quellIdx < _cropOben.Length   ? _cropOben[quellIdx]   : 0;
-                        double qU = quellIdx < _cropUnten.Length  ? _cropUnten[quellIdx]  : 0;
-                        if (seitenIdx < _cropLinks.Length)  _cropLinks[seitenIdx]  = Math.Min(qL * qRefW / iRefW, 0.49);
-                        if (seitenIdx < _cropRechts.Length) _cropRechts[seitenIdx] = Math.Min(qR * qRefW / iRefW, 0.49);
-                        if (seitenIdx < _cropOben.Length)   _cropOben[seitenIdx]   = Math.Min(qO * qRefH / iRefH, 0.49);
-                        if (seitenIdx < _cropUnten.Length)  _cropUnten[seitenIdx]  = Math.Min(qU * qRefH / iRefH, 0.49);
-                    }
-                }
-                catch (Exception ex) { LogException(ex, "Seite zuweisen/CropKopie"); }
-
-                // Visuellen Refresh NACH dem aktuellen MouseDown-Handler ausführen.
-                // In MouseLeftButtonDown hält WPF die Render-Pipeline zurück, bis die
-                // Maus-Geste beendet ist – DependencyProperty-Änderungen werden erst im
-                // nächsten Frame sichtbar. Über BeginInvoke(Loaded) läuft der Refresh
-                // nach dem aktuellen Input-Event (Prio 5) aber vor dem Render-Frame (Prio 7).
-                Dispatcher.BeginInvoke(
-                    System.Windows.Threading.DispatcherPriority.Loaded,
-                    new Action(() =>
-                    {
-                        if (BtnRandAnzeigen.IsChecked != true) BtnRandAnzeigen.IsChecked = true;
-                        AktualisiereCropLinien();
-                    }));
-
+                // Toggle in _tempSeiten — permanente Gruppenstruktur bleibt unberührt
+                if (_tempSeiten.Contains(seitenIdx))
+                    _tempSeiten.Remove(seitenIdx);
+                else
+                    _tempSeiten.Add(seitenIdx);
+                AktualisiereTempInfo();
                 AktualisiereAuswahlAnzeige();
                 ev.Handled = true;
             };
@@ -1251,18 +1205,19 @@ namespace StatikManager.Modules.Werkzeuge
         {
             SafeExecute(() =>
             {
-                if (_gruppen.Count <= 1) return; // letzte Gruppe bleibt
                 var aktGruppe = AktiveGruppe();
                 if (aktGruppe == null) return;
+                if (aktGruppe.Id == 0) return; // Gruppe 0 ist unverlöschbar
+                if (_gruppen.Count <= 1) return;
 
-                // Seiten der gelöschten Gruppe → erste verbleibende Gruppe
-                var ziel = _gruppen.FirstOrDefault(g => g.Id != aktGruppe.Id);
-                if (ziel != null)
+                // Seiten der gelöschten Gruppe → Gruppe 0
+                var gruppe0 = _gruppen.FirstOrDefault(g => g.Id == 0);
+                if (gruppe0 != null)
                     foreach (int s in aktGruppe.Seiten)
-                        if (!ziel.Seiten.Contains(s)) ziel.Seiten.Add(s);
+                        if (!gruppe0.Seiten.Contains(s)) gruppe0.Seiten.Add(s);
 
                 _gruppen.Remove(aktGruppe);
-                _aktGruppeId = _gruppen[0].Id;
+                _aktGruppeId = 0; // nach Löschen immer zu Gruppe 0 zurück
                 AktualisiereGruppenComboBox();
                 AktualisiereAuswahlAnzeige();
             }, "BtnGruppeLöschen_Click");
