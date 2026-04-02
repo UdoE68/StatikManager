@@ -444,8 +444,39 @@ namespace StatikManager.Modules.Werkzeuge
                     SafeExecute(() => ZeicheSeite(i), $"ZeicheSeite[{i}]");
 
                 ZeicheCropLinien();
+                AktualisiereAuswahlAnzeige();
             }
             catch (Exception ex) { LogException(ex, "ZeicheCanvas"); }
+        }
+
+        // Aktualisiert Opacity und Rahmen-Farbe aller Seiten-Borders im Canvas.
+        // Im Modus "Ausgewählt": ausgewählte Seiten = blauer Rahmen, nicht gewählte = Opacity 0.6.
+        // Alle anderen Modi: einheitlich Opacity 1.0, grauer Rahmen.
+        private void AktualisiereAuswahlAnzeige()
+        {
+            bool auswahlModus = _cropModus == CropAnwendungsModus.Ausgewählt;
+            foreach (UIElement child in PdfCanvas.Children)
+            {
+                if (child is not Border b) continue;
+                if (b.Tag is not string tag || !tag.StartsWith("SEITE_")) continue;
+                if (!int.TryParse(tag.Substring(6), out int idx)) continue;
+
+                if (auswahlModus)
+                {
+                    bool gewählt = _cropAuswahlSeiten.Contains(idx);
+                    b.Opacity       = gewählt ? 1.0 : 0.6;
+                    b.BorderBrush   = gewählt
+                        ? new SolidColorBrush(Color.FromRgb(0, 120, 215))   // Blau = ausgewählt
+                        : new SolidColorBrush(Color.FromRgb(160, 160, 160)); // Grau = nicht gewählt
+                    b.BorderThickness = new Thickness(2);
+                }
+                else
+                {
+                    b.Opacity         = 1.0;
+                    b.BorderBrush     = new SolidColorBrush(Color.FromRgb(160, 160, 160));
+                    b.BorderThickness = new Thickness(2);
+                }
+            }
         }
 
         private void ZeicheSeite(int i)
@@ -468,6 +499,7 @@ namespace StatikManager.Modules.Werkzeuge
 
             var blatt = new Border
             {
+                Tag                 = $"SEITE_{i}",
                 Width               = bmpW,
                 Height              = bmpH,
                 Background          = Brushes.White,
@@ -484,6 +516,23 @@ namespace StatikManager.Modules.Werkzeuge
                 Effect              = shadow,
                 SnapsToDevicePixels = true
             };
+
+            // Direktauswahl per Klick: nur im Modus "Ausgewählte Seiten" + Shift oder ToggleButton
+            int seitenIdx = i; // capture für Lambda
+            blatt.MouseLeftButtonDown += (_, ev) =>
+            {
+                if (_cropModus != CropAnwendungsModus.Ausgewählt) return;
+                bool auswahlAktiv = BtnAuswahlmodus?.IsChecked == true
+                                 || (Keyboard.Modifiers & ModifierKeys.Shift) != 0;
+                if (!auswahlAktiv) return;
+                if (_cropAuswahlSeiten.Contains(seitenIdx))
+                    _cropAuswahlSeiten.Remove(seitenIdx);
+                else
+                    _cropAuswahlSeiten.Add(seitenIdx);
+                AktualisiereAuswahlAnzeige();
+                ev.Handled = true;
+            };
+
             double setX = _layoutHorizontal && i < _seitenXStart.Length ? _seitenXStart[i] : SeiteX;
             double setY = _layoutHorizontal ? SeiteX : _seitenYStart[i];
             Canvas.SetLeft(blatt, setX);
@@ -868,6 +917,13 @@ namespace StatikManager.Modules.Werkzeuge
                 _cropAuswahlSeiten = sel;
             }
             _cropModus = (CropAnwendungsModus)Math.Min(idx, 3);
+
+            // ToggleButton aktivierbar nur im Modus "Ausgewählte Seiten"
+            bool istAuswahlModus = _cropModus == CropAnwendungsModus.Ausgewählt;
+            BtnAuswahlmodus.IsEnabled = istAuswahlModus;
+            if (!istAuswahlModus) BtnAuswahlmodus.IsChecked = false;
+
+            AktualisiereAuswahlAnzeige();
         }
 
         private void BtnRandAnzeigen_Checked(object sender, RoutedEventArgs e)
@@ -1177,6 +1233,7 @@ namespace StatikManager.Modules.Werkzeuge
                     }
                     // Selektion für künftige Drag-Operationen übernehmen
                     _cropAuswahlSeiten = zielSeiten;
+                    AktualisiereAuswahlAnzeige();
                 }
                 else
                 {

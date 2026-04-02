@@ -78,7 +78,7 @@
                            ToolTip="Auf welche Seiten werden Rand-&#196;nderungen angewendet (Drag, Dialog, Auto-Rand)"/>
                 <ComboBox x:Name="CmbCropModus"
                           Height="24" MinWidth="130"
-                          Margin="0,0,8,0" FontSize="11"
+                          Margin="0,0,4,0" FontSize="11"
                           ToolTip="Auf welche Seiten werden Rand-&#196;nderungen angewendet"
                           SelectionChanged="CmbCropModus_SelectionChanged">
                     <ComboBoxItem Content="Nur diese Seite" IsSelected="True"/>
@@ -86,6 +86,12 @@
                     <ComboBoxItem Content="Ausgew&#228;hlte Seiten &#8230;"/>
                     <ComboBoxItem Content="Als Standard"/>
                 </ComboBox>
+                <ToggleButton x:Name="BtnAuswahlmodus"
+                              Content="&#x2714; Seiten w&#228;hlen"
+                              Height="26" Padding="6,0"
+                              Margin="0,0,8,0"
+                              IsEnabled="False"
+                              ToolTip="Klicke direkt auf Seiten im Viewer, um sie auszuw&#228;hlen / abzuw&#228;hlen (alternativ: Shift + Klick)"/>
 
                 <!-- ── Sicherheitsabstand für Auto-Rand ──────────────────── -->
                 <TextBlock Text="Abstand:"
