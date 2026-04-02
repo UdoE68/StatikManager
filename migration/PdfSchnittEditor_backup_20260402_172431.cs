@@ -2239,16 +2239,11 @@ namespace StatikManager.Modules.Werkzeuge
                     // Für Template: nutzbaren Bereich aus Tabellenstruktur ermitteln
                     if (vorlagePfad != null && einfügePunkt != null)
                     {
-                        var (zellenB, zellenH) = HoleZellenMasse(einfügePunkt);
-                        if (zellenB.HasValue)
+                        double? zellenB = HoleZellenBreite(einfügePunkt);
+                        if (zellenB.HasValue && zellenB.Value > 10)
                         {
                             App.LogFehler("Export/Schreibbereich", $"Tabellenbreite: {zellenB.Value:F1} pt");
                             availW_pt = zellenB.Value;
-                        }
-                        if (zellenH.HasValue)
-                        {
-                            App.LogFehler("Export/Schreibbereich", $"Tabellenhöhe: {zellenH.Value:F1} pt");
-                            availH_pt = zellenH.Value;
                         }
                     }
                     App.LogFehler("Export/Schreibbereich",
@@ -2269,26 +2264,24 @@ namespace StatikManager.Modules.Werkzeuge
                     if (globalScale < 0.99)
                     {
                         int prozent = (int)Math.Round(globalScale * 100.0);
-                        SkalierungWahl wahl = SkalierungWahl.Abbrechen;
+                        string engpassAchse = scaleW <= scaleH
+                            ? $"Breite: PDF {nativeW_eff:F0} pt > Schreibbereich {availW_pt:F0} pt"
+                            : $"Höhe: PDF {nativeH_eff:F0} pt > Schreibbereich {availH_pt:F0} pt";
                         Dispatcher.Invoke(new Action(() =>
                         {
-                            var dlg = new SkalierungDialog(
-                                prozent,
-                                bildB_pt: nativeW_eff, bildH_pt: nativeH_eff,
-                                zielB_pt: availW_pt,   zielH_pt: availH_pt)
-                            {
-                                Owner = Application.Current?.MainWindow
-                            };
-                            dlg.ShowDialog();
-                            wahl = dlg.Wahl;
+                            var antwort = MessageBox.Show(
+                                $"Der Druckbereich des PDFs ({nativeW_eff:F0} × {nativeH_eff:F0} pt)\n" +
+                                $"ist größer als der Schreibbereich der Word-Vorlage ({availW_pt:F0} × {availH_pt:F0} pt).\n" +
+                                $"  Engpass: {engpassAchse}\n\n" +
+                                $"Hinweis: Die Word-Seitenränder reduzieren den Schreibbereich.\n" +
+                                $"Proportionale Verkleinerung auf {prozent} % passt den Inhalt vollständig ein.\n\n" +
+                                $"Möchten Sie alle Seiten auf {prozent} % verkleinern?\n" +
+                                $"(Nein = Überstand rechts/unten abschneiden, Originalgröße bleibt erhalten)",
+                                "Proportionale Verkleinerung",
+                                MessageBoxButton.YesNo,
+                                MessageBoxImage.Question);
+                            doScale = (antwort == MessageBoxResult.Yes);
                         }));
-
-                        if (wahl == SkalierungWahl.Abbrechen)
-                        {
-                            Dispatcher.BeginInvoke(new Action(() => TxtInfo.Text = "Export abgebrochen."));
-                            return;
-                        }
-                        doScale = (wahl == SkalierungWahl.Verkleinern);
                     }
                     else
                     {
@@ -2298,6 +2291,8 @@ namespace StatikManager.Modules.Werkzeuge
                     App.LogFehler("Export/Skalierung",
                         $"globalScale={globalScale:F4} ({(int)Math.Round(globalScale * 100)} %) | doScale={doScale}");
 
+                    int availW_px = Math.Max(1, (int)Math.Round(availW_pt / 72.0 * ExportDpi));
+                    int availH_px = Math.Max(1, (int)Math.Round(availH_pt / 72.0 * ExportDpi));
                     int gesamtGruppen = hochRes.Count;
 
                     // ── 5. Pro Original-PDF-Seite genau ein Bild → eine Word-Seite ──
@@ -2332,10 +2327,19 @@ namespace StatikManager.Modules.Werkzeuge
                         }
                         else
                         {
-                            // Originalgröße: linksbündig, rechter/unterer Überstand bleibt
-                            finalBmp  = segBmp;
-                            finalW_pt = (float)segW_pt;
-                            finalH_pt = (float)segH_pt;
+                            int clipW = Math.Min(segBmp.PixelWidth,  availW_px);
+                            int clipH = Math.Min(segBmp.PixelHeight, availH_px);
+                            BitmapSource clipped = segBmp;
+                            try
+                            {
+                                var cb = new CroppedBitmap(segBmp, new Int32Rect(0, 0, clipW, clipH));
+                                cb.Freeze();
+                                clipped = cb;
+                            }
+                            catch (Exception ex) { LogException(ex, $"Export/Clip[{gi}]"); }
+                            finalBmp  = clipped;
+                            finalW_pt = (float)(finalBmp.PixelWidth  / ExportDpi * 72.0);
+                            finalH_pt = (float)(finalBmp.PixelHeight / ExportDpi * 72.0);
                         }
 
                         App.LogFehler("Export/Seite",
@@ -2541,12 +2545,11 @@ namespace StatikManager.Modules.Werkzeuge
         }
 
         /// <summary>
-        /// Gibt Breite und Höhe der Tabellenzelle zurück, in der sich die Range befindet.
-        /// Gibt (null, null) zurück wenn die Range nicht in einer Tabelle liegt.
-        /// Höhe wird nur zurückgegeben wenn die Zeile eine feste/Mindesthöhe hat.
+        /// Gibt die Breite der Tabellenzelle zurück, in der sich die Range befindet.
+        /// Gibt null zurück wenn die Range nicht in einer Tabelle liegt.
         /// Rückgabe in Points.
         /// </summary>
-        private static (double? Breite, double? Höhe) HoleZellenMasse(Word.Range r)
+        private static double? HoleZellenBreite(Word.Range r)
         {
             try
             {
@@ -2554,21 +2557,12 @@ namespace StatikManager.Modules.Werkzeuge
                 bool istInTabelle = inTable is bool b ? b : (inTable is int iv && iv != 0);
                 if (istInTabelle)
                 {
-                    var cell   = r.Cells[1];
-                    double?    breite = cell.Width > 10 ? cell.Width : (double?)null;
-                    double?    höhe   = null;
-                    try
-                    {
-                        var row = cell.Row;
-                        if (row.HeightRule != Word.WdRowHeightRule.wdRowHeightAuto)
-                            höhe = row.Height > 10 ? row.Height : (double?)null;
-                    }
-                    catch { }
-                    return (breite, höhe);
+                    var cell = r.Cells[1];
+                    return cell.Width;
                 }
             }
             catch { }
-            return (null, null);
+            return null;
         }
 
         /// <summary>
