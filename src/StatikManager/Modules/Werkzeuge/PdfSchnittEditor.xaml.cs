@@ -92,6 +92,12 @@ namespace StatikManager.Modules.Werkzeuge
         private bool             _modusWahlLäuft;   // Re-Entranz-Schutz für CmbCropModus_SelectionChanged
         private bool             _gruppeWahlLäuft;  // Re-Entranz-Schutz für CmbGruppe_SelectionChanged
 
+        // Bearbeitungsmodus für Seitenzuweisung
+        private bool      _bearbeitungsModus    = false;
+        private List<int> _tempSeiten           = new List<int>();  // Arbeitsauswahl während Bearbeitung
+        private List<int> _tempSeitenOriginal   = new List<int>();  // Snapshot für Abbrechen
+        private bool      _bearbeitungsEndet;   // Re-Entranz-Schutz für BtnAuswahlmodus_Unchecked
+
         // Sicherheitsabstand für automatische Rand-Erkennung (Vorschau-Pixel, min 0, max 50)
         private double _cropSicherheitMm  = 2.0;   // Sicherheitsabstand fuer Auto-Rand (mm)
         private double _pxPerMm           = 4.0;   // Pixel pro mm (beim PDF-Laden berechnet)
@@ -505,6 +511,111 @@ namespace StatikManager.Modules.Werkzeuge
             finally { _gruppeWahlLäuft = false; }
         }
 
+        // ── Bearbeitungsmodus ─────────────────────────────────────────────────
+
+        private void StarteBearbeitungsModus()
+        {
+            var aktGruppe = AktiveGruppe();
+            _tempSeiten         = aktGruppe?.Seiten.ToList() ?? new List<int>();
+            _tempSeitenOriginal = _tempSeiten.ToList();
+            _bearbeitungsModus  = true;
+            BorderBearbeitungsModus.Visibility = Visibility.Visible;
+            if (TxtSeitenBereich != null) TxtSeitenBereich.Clear();
+            AktualisiereTempInfo();
+            AktualisiereAuswahlAnzeige();
+        }
+
+        private void BeendeBearbeitungsModus(bool übernehmen)
+        {
+            if (übernehmen)
+            {
+                var aktGruppe = AktiveGruppe();
+                if (aktGruppe != null)
+                {
+                    // Seiten die aus der Gruppe entfernt werden sollen
+                    var entfernt = aktGruppe.Seiten.Except(_tempSeiten).ToList();
+                    // Seiten die neu zur Gruppe hinzukommen
+                    var hinzugekommen = _tempSeiten.Except(aktGruppe.Seiten).ToList();
+
+                    // Hinzugekommene Seiten: WeiseSeiteZu entfernt sie aus alter Gruppe
+                    foreach (int s in hinzugekommen)
+                        WeiseSeiteZu(s, aktGruppe);
+
+                    // Entfernte Seiten: erste andere Gruppe als Ziel
+                    if (entfernt.Count > 0)
+                    {
+                        var ziel = _gruppen.FirstOrDefault(g => g.Id != aktGruppe.Id);
+                        foreach (int s in entfernt)
+                        {
+                            aktGruppe.Seiten.Remove(s);
+                            if (ziel != null && !ziel.Seiten.Contains(s))
+                                ziel.Seiten.Add(s);
+                            else if (ziel == null)
+                                aktGruppe.Seiten.Add(s); // einzige Gruppe: Seite bleibt
+                        }
+                    }
+                }
+            }
+
+            _tempSeiten.Clear();
+            _tempSeitenOriginal.Clear();
+            _bearbeitungsModus = false;
+            BorderBearbeitungsModus.Visibility = Visibility.Collapsed;
+
+            // BtnAuswahlmodus zurücksetzen ohne Unchecked-Handler auszulösen
+            _bearbeitungsEndet = true;
+            try { if (BtnAuswahlmodus?.IsChecked == true) BtnAuswahlmodus.IsChecked = false; }
+            finally { _bearbeitungsEndet = false; }
+
+            AktualisiereAuswahlAnzeige();
+        }
+
+        private void AktualisiereTempInfo()
+        {
+            if (TxtBearbeitungInfo == null) return;
+            int n = _seitenBilder.Count;
+            TxtBearbeitungInfo.Text = n > 0
+                ? $"{_tempSeiten.Count} von {n} Seiten ausgewählt"
+                : "";
+        }
+
+        // Parst Seitenbereiche wie "1-5,8,10-12" (1-basiert) → 0-basierte Indizes.
+        private List<int> ParseSeitenBereich(string eingabe)
+        {
+            var seiten = new SortedSet<int>();
+            int n = _seitenBilder.Count;
+            if (n == 0 || string.IsNullOrWhiteSpace(eingabe)) return new List<int>();
+            foreach (var teil in eingabe.Split(','))
+            {
+                var t = teil.Trim();
+                if (t.Contains('-'))
+                {
+                    var parts = t.Split(new[] { '-' }, 2);
+                    if (parts.Length == 2
+                        && int.TryParse(parts[0].Trim(), out int von)
+                        && int.TryParse(parts[1].Trim(), out int bis))
+                    {
+                        for (int i = Math.Max(1, von); i <= Math.Min(n, bis); i++)
+                            seiten.Add(i - 1);
+                    }
+                }
+                else if (int.TryParse(t, out int s) && s >= 1 && s <= n)
+                {
+                    seiten.Add(s - 1);
+                }
+            }
+            return seiten.ToList();
+        }
+
+        // Liefert die Seiten-Menge, auf die Crop-Ops im Modus "Ausgewählt" wirken.
+        // Im Bearbeitungsmodus: _tempSeiten (Arbeitsauswahl), sonst: aktive Gruppe.
+        private IEnumerable<int> AktuelleZielSeiten()
+        {
+            if (_cropModus != CropAnwendungsModus.Ausgewählt) return Enumerable.Empty<int>();
+            if (_bearbeitungsModus) return _tempSeiten;
+            return AktiveGruppe()?.Seiten ?? (IEnumerable<int>)Enumerable.Empty<int>();
+        }
+
         // ── Canvas zeichnen ───────────────────────────────────────────────────
 
         private void ZeicheCanvas()
@@ -557,7 +668,16 @@ namespace StatikManager.Modules.Werkzeuge
                 if (b.Tag is not string tag || !tag.StartsWith("SEITE_")) continue;
                 if (!int.TryParse(tag.Substring(6), out int idx)) continue;
 
-                if (auswahlModus)
+                if (_bearbeitungsModus)
+                {
+                    bool inTemp = _tempSeiten.Contains(idx);
+                    var aktGruppe = AktiveGruppe();
+                    Color farbe   = aktGruppe != null ? FarbeVonGruppe(aktGruppe) : GruppenFarben[0];
+                    b.Opacity         = inTemp ? 1.0 : 0.40;
+                    b.BorderBrush     = new SolidColorBrush(inTemp ? farbe : Color.FromRgb(160, 160, 160));
+                    b.BorderThickness = new Thickness(inTemp ? 3 : 1);
+                }
+                else if (auswahlModus)
                 {
                     var gruppe = GruppeVonSeite(idx);
                     bool istAktiv = gruppe != null && gruppe.Id == _aktGruppeId;
@@ -618,6 +738,20 @@ namespace StatikManager.Modules.Werkzeuge
             blatt.MouseLeftButtonDown += (_, ev) =>
             {
                 if (_cropModus != CropAnwendungsModus.Ausgewählt) return;
+
+                // ── Bearbeitungsmodus: Toggle in _tempSeiten, keine permanente Änderung ──
+                if (_bearbeitungsModus)
+                {
+                    if (_tempSeiten.Contains(seitenIdx))
+                        _tempSeiten.Remove(seitenIdx);
+                    else
+                        _tempSeiten.Add(seitenIdx);
+                    AktualisiereTempInfo();
+                    AktualisiereAuswahlAnzeige();
+                    ev.Handled = true;
+                    return;
+                }
+
                 bool auswahlAktiv = BtnAuswahlmodus?.IsChecked == true
                                  || (Keyboard.Modifiers & ModifierKeys.Shift) != 0;
                 if (!auswahlAktiv) return;
@@ -1053,6 +1187,18 @@ namespace StatikManager.Modules.Werkzeuge
             AktualisiereAuswahlAnzeige();
         }
 
+        private void BtnAuswahlmodus_Checked(object sender, RoutedEventArgs e)
+        {
+            if (_seitenBilder.Count == 0) { BtnAuswahlmodus.IsChecked = false; return; }
+            StarteBearbeitungsModus();
+        }
+
+        private void BtnAuswahlmodus_Unchecked(object sender, RoutedEventArgs e)
+        {
+            if (_bearbeitungsEndet) return; // ausgelöst durch BeendeBearbeitungsModus → ignorieren
+            if (_bearbeitungsModus) BeendeBearbeitungsModus(false); // User deaktiviert Toggle = Abbrechen
+        }
+
         // ── Gruppen-Handler ───────────────────────────────────────────────────
 
         private void CmbGruppe_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -1120,6 +1266,50 @@ namespace StatikManager.Modules.Werkzeuge
                 AktualisiereGruppenComboBox();
                 AktualisiereAuswahlAnzeige();
             }, "BtnGruppeLöschen_Click");
+        }
+
+        // ── Bearbeitungs-Handler ──────────────────────────────────────────────
+
+        private void BtnBearbeitungOk_Click(object sender, RoutedEventArgs e)
+            => SafeExecute(() => BeendeBearbeitungsModus(true), "BtnBearbeitungOk_Click");
+
+        private void BtnBearbeitungAbbrechen_Click(object sender, RoutedEventArgs e)
+            => SafeExecute(() => BeendeBearbeitungsModus(false), "BtnBearbeitungAbbrechen_Click");
+
+        private void BtnAlleSeiten_Click(object sender, RoutedEventArgs e)
+            => SafeExecute(() =>
+            {
+                _tempSeiten = Enumerable.Range(0, _seitenBilder.Count).ToList();
+                AktualisiereTempInfo();
+                AktualisiereAuswahlAnzeige();
+            }, "BtnAlleSeiten_Click");
+
+        private void BtnKeineSeiten_Click(object sender, RoutedEventArgs e)
+            => SafeExecute(() =>
+            {
+                _tempSeiten.Clear();
+                AktualisiereTempInfo();
+                AktualisiereAuswahlAnzeige();
+            }, "BtnKeineSeiten_Click");
+
+        private void BtnBereichHinzufügen_Click(object sender, RoutedEventArgs e)
+            => SafeExecute(() =>
+            {
+                var neu = ParseSeitenBereich(TxtSeitenBereich?.Text ?? "");
+                foreach (int s in neu)
+                    if (!_tempSeiten.Contains(s)) _tempSeiten.Add(s);
+                if (TxtSeitenBereich != null) TxtSeitenBereich.Clear();
+                AktualisiereTempInfo();
+                AktualisiereAuswahlAnzeige();
+            }, "BtnBereichHinzufügen_Click");
+
+        private void TxtSeitenBereich_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key == Key.Return)
+            {
+                BtnBereichHinzufügen_Click(sender, new RoutedEventArgs());
+                e.Handled = true;
+            }
         }
 
         private void BtnRandAnzeigen_Checked(object sender, RoutedEventArgs e)
@@ -1200,9 +1390,9 @@ namespace StatikManager.Modules.Werkzeuge
                             zielIdxs = aktIdx >= 0 ? new[] { aktIdx } : Enumerable.Empty<int>();
                             break;
                         case CropAnwendungsModus.Ausgewählt:
-                            var agAuto = AktiveGruppe();
-                            zielIdxs = agAuto?.Seiten.Count > 0
-                                ? agAuto.Seiten
+                            var zielMenge = AktuelleZielSeiten().ToList();
+                            zielIdxs = zielMenge.Count > 0
+                                ? zielMenge
                                 : (aktIdx >= 0 ? new[] { aktIdx } : Enumerable.Empty<int>());
                             break;
                         default: // Alle
@@ -1417,10 +1607,10 @@ namespace StatikManager.Modules.Werkzeuge
                 }
                 else if (rbAuswahl.IsChecked == true)
                 {
-                    // Aktive Gruppe verwenden; Fallback: aktive Seite
-                    var agDialog = AktiveGruppe();
-                    zielSeiten = agDialog?.Seiten.Count > 0
-                        ? new List<int>(agDialog.Seiten)
+                    // Im Bearbeitungsmodus: _tempSeiten; sonst aktive Gruppe. Fallback: aktive Seite.
+                    var zielDialog = AktuelleZielSeiten().ToList();
+                    zielSeiten = zielDialog.Count > 0
+                        ? zielDialog
                         : new List<int> { aktSeite };
                 }
                 else
@@ -1776,9 +1966,9 @@ namespace StatikManager.Modules.Werkzeuge
                         Enumerable.Range(0, _seitenBilder.Count));
                     break;
                 case CropAnwendungsModus.Ausgewählt:
-                    var agDrag = AktiveGruppe();
-                    if (agDrag?.Seiten.Count > 0)
-                        KopiereCropAufSeiten(quellIdx, qL, qR, qO, qU, agDrag.Seiten);
+                    var zielDrag = AktuelleZielSeiten().ToList();
+                    if (zielDrag.Count > 0)
+                        KopiereCropAufSeiten(quellIdx, qL, qR, qO, qU, zielDrag);
                     break;
             }
         }

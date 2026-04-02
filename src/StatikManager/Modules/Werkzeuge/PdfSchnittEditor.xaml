@@ -5,6 +5,7 @@
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
@@ -87,11 +88,13 @@
                     <ComboBoxItem Content="Als Standard"/>
                 </ComboBox>
                 <ToggleButton x:Name="BtnAuswahlmodus"
-                              Content="&#x2714; Seiten zuweisen"
+                              Content="&#x270E; Seiten bearbeiten"
                               Height="26" Padding="6,0"
                               Margin="0,0,8,0"
                               IsEnabled="False"
-                              ToolTip="Klicke auf Seiten im Viewer, um sie der aktiven Gruppe zuzuweisen (alternativ: Shift + Klick)"/>
+                              ToolTip="Bearbeitungsmodus starten: Seiten der aktiven Gruppe per Klick zuweisen / entfernen"
+                              Checked="BtnAuswahlmodus_Checked"
+                              Unchecked="BtnAuswahlmodus_Unchecked"/>
 
                 <!-- ── Gruppen ──────────────────────────────────────────────── -->
                 <TextBlock Text="Gruppe:" VerticalAlignment="Center"
@@ -175,8 +178,80 @@
             </StackPanel>
         </Border>
 
+        <!-- ── Bearbeitungs-Toolbar (nur im Bearbeitungsmodus sichtbar) ──── -->
+        <Border x:Name="BorderBearbeitungsModus"
+                Grid.Row="1"
+                Visibility="Collapsed"
+                Background="#FFF8E1"
+                BorderBrush="{DynamicResource Farbe.Rahmen}"
+                BorderThickness="0,0,0,1"
+                Padding="8,5">
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+
+                <TextBlock Text="Seiten bearbeiten:"
+                           FontWeight="SemiBold" FontSize="11"
+                           VerticalAlignment="Center" Margin="0,0,8,0"/>
+
+                <!-- Bereichseingabe -->
+                <TextBlock Text="Bereich:" VerticalAlignment="Center"
+                           Margin="0,0,4,0" FontSize="11"/>
+                <TextBox x:Name="TxtSeitenBereich"
+                         Width="100" Height="24"
+                         Margin="0,0,4,0" FontSize="11"
+                         VerticalContentAlignment="Center"
+                         ToolTip="Seitenbereiche eingeben, z.B. 1-5,8,10-12"
+                         KeyDown="TxtSeitenBereich_KeyDown"/>
+                <Button x:Name="BtnBereichHinzufügen"
+                        Content="+ Hinzufügen"
+                        Height="26" Padding="6,0"
+                        Margin="0,0,8,0" FontSize="11"
+                        ToolTip="Eingegebene Seiten zur Auswahl hinzufügen"
+                        Click="BtnBereichHinzufügen_Click"/>
+
+                <Separator Width="1" Height="18" Background="#BBB" Margin="0,0,8,0"/>
+
+                <!-- Alle / Keine -->
+                <Button x:Name="BtnAlleSeiten"
+                        Content="Alle"
+                        Height="26" Padding="8,0"
+                        Margin="0,0,4,0" FontSize="11"
+                        ToolTip="Alle Seiten auswählen"
+                        Click="BtnAlleSeiten_Click"/>
+                <Button x:Name="BtnKeineSeiten"
+                        Content="Keine"
+                        Height="26" Padding="8,0"
+                        Margin="0,0,8,0" FontSize="11"
+                        ToolTip="Alle Seiten abwählen"
+                        Click="BtnKeineSeiten_Click"/>
+
+                <Separator Width="1" Height="18" Background="#BBB" Margin="0,0,8,0"/>
+
+                <!-- OK / Abbrechen -->
+                <Button x:Name="BtnBearbeitungOk"
+                        Content="&#x2714; OK"
+                        Height="26" Padding="10,0"
+                        Margin="0,0,4,0"
+                        Style="{StaticResource PrimaryButton}"
+                        ToolTip="Seitenzuweisung übernehmen"
+                        Click="BtnBearbeitungOk_Click"/>
+                <Button x:Name="BtnBearbeitungAbbrechen"
+                        Content="&#x2716; Abbrechen"
+                        Height="26" Padding="6,0"
+                        Margin="0,0,12,0" FontSize="11"
+                        ToolTip="Änderungen verwerfen"
+                        Click="BtnBearbeitungAbbrechen_Click"/>
+
+                <!-- Zählinfo -->
+                <TextBlock x:Name="TxtBearbeitungInfo"
+                           VerticalAlignment="Center"
+                           Foreground="#666" FontSize="11"
+                           FontStyle="Italic"/>
+
+            </StackPanel>
+        </Border>
+
         <!-- ── Vorschau ───────────────────────────────────────────────────── -->
-        <ScrollViewer Grid.Row="1"
+        <ScrollViewer Grid.Row="2"
                       x:Name="ScrollView"
                       HorizontalScrollBarVisibility="Auto"
                       VerticalScrollBarVisibility="Auto"
