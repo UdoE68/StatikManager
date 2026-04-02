@@ -400,10 +400,8 @@ namespace StatikManager.Modules.Werkzeuge
             var cropOK = (double[])_cropOben.Clone();
             var cropUK = (double[])_cropUnten.Clone();
 
-            string? vorlagePfad = WähleVorlage();
-
             var thread = new Thread(() =>
-                ExportThreadWorker(zielPfad, pdfK, yStartK, höheK, cropLK, cropRK, cropOK, cropUK, vorlagePfad))
+                ExportThreadWorker(zielPfad, pdfK, yStartK, höheK, cropLK, cropRK, cropOK, cropUK))
             { IsBackground = true, Name = "PdfSchnittExport" };
             thread.SetApartmentState(ApartmentState.STA);
             thread.Start();
@@ -2156,8 +2154,7 @@ namespace StatikManager.Modules.Werkzeuge
         private void ExportThreadWorker(
             string zielPfad, string pdfPfad,
             double[] seitenYStart, double[] seitenHöhe,
-            double[] cropLinks, double[] cropRechts, double[] cropOben, double[] cropUnten,
-            string? vorlagePfad = null)
+            double[] cropLinks, double[] cropRechts, double[] cropOben, double[] cropUnten)
         {
             var alleTemp = new List<string>();
             var sw = System.Diagnostics.Stopwatch.StartNew();
@@ -2219,33 +2216,13 @@ namespace StatikManager.Modules.Werkzeuge
                 {
                     wordApp = new Word.Application { Visible = false };
                     wordApp.DisplayAlerts = Word.WdAlertLevel.wdAlertsNone;
+                    wordDoc = wordApp.Documents.Add();
+                    NormiereAbsatzstil(wordDoc);
 
-                    Word.Range? einfügePunkt = null;
-                    if (vorlagePfad != null)
-                    {
-                        wordDoc = ÖffneVorlage(wordApp, vorlagePfad);
-                        NormiereAbsatzstil(wordDoc);
-                        einfügePunkt = HoleEinfügePunkt(wordDoc);
-                    }
-                    else
-                    {
-                        wordDoc = wordApp.Documents.Add();
-                        NormiereAbsatzstil(wordDoc);
-                        SetzeWordSeitenFormat(wordDoc, nativeW_pts, nativeH_pts);
-                    }
+                    // Seitenformat in Word passend zur PDF-Seite einstellen
+                    SetzeWordSeitenFormat(wordDoc, nativeW_pts, nativeH_pts);
 
                     var (availW_pt, availH_pt) = HoleSchreibbereich(wordDoc);
-
-                    // Für Template: nutzbaren Bereich aus Tabellenstruktur ermitteln
-                    if (vorlagePfad != null && einfügePunkt != null)
-                    {
-                        double? zellenB = HoleZellenBreite(einfügePunkt);
-                        if (zellenB.HasValue && zellenB.Value > 10)
-                        {
-                            App.LogFehler("Export/Schreibbereich", $"Tabellenbreite: {zellenB.Value:F1} pt");
-                            availW_pt = zellenB.Value;
-                        }
-                    }
                     App.LogFehler("Export/Schreibbereich",
                         $"Vorlage: {availW_pt:F1} × {availH_pt:F1} pt | " +
                         $"Druckbereich: {nativeW_eff:F1} × {nativeH_eff:F1} pt");
@@ -2358,10 +2335,8 @@ namespace StatikManager.Modules.Werkzeuge
                         catch (Exception ex) { LogException(ex, $"Export/PNG[{gi}]"); continue; }
 
                         bool seitenumbruch = (seiteNr > 1);
-                        Word.Range? thisInsertAt = (gi == 0) ? einfügePunkt : null;
                         try { EinfügenSegment(wordDoc, png, finalW_pt, finalH_pt,
-                                neuerAbsatz: false, seitenumbruchVorher: seitenumbruch,
-                                insertBei: thisInsertAt); }
+                                neuerAbsatz: false, seitenumbruchVorher: seitenumbruch); }
                         catch (Exception ex) { LogException(ex, $"Export/Word[{gi}]"); }
                     }
                     App.LogFehler("Export/Timing",
@@ -2492,79 +2467,6 @@ namespace StatikManager.Modules.Werkzeuge
             }
         }
 
-        // ── Vorlagen-Hilfsmethoden ────────────────────────────────────────────
-
-        /// <summary>
-        /// Wählt die zu verwendende Word-Vorlage aus den Einstellungen.
-        /// Gibt null zurück wenn keine Vorlage konfiguriert ist (Legacy-Modus).
-        /// </summary>
-        private string? WähleVorlage()
-        {
-            var vorlagen = Einstellungen.Instanz.WordVorlagen
-                .Where(v => !string.IsNullOrWhiteSpace(v.Pfad) && IO.File.Exists(v.Pfad))
-                .ToList();
-
-            if (vorlagen.Count == 0) return null;
-            if (vorlagen.Count == 1) return vorlagen[0].Pfad;
-
-            var standard = vorlagen.FirstOrDefault(v => v.Standard);
-            return standard?.Pfad ?? vorlagen[0].Pfad;
-        }
-
-        /// <summary>
-        /// Öffnet ein neues Dokument auf Basis der angegebenen Word-Vorlage.
-        /// </summary>
-        private static Word.Document ÖffneVorlage(Word.Application app, string vorlagePfad)
-        {
-            return app.Documents.Add(Template: vorlagePfad);
-        }
-
-        /// <summary>
-        /// Sucht die Textmarke "BILD_BEREICH" und gibt deren Range zurück (Inhalt wird gelöscht).
-        /// Fallback: Ende des Dokuments.
-        /// </summary>
-        private static Word.Range HoleEinfügePunkt(Word.Document doc)
-        {
-            try
-            {
-                if (doc.Bookmarks.Exists("BILD_BEREICH"))
-                {
-                    var bm = doc.Bookmarks["BILD_BEREICH"];
-                    var r  = bm.Range;
-                    r.Delete();
-                    App.LogFehler("Export/Textmarke", "Textmarke BILD_BEREICH gefunden und geleert");
-                    return r;
-                }
-                App.LogFehler("Export/Textmarke", "Textmarke BILD_BEREICH nicht gefunden – Fallback: Dokumentende");
-            }
-            catch (Exception ex) { LogException(ex, "HoleEinfügePunkt"); }
-
-            var fallback = doc.Content;
-            fallback.Collapse(Word.WdCollapseDirection.wdCollapseEnd);
-            return fallback;
-        }
-
-        /// <summary>
-        /// Gibt die Breite der Tabellenzelle zurück, in der sich die Range befindet.
-        /// Gibt null zurück wenn die Range nicht in einer Tabelle liegt.
-        /// Rückgabe in Points.
-        /// </summary>
-        private static double? HoleZellenBreite(Word.Range r)
-        {
-            try
-            {
-                var inTable = r.Information[Word.WdInformation.wdWithInTable];
-                bool istInTabelle = inTable is bool b ? b : (inTable is int iv && iv != 0);
-                if (istInTabelle)
-                {
-                    var cell = r.Cells[1];
-                    return cell.Width;
-                }
-            }
-            catch { }
-            return null;
-        }
-
         /// <summary>
         /// Setzt das Word-Seitenformat (Größe, Ausrichtung, Ränder) passend zur PDF-Seite.
         /// Ränder werden auf 0 gesetzt, damit das Bild die volle Seite füllt.
@@ -2641,8 +2543,7 @@ namespace StatikManager.Modules.Werkzeuge
             string bildPfad,
             float imgW_pt, float imgH_pt,
             bool neuerAbsatz,
-            bool seitenumbruchVorher = false,
-            Word.Range? insertBei = null)
+            bool seitenumbruchVorher = false)
         {
             if (seitenumbruchVorher || neuerAbsatz)
             {
@@ -2651,16 +2552,8 @@ namespace StatikManager.Modules.Werkzeuge
                 rNew.InsertParagraphAfter();
             }
 
-            Word.Range r;
-            if (insertBei != null)
-            {
-                r = insertBei;
-            }
-            else
-            {
-                r = doc.Content;
-                r.Collapse(Word.WdCollapseDirection.wdCollapseEnd);
-            }
+            Word.Range r = doc.Content;
+            r.Collapse(Word.WdCollapseDirection.wdCollapseEnd);
 
             SetzeAbsatzFormat(r.ParagraphFormat);
             try { r.ParagraphFormat.PageBreakBefore = seitenumbruchVorher ? -1 : 0; } catch { }
