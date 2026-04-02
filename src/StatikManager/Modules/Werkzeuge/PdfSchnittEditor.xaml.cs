@@ -551,6 +551,7 @@ namespace StatikManager.Modules.Werkzeuge
                         if (seitenIdx < _cropOben.Length)   _cropOben[seitenIdx]   = Math.Min(qO * qRefH / iRefH, 0.49);
                         if (seitenIdx < _cropUnten.Length)  _cropUnten[seitenIdx]  = Math.Min(qU * qRefH / iRefH, 0.49);
                         AktualisiereCropLinien();
+                        if (BtnRandAnzeigen.IsChecked != true) BtnRandAnzeigen.IsChecked = true;
                     }
                 }
                 AktualisiereAuswahlAnzeige();
