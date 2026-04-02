@@ -530,6 +530,11 @@ namespace StatikManager.Modules.Werkzeuge
             _tempSeitenOriginal = _tempSeiten.ToList();
             _bearbeitungsModus  = true;
             BorderBearbeitungsModus.Visibility = Visibility.Visible;
+            // Gruppe und Crop-Modus während Bearbeitung sperren
+            CmbGruppe.IsEnabled        = false;
+            BtnGruppeNeu.IsEnabled     = false;
+            BtnGruppeLöschen.IsEnabled = false;
+            CmbCropModus.IsEnabled     = false;
             if (TxtSeitenBereich != null) TxtSeitenBereich.Clear();
             AktualisiereTempInfo();
             AktualisiereAuswahlAnzeige();
@@ -572,6 +577,12 @@ namespace StatikManager.Modules.Werkzeuge
             _tempSeitenOriginal.Clear();
             _bearbeitungsModus = false;
             BorderBearbeitungsModus.Visibility = Visibility.Collapsed;
+
+            // Gruppe und Crop-Modus wieder freigeben
+            CmbGruppe.IsEnabled        = true;
+            BtnGruppeNeu.IsEnabled     = true;
+            BtnGruppeLöschen.IsEnabled = _gruppen.Count > 1 && AktiveGruppe()?.Id != 0;
+            CmbCropModus.IsEnabled     = true;
 
             // BtnAuswahlmodus zurücksetzen ohne Unchecked-Handler auszulösen
             _bearbeitungsEndet = true;
@@ -750,7 +761,6 @@ namespace StatikManager.Modules.Werkzeuge
             {
                 // Außerhalb Bearbeitungsmodus: keine Gruppenänderung, normale Navigation
                 if (!_bearbeitungsModus) return;
-                if (_cropModus != CropAnwendungsModus.Ausgewählt) return;
 
                 // Toggle in _tempSeiten — permanente Gruppenstruktur bleibt unberührt
                 if (_tempSeiten.Contains(seitenIdx))
