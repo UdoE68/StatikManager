@@ -1206,275 +1206,87 @@ namespace StatikManager.Modules.Werkzeuge
         // Gibt die Indizes der gewählten Seiten zurück; leere Liste = Abbruch.
         private List<int> WähleSeiten(int aktSeite, Window? owner = null)
         {
-            int n        = _seitenBilder.Count;
-            var selected = new bool[n];
-            if (aktSeite >= 0 && aktSeite < n) selected[aktSeite] = true;
-            int aktIdx   = Math.Max(0, Math.Min(n - 1, aktSeite));
+            int n = _seitenBilder.Count;
 
-            // ── Alle UI-Controls vorab deklarieren (Reihenfolge wichtig für lokale Funktionen) ──
-
-            // Rechte Vorschau
-            var imgVorschau = new Image
-            {
-                Stretch             = Stretch.Uniform,
-                HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment   = VerticalAlignment.Center,
-                Margin              = new Thickness(6)
-            };
-
-            // Navigations-Zeile
-            var btnZurück = new Button { Content = "\u25c4  Zur\u00fcck", Width = 90, Height = 26, Margin = new Thickness(0, 0, 8, 0) };
-            var btnWeiter = new Button { Content = "Weiter  \u25ba", Width = 90, Height = 26, Margin = new Thickness(8, 0, 0, 0) };
-            var txtSeite  = new TextBlock
-            {
-                VerticalAlignment   = VerticalAlignment.Center,
-                HorizontalAlignment = HorizontalAlignment.Center,
-                FontSize            = 12,
-                MinWidth            = 100,
-                TextAlignment       = TextAlignment.Center
-            };
-
-            // Toggle "Diese Seite auswählen"
-            var cbDiese = new CheckBox
-            {
-                Content  = "Diese Seite ausw\u00e4hlen",
-                FontSize = 12,
-                Margin   = new Thickness(8, 2, 8, 6)
-            };
-
-            // Header-Anzahl
-            var txtAnzahl = new TextBlock
-            {
-                FontSize            = 11,
-                Foreground          = new SolidColorBrush(Color.FromRgb(80, 80, 80)),
-                HorizontalAlignment = HorizontalAlignment.Right,
-                VerticalAlignment   = VerticalAlignment.Center,
-                Margin              = new Thickness(0, 0, 6, 0)
-            };
-
-            // Linke Seitenliste
-            var listSp  = new StackPanel();
-            var listCbs = new CheckBox[n];
-            var listBtn = new Border[n];
-
-            // Footer
-            var btnAlle   = new Button { Content = "Alle",      Width = 58, Height = 24, Margin = new Thickness(0, 0, 6, 0) };
-            var btnKeine  = new Button { Content = "Keine",     Width = 58, Height = 24 };
-            bool ok       = false;
-            Window? dlg   = null;
-            var btnOk     = new Button { Content = "OK",        Width = 70, Height = 26, IsDefault = true, Margin = new Thickness(0, 0, 8, 0) };
-            var btnCancel = new Button { Content = "Abbrechen", Width = 80, Height = 26, IsCancel  = true };
-            btnOk.Click     += (_, __) => { ok = true; dlg!.Close(); };
-            btnCancel.Click += (_, __) => dlg!.Close();
-
-            // ── Interne Aktualisierungsfunktionen ─────────────────────────────
-
-            int AnzahlGewählt() => selected.Count(v => v);
-
-            void AktualisiereAnzahl()
-                => txtAnzahl.Text = $"{AnzahlGewählt()} von {n} ausgew\u00e4hlt";
-
-            void AktualisiereListenMarkierung()
-            {
-                for (int i = 0; i < n; i++)
-                {
-                    listCbs[i].IsChecked   = selected[i];
-                    bool istAktuell        = (i == aktIdx);
-                    listBtn[i].BorderThickness = istAktuell ? new Thickness(2) : new Thickness(0);
-                    listBtn[i].BorderBrush     = istAktuell
-                        ? new SolidColorBrush(Color.FromRgb(0, 120, 215))
-                        : Brushes.Transparent;
-                    if (listBtn[i].Child is StackPanel rowSp)
-                    {
-                        var lbl = rowSp.Children.OfType<TextBlock>().FirstOrDefault();
-                        if (lbl != null)
-                            lbl.FontWeight = istAktuell ? FontWeights.SemiBold : FontWeights.Normal;
-                    }
-                }
-                listBtn[aktIdx].BringIntoView();
-            }
-
-            void ZeigeSeite(int idx)
-            {
-                aktIdx              = Math.Max(0, Math.Min(n - 1, idx));
-                imgVorschau.Source  = _seitenBilder[aktIdx];
-                txtSeite.Text       = $"Seite {aktIdx + 1} von {n}";
-                cbDiese.IsChecked   = selected[aktIdx];
-                btnZurück.IsEnabled = aktIdx > 0;
-                btnWeiter.IsEnabled = aktIdx < n - 1;
-                AktualisiereListenMarkierung();
-            }
-
-            // ── Linke Seitenliste befüllen ────────────────────────────────────
-
+            var cSp = new StackPanel();
+            var checkboxen = new CheckBox[n];
             for (int i = 0; i < n; i++)
             {
-                int idx = i; // capture für Lambda
-
-                listCbs[i] = new CheckBox
+                checkboxen[i] = new CheckBox
                 {
-                    IsChecked         = selected[i],
-                    IsHitTestVisible  = false,          // rein visuell
-                    VerticalAlignment = VerticalAlignment.Center,
-                    Margin            = new Thickness(0, 0, 6, 0)
+                    Content   = $"Seite {i + 1}",
+                    IsChecked = (i == aktSeite),
+                    Margin    = new Thickness(0, 2, 0, 2)
                 };
-
-                var lbl = new TextBlock
-                {
-                    Text              = $"Seite {i + 1}",
-                    VerticalAlignment = VerticalAlignment.Center,
-                    FontSize          = 12
-                };
-
-                var rowSp = new StackPanel { Orientation = Orientation.Horizontal };
-                rowSp.Children.Add(listCbs[i]);
-                rowSp.Children.Add(lbl);
-
-                listBtn[i] = new Border
-                {
-                    Child      = rowSp,
-                    Padding    = new Thickness(8, 4, 8, 4),
-                    Cursor     = Cursors.Hand,
-                    Background = Brushes.Transparent
-                };
-
-                // Hover-Effekt
-                listBtn[i].MouseEnter += (s, _) =>
-                    ((Border)s!).Background = new SolidColorBrush(Color.FromRgb(220, 232, 248));
-                listBtn[i].MouseLeave += (s, _) =>
-                    ((Border)s!).Background = Brushes.Transparent;
-
-                // Klick → nur navigieren, keine Auswahländerung
-                listBtn[i].MouseLeftButtonUp += (_, __) => ZeigeSeite(idx);
-
-                listSp.Children.Add(listBtn[i]);
+                cSp.Children.Add(checkboxen[i]);
             }
 
-            // ── Event-Handler ─────────────────────────────────────────────────
-
-            btnZurück.Click += (_, __) => ZeigeSeite(aktIdx - 1);
-            btnWeiter.Click += (_, __) => ZeigeSeite(aktIdx + 1);
-
-            btnZurück.PreviewKeyDown += (_, ev) =>
+            var sv = new ScrollViewer
             {
-                if (ev.Key == Key.Left || ev.Key == Key.Up) { ZeigeSeite(aktIdx - 1); ev.Handled = true; }
-            };
-            btnWeiter.PreviewKeyDown += (_, ev) =>
-            {
-                if (ev.Key == Key.Right || ev.Key == Key.Down) { ZeigeSeite(aktIdx + 1); ev.Handled = true; }
+                MaxHeight = 260,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                Content = cSp,
+                Margin  = new Thickness(0, 0, 0, 6)
             };
 
-            cbDiese.Checked   += (_, __) => { selected[aktIdx] = true;  AktualisiereListenMarkierung(); AktualisiereAnzahl(); };
-            cbDiese.Unchecked += (_, __) => { selected[aktIdx] = false; AktualisiereListenMarkierung(); AktualisiereAnzahl(); };
-
-            btnAlle.Click  += (_, __) => { for (int i = 0; i < n; i++) selected[i] = true;  ZeigeSeite(aktIdx); AktualisiereAnzahl(); };
-            btnKeine.Click += (_, __) => { for (int i = 0; i < n; i++) selected[i] = false; ZeigeSeite(aktIdx); AktualisiereAnzahl(); };
-
-            // ── Layout zusammenbauen ──────────────────────────────────────────
-
-            var listScroll = new ScrollViewer
+            var btnAlle  = new Button { Content = "Alle",  Width = 58, Margin = new Thickness(0, 0, 6, 0) };
+            var btnKeine = new Button { Content = "Keine", Width = 58 };
+            btnAlle.Click  += (_, __) => { foreach (var cb in checkboxen) cb.IsChecked = true;  };
+            btnKeine.Click += (_, __) => { foreach (var cb in checkboxen) cb.IsChecked = false; };
+            var selRow = new StackPanel
             {
-                Content                       = listSp,
-                VerticalScrollBarVisibility   = ScrollBarVisibility.Auto,
-                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
-                MinWidth                      = 130,
-                MaxWidth                      = 160
+                Orientation = Orientation.Horizontal,
+                Margin      = new Thickness(0, 0, 0, 8)
             };
+            selRow.Children.Add(btnAlle);
+            selRow.Children.Add(btnKeine);
 
-            var vorschauBorder = new Border
-            {
-                Child           = imgVorschau,
-                Background      = new SolidColorBrush(Color.FromRgb(74, 74, 74)),
-                BorderBrush     = new SolidColorBrush(Color.FromRgb(160, 160, 160)),
-                BorderThickness = new Thickness(1),
-                Margin          = new Thickness(6, 0, 6, 0)
-            };
-
-            var navRow = new DockPanel { Margin = new Thickness(6, 4, 6, 4) };
-            DockPanel.SetDock(btnZurück, Dock.Left);
-            DockPanel.SetDock(btnWeiter, Dock.Right);
-            navRow.Children.Add(btnZurück);
-            navRow.Children.Add(btnWeiter);
-            navRow.Children.Add(txtSeite);
-
-            var headerRow = new DockPanel { Margin = new Thickness(6, 6, 6, 4) };
-            var headerLbl = new TextBlock
-            {
-                Text              = "Seiten ausw\u00e4hlen",
-                FontWeight        = FontWeights.SemiBold,
-                FontSize          = 13,
-                VerticalAlignment = VerticalAlignment.Center
-            };
-            DockPanel.SetDock(txtAnzahl, Dock.Right);
-            headerRow.Children.Add(txtAnzahl);
-            headerRow.Children.Add(headerLbl);
-
-            var hauptGrid = new Grid();
-            hauptGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            hauptGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            Grid.SetColumn(listScroll,     0);
-            Grid.SetColumn(vorschauBorder, 1);
-            hauptGrid.Children.Add(listScroll);
-            hauptGrid.Children.Add(vorschauBorder);
-
-            var footerLinksRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(6, 0, 0, 0) };
-            footerLinksRow.Children.Add(btnAlle);
-            footerLinksRow.Children.Add(btnKeine);
-
-            var footerRechtsRow = new StackPanel
+            bool ok = false;
+            Window? dlg = null;
+            var btnOk     = new Button { Content = "OK",        Width = 70, IsDefault = true, Margin = new Thickness(0, 0, 8, 0) };
+            var btnCancel = new Button { Content = "Abbrechen", Width = 80, IsCancel  = true };
+            btnOk.Click     += (_, __) => { ok = true; dlg!.Close(); };
+            btnCancel.Click += (_, __) => dlg!.Close();
+            var btnRow = new StackPanel
             {
                 Orientation         = Orientation.Horizontal,
                 HorizontalAlignment = HorizontalAlignment.Right,
-                Margin              = new Thickness(0, 0, 6, 0)
+                Margin              = new Thickness(0, 4, 0, 0)
             };
-            footerRechtsRow.Children.Add(btnOk);
-            footerRechtsRow.Children.Add(btnCancel);
+            btnRow.Children.Add(btnOk);
+            btnRow.Children.Add(btnCancel);
 
-            var footerRow = new DockPanel { Margin = new Thickness(0, 4, 0, 6) };
-            DockPanel.SetDock(footerRechtsRow, Dock.Right);
-            footerRow.Children.Add(footerRechtsRow);
-            footerRow.Children.Add(footerLinksRow);
-
-            var rootGrid = new Grid();
-            rootGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            rootGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            rootGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-            rootGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            rootGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            rootGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            rootGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            rootGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-
-            void SetRow(UIElement el, int row) { Grid.SetRow(el, row); rootGrid.Children.Add(el); }
-            SetRow(headerRow,                  0);
-            SetRow(new Separator(),            1);
-            SetRow(hauptGrid,                  2);
-            SetRow(new Separator(),            3);
-            SetRow(navRow,                     4);
-            SetRow(cbDiese,                    5);
-            SetRow(new Separator(),            6);
-            SetRow(footerRow,                  7);
+            var sp = new StackPanel { Margin = new Thickness(14) };
+            sp.Children.Add(new TextBlock
+            {
+                Text       = "Seiten ausw\u00e4hlen:",
+                FontWeight = FontWeights.SemiBold,
+                Margin     = new Thickness(0, 0, 0, 6)
+            });
+            sp.Children.Add(sv);
+            sp.Children.Add(selRow);
+            sp.Children.Add(btnRow);
 
             dlg = new Window
             {
                 Title                 = "Seiten ausw\u00e4hlen",
-                Content               = rootGrid,
-                Width                 = 680,
-                Height                = 520,
-                MinWidth              = 500,
-                MinHeight             = 380,
+                Content               = sp,
+                SizeToContent         = SizeToContent.WidthAndHeight,
+                MinWidth              = 200,
                 WindowStartupLocation = WindowStartupLocation.CenterOwner,
                 Owner                 = owner,
-                ResizeMode            = ResizeMode.CanResize,
+                ResizeMode            = ResizeMode.NoResize,
                 ShowInTaskbar         = false
             };
-
-            AktualisiereAnzahl();
-            ZeigeSeite(aktIdx);
             dlg.ShowDialog();
 
             if (!ok) return new List<int>();
-            return Enumerable.Range(0, n).Where(i => selected[i]).ToList();
+
+            var result = new List<int>();
+            for (int i = 0; i < n; i++)
+                if (checkboxen[i].IsChecked == true)
+                    result.Add(i);
+            return result;
         }
 
         // ── Crop-Modus Propagierung ───────────────────────────────────────────
