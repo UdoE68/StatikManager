@@ -2292,31 +2292,21 @@ namespace StatikManager.Modules.Werkzeuge
 
                     // ── DIAGNOSE: Zielbereich-Breakdown als MessageBox ───────────
                     {
-                        var ps2 = wordDoc!.PageSetup;
-                        double effUntererRand2    = Math.Max(ps2.BottomMargin, ps2.FooterDistance);
-                        double footerOberkante2   = ps2.PageHeight - ps2.FooterDistance;
-                        double satzspiegelH2      = ps2.PageHeight - ps2.TopMargin - effUntererRand2;
-                        string quelleBotM         = ps2.FooterDistance > ps2.BottomMargin
-                                                    ? $"FooterDistance ({ps2.FooterDistance:F1} pt)"
-                                                    : $"BottomMargin ({ps2.BottomMargin:F1} pt)";
+                        var ps2     = wordDoc!.PageSetup;
                         string quelleB = zellenB.HasValue ? "Tabellenbreite" : "Satzspiegel";
                         string quelleH = zellenH.HasValue ? "Zeilenhöhe fix" : "Satzspiegel";
                         Dispatcher.Invoke(new Action(() =>
                             MessageBox.Show(
-                                $"── Seitenmaße ─────────────────────────\n" +
-                                $"Seitenhöhe:         {ps2.PageHeight:F1} pt\n" +
-                                $"TopMargin:          {ps2.TopMargin:F1} pt\n" +
-                                $"BottomMargin:       {ps2.BottomMargin:F1} pt\n" +
-                                $"HeaderDistance:     {ps2.HeaderDistance:F1} pt\n" +
-                                $"FooterDistance:     {ps2.FooterDistance:F1} pt\n\n" +
-                                $"── Footer-Analyse ──────────────────────\n" +
-                                $"Footer-Oberkante (PageH−FooterDist): {footerOberkante2:F1} pt von oben\n" +
-                                $"Eff. unterer Rand:  {effUntererRand2:F1} pt  (Quelle: {quelleBotM})\n" +
-                                $"Satzspiegel-Höhe:   {satzspiegelH2:F1} pt\n\n" +
-                                $"── Finaler Zielbereich ─────────────────\n" +
+                                $"── Seitenmaße ──────────────────\n" +
+                                $"Seitenhöhe:     {ps2.PageHeight:F1} pt\n" +
+                                $"TopMargin:      {ps2.TopMargin:F1} pt\n" +
+                                $"BottomMargin:   {ps2.BottomMargin:F1} pt\n" +
+                                $"HeaderDistance: {ps2.HeaderDistance:F1} pt\n" +
+                                $"FooterDistance: {ps2.FooterDistance:F1} pt\n\n" +
+                                $"── Zielbereich ─────────────────\n" +
                                 $"Breite: {availW_pt:F0} pt  (Quelle: {quelleB})\n" +
                                 $"Höhe:   {availH_pt:F0} pt  (Quelle: {quelleH})\n\n" +
-                                $"── Bild ────────────────────────────────\n" +
+                                $"── Bild ────────────────────────\n" +
                                 $"Breite: {nativeW_eff:F0} pt\n" +
                                 $"Höhe:   {nativeH_eff:F0} pt",
                                 "DIAGNOSE – Zielbereich",
@@ -2547,15 +2537,14 @@ namespace StatikManager.Modules.Werkzeuge
         /// <summary>
         /// Liest den tatsächlich verfügbaren Schreibbereich des Word-Dokuments.
         ///
-        /// Breite = PageWidth − LeftMargin − RightMargin
+        /// Berechnung:
+        ///   Breite = PageWidth − LeftMargin − RightMargin
+        ///   Höhe   = PageHeight − TopMargin − BottomMargin
         ///
-        /// Höhe: untere Nutzgrenze = PageHeight − max(BottomMargin, FooterDistance)
-        ///   • BottomMargin  = Abstand Seitenende → Ende Körperbereich
-        ///   • FooterDistance = Abstand Seitenende → Oberkante Fußzeile
-        ///   → Wenn FooterDistance > BottomMargin, ragt die Fußzeile in den Body:
-        ///     FooterDistance wird dann als harte Untergrenze verwendet.
-        ///   → Wenn FooterDistance ≤ BottomMargin, liegt Fußzeile innerhalb des Rands:
-        ///     BottomMargin bleibt maßgeblich (bestehende Formel).
+        /// In Word enthält TopMargin bereits den Kopfzeilen-Bereich
+        /// (Kopfzeile liegt zwischen HeaderDistance und TopMargin).
+        /// BottomMargin enthält entsprechend den Fußzeilen-Bereich.
+        /// Diese Formel liefert den tatsächlichen Körper-Bereich (Satzspiegel).
         ///
         /// Rückgabe in Points (72 pt = 1 inch).
         /// Fallback: A4 mit 2,5 cm Rand ≈ 451 × 694 pt.
@@ -2565,20 +2554,13 @@ namespace StatikManager.Modules.Werkzeuge
             try
             {
                 var ps = doc.PageSetup;
-                double w = ps.PageWidth - ps.LeftMargin - ps.RightMargin;
-
-                // Untere Nutzgrenze: Fußzeilen-Oberkante als harte Grenze wenn sie über
-                // die BottomMargin hinausragt (FooterDistance = Abstand Seitenende → Footer-Oberkante)
-                double effUntererRand = Math.Max(ps.BottomMargin, ps.FooterDistance);
-                double footerOberkanteVonOben = ps.PageHeight - ps.FooterDistance;
-                double h = ps.PageHeight - ps.TopMargin - effUntererRand;
+                double w = ps.PageWidth  - ps.LeftMargin - ps.RightMargin;
+                double h = ps.PageHeight - ps.TopMargin  - ps.BottomMargin;
 
                 App.LogFehler("HoleSchreibbereich",
-                    $"PageH={ps.PageHeight:F1} | TopM={ps.TopMargin:F1} | " +
-                    $"BotM={ps.BottomMargin:F1} | FooterDist={ps.FooterDistance:F1} | " +
-                    $"FooterOberkanteVonOben={footerOberkanteVonOben:F1} | " +
-                    $"EffUntererRand={effUntererRand:F1} (={( ps.FooterDistance > ps.BottomMargin ? "FooterDist" : "BottomMargin")}) | " +
-                    $"W={w:F1} | H={h:F1}");
+                    $"PageH={ps.PageHeight:F1} | TopM={ps.TopMargin:F1} | BotM={ps.BottomMargin:F1} " +
+                    $"| HeaderDist={ps.HeaderDistance:F1} | FooterDist={ps.FooterDistance:F1} " +
+                    $"| W={w:F1} | H={h:F1}");
 
                 return (Math.Max(10.0, w), Math.Max(10.0, h));
             }

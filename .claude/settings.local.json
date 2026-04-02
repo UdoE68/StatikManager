@@ -76,7 +76,8 @@
       "Bash(powershell -Command \"& 'C:\\\\Program Files\\\\Microsoft Visual Studio\\\\2022\\\\Community\\\\MSBuild\\\\Current\\\\Bin\\\\MSBuild.exe' 'C:\\\\KI\\\\StatikManager_V1\\\\src\\\\StatikManager\\\\StatikManager.csproj' /p:Platform=x64 /p:Configuration=Debug /t:Build /v:minimal 2>&1 | Select-String -Pattern 'error CS|error MSB3|-> ' | Select-Object -Last 5\")",
       "Bash(grep -E \"\\\\.cs$\")",
       "Bash(\"C:/Program Files/Microsoft Visual Studio/2022/Community/MSBuild/Current/Bin/MSBuild.exe\" src/StatikManager/StatikManager.csproj /p:Configuration=Debug /t:Build /v:minimal)",
-      "Bash(\"C:/Program Files/Microsoft Visual Studio/2022/Community/MSBuild/Current/Bin/MSBuild.exe\" \"src/StatikManager/StatikManager.csproj\" \"/p:Configuration=Debug\" \"/t:Build\" \"/v:minimal\")"
+      "Bash(\"C:/Program Files/Microsoft Visual Studio/2022/Community/MSBuild/Current/Bin/MSBuild.exe\" \"src/StatikManager/StatikManager.csproj\" \"/p:Configuration=Debug\" \"/t:Build\" \"/v:minimal\")",
+      "Bash(powershell -Command \"& 'C:\\\\Program Files\\\\Microsoft Visual Studio\\\\2022\\\\Community\\\\MSBuild\\\\Current\\\\Bin\\\\MSBuild.exe' 'C:\\\\KI\\\\StatikManager_V1\\\\src\\\\StatikManager\\\\StatikManager.csproj' /p:Configuration=Debug /p:Platform=x64 /t:Build /v:minimal 2>&1 | Select-Object -Last 20\")"
     ]
   }
 }
