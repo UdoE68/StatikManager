@@ -9,6 +9,7 @@ namespace StatikManager.Infrastructure
         SchnittEditor,
         WordVorschau,
         Browser,
+        JsonVorschau,
         KeinVorschau
     }
 
@@ -26,6 +27,7 @@ namespace StatikManager.Infrastructure
             else if (DateiTypen.IstWordDatei(ext))  typ = VorschauTyp.WordVorschau;
             else if (DateiTypen.IstBildDatei(ext))  typ = VorschauTyp.Browser;
             else if (DateiTypen.IstHtmlDatei(ext))  typ = VorschauTyp.Browser;
+            else if (DateiTypen.IstJsonDatei(ext))  typ = VorschauTyp.JsonVorschau;
             else                                     typ = VorschauTyp.KeinVorschau;
 
             Logger.Debug("Routing", $"{ext} → {typ} ({System.IO.Path.GetFileName(dateipfad)})");

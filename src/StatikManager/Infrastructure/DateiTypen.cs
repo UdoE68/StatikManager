@@ -28,6 +28,9 @@ namespace StatikManager.Infrastructure
             return e == ".html" || e == ".htm";
         }
 
+        public static bool IstJsonDatei(string ext)
+            => ext.Equals(".json", StringComparison.OrdinalIgnoreCase);
+
         /// <summary>
         /// Dateitypen, die im Statik-Manager nie per Shell geöffnet werden dürfen.
         /// Beispiel: .axs würde AxisVM starten; .exe/.bat sind gefährlich.
@@ -50,6 +53,7 @@ namespace StatikManager.Infrastructure
             if (e == ".pdf")                                                   return "📑";
             if (e == ".jpg"  || e == ".jpeg"  || e == ".png"
              || e == ".gif"  || e == ".bmp"   || e == ".tif"  || e == ".tiff") return "🖼️";
+            if (e == ".json") return "{ }";
             return "📎";
         }
     }

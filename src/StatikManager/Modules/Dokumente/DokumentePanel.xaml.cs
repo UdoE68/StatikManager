@@ -614,6 +614,11 @@ namespace StatikManager.Modules.Dokumente
                         WordVorschau.Navigate(new Uri(pfad));
                         GibUI(); // synchron: Navigation ist fire-and-forget
                         break;
+                    case VorschauTyp.JsonVorschau:
+                        ZeigeBrowser(mitAbdeckung: false);
+                        ZeigeJsonVorschau(pfad);
+                        GibUI(); // synchron: kein Hintergrundladevorgang
+                        break;
                     case VorschauTyp.KeinVorschau:
                         ZeigeBrowser(mitAbdeckung: false);
                         ZeigeKeinVorschauHinweis(pfad);
@@ -1112,6 +1117,81 @@ namespace StatikManager.Modules.Dokumente
                 + "<p style='color:#aaa;font-size:12px'>Dateityp: " + ext + "</p>"
                 + "</body></html>");
             _dokumentGeladen = true;
+        }
+
+        private void ZeigeJsonVorschau(string pfad)
+        {
+            string formatiert;
+            try
+            {
+                var raw = File.ReadAllText(pfad, System.Text.Encoding.UTF8);
+                formatiert = FormatierJson(raw);
+            }
+            catch (Exception ex)
+            {
+                formatiert = $"(Datei konnte nicht gelesen werden: {ex.Message})";
+            }
+
+            var escaped = System.Security.SecurityElement.Escape(formatiert);
+
+            WordVorschau.NavigateToString(
+                "<!DOCTYPE html><html><head><meta charset='utf-8'><style>"
+                + "html,body{margin:0;padding:0;height:100%;background:#1e1e1e;}"
+                + "pre{font-family:Consolas,'Courier New',monospace;font-size:12px;"
+                + "color:#d4d4d4;margin:0;padding:16px;white-space:pre-wrap;"
+                + "word-break:break-all;line-height:1.5;}"
+                + "</style></head><body><pre>" + escaped + "</pre></body></html>");
+            _dokumentGeladen = true;
+        }
+
+        /// <summary>
+        /// Einfacher JSON-Formatter ohne externe Bibliothek.
+        /// Ignoriert Whitespace außerhalb von Strings und baut Einrückung nach.
+        /// </summary>
+        private static string FormatierJson(string raw)
+        {
+            var sb    = new System.Text.StringBuilder(raw.Length * 2);
+            int level = 0;
+            bool inStr = false;
+
+            for (int i = 0; i < raw.Length; i++)
+            {
+                char c = raw[i];
+
+                // String-Zustand nachführen (Escape-Sequenzen korrekt überspringen)
+                if (c == '\\' && inStr) { sb.Append(c); if (i + 1 < raw.Length) sb.Append(raw[++i]); continue; }
+                if (c == '"') { inStr = !inStr; sb.Append(c); continue; }
+
+                if (inStr) { sb.Append(c); continue; }
+
+                switch (c)
+                {
+                    case '{': case '[':
+                        sb.Append(c); sb.AppendLine();
+                        level++;
+                        sb.Append(' ', level * 2);
+                        break;
+                    case '}': case ']':
+                        sb.AppendLine();
+                        level = Math.Max(0, level - 1);
+                        sb.Append(' ', level * 2);
+                        sb.Append(c);
+                        break;
+                    case ',':
+                        sb.Append(c); sb.AppendLine();
+                        sb.Append(' ', level * 2);
+                        break;
+                    case ':':
+                        sb.Append(": ");
+                        break;
+                    case ' ': case '\t': case '\r': case '\n':
+                        break; // Whitespace außerhalb Strings wird neu erzeugt
+                    default:
+                        sb.Append(c);
+                        break;
+                }
+            }
+            return sb.ToString();
         }
 
         // ── Navigations-Kontrolle ─────────────────────────────────────────────
