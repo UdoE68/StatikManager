@@ -177,7 +177,18 @@ namespace StatikManager.Modules.Dokumente
         {
             if (_aktiverDateipfad is null) return;
 
-            if (DateiTypen.IstPdfDatei(Path.GetExtension(_aktiverDateipfad)))
+            var ext = Path.GetExtension(_aktiverDateipfad);
+
+            // AxisVM-Projektdateien (.axs) nicht öffnen – würde AxisVM starten
+            if (DateiTypen.IstGesperrteExtension(ext))
+            {
+                AppZustand.Instanz.SetzeStatus(
+                    $"{ext}-Dateien werden im Statik-Manager nicht geöffnet.",
+                    StatusLevel.Warn);
+                return;
+            }
+
+            if (DateiTypen.IstPdfDatei(ext))
             {
                 // PDF → blockweise als Bilder in Word exportieren
                 PdfEditor.ExportierenNachWord();
@@ -1322,6 +1333,17 @@ namespace StatikManager.Modules.Dokumente
         private void BtnWordÖffnen_Click(object sender, RoutedEventArgs e)
         {
             if (_aktiverDateipfad == null) return;
+
+            // Gesperrte Dateitypen (z.B. .axs) nie mit Shell öffnen
+            var ext = Path.GetExtension(_aktiverDateipfad);
+            if (DateiTypen.IstGesperrteExtension(ext))
+            {
+                AppZustand.Instanz.SetzeStatus(
+                    $"{ext}-Dateien werden im Statik-Manager nicht geöffnet.",
+                    StatusLevel.Warn);
+                return;
+            }
+
             try
             {
                 System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
