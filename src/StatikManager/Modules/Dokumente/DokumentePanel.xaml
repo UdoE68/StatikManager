@@ -312,6 +312,7 @@
             <WebBrowser x:Name="WordVorschau"
                         Grid.Row="2"
                         Visibility="Collapsed"
+                        Navigating="WordVorschau_Navigating"
                         LoadCompleted="WordVorschau_LoadCompleted"/>
 
             <!-- PDF-Schnitt-Editor (für .pdf) -->

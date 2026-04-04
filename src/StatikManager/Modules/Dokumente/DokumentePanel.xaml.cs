@@ -476,7 +476,8 @@ namespace StatikManager.Modules.Dokumente
                 var item = new TreeViewItem
                 {
                     Header     = "📁 " + sub.Name,
-                    IsExpanded = _baumTiefe == 0 || tiefe < _baumTiefe - 1
+                    IsExpanded = _baumTiefe == 0 || tiefe < _baumTiefe - 1,
+                    Tag        = sub.FullName
                 };
                 FülleBaumItem(item, sub, tiefe + 1);
                 parent.Items.Add(item);
@@ -1113,6 +1114,26 @@ namespace StatikManager.Modules.Dokumente
             _dokumentGeladen = true;
         }
 
+        // ── Navigations-Kontrolle ─────────────────────────────────────────────
+
+        private void WordVorschau_Navigating(object sender, System.Windows.Navigation.NavigatingCancelEventArgs e)
+        {
+            if (e.Uri == null) return;
+            if (e.Uri.ToString() == "about:blank") return;
+
+            // Nur bei HTML- und Bild-Dateien relevant: In-Page-Klicks (Links, eingebettete Bilder)
+            // würden den Browser intern auf eine andere URL navigieren, was die Anzeige "einklemmt"
+            // (der Tree zeigt noch die Original-Datei, der Browser zeigt aber die verlinkte Ressource).
+            // Lösung: Jede Navigation, die nicht zu _aktiverDateipfad passt, wird unterbunden.
+            if (_aktiverDateipfad == null) return;
+            var ext = Path.GetExtension(_aktiverDateipfad).ToLowerInvariant();
+            if (!DateiTypen.IstHtmlDatei(ext) && !DateiTypen.IstBildDatei(ext)) return;
+
+            var erwartet = new Uri(_aktiverDateipfad);
+            if (!string.Equals(e.Uri.LocalPath, erwartet.LocalPath, StringComparison.OrdinalIgnoreCase))
+                e.Cancel = true;
+        }
+
         // ── Vorschau geladen ──────────────────────────────────────────────────
 
         private void WordVorschau_LoadCompleted(object sender, NavigationEventArgs e)
@@ -1292,17 +1313,29 @@ namespace StatikManager.Modules.Dokumente
                 element = System.Windows.Media.VisualTreeHelper.GetParent(element);
 
             var treeItem = element as TreeViewItem;
-            string? pfad = treeItem?.Tag as string; // nur Datei-Items haben ein Tag
+            string? pfad = treeItem?.Tag as string;
+
+            bool istOrdner = pfad != null && Directory.Exists(pfad);
+            bool istDatei  = pfad != null && File.Exists(pfad);
 
             var menu = new ContextMenu();
 
-            var itemLöschen = new MenuItem
+            if (istOrdner)
             {
-                Header    = "🗑 Datei löschen",
-                IsEnabled = pfad != null
-            };
-            itemLöschen.Click += (s, ev) => DateiLöschen(pfad);
-            menu.Items.Add(itemLöschen);
+                var itemLöschen = new MenuItem { Header = "🗑 Ordner löschen …" };
+                itemLöschen.Click += (s, ev) => OrdnerLöschen(pfad!);
+                menu.Items.Add(itemLöschen);
+            }
+            else
+            {
+                var itemLöschen = new MenuItem
+                {
+                    Header    = "🗑 Datei löschen",
+                    IsEnabled = istDatei
+                };
+                itemLöschen.Click += (s, ev) => DateiLöschen(pfad);
+                menu.Items.Add(itemLöschen);
+            }
 
             if (_projektPfad != null)
             {
@@ -1455,6 +1488,41 @@ namespace StatikManager.Modules.Dokumente
                 MessageBox.Show(
                     "Folgende Dateien konnten nicht gelöscht werden:\n\n" + string.Join("\n", fehler),
                     "Fehler beim Löschen", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+
+        private void OrdnerLöschen(string ordnerPfad)
+        {
+            var name = Path.GetFileName(ordnerPfad);
+            var antwort = MessageBox.Show(
+                $"Position \"{name}\" und alle Inhalte unwiderruflich löschen?",
+                "Ordner löschen bestätigen",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning,
+                MessageBoxResult.No);
+            if (antwort != MessageBoxResult.Yes) return;
+
+            // Vorschau leeren, wenn aktive Datei im gelöschten Ordner liegt
+            if (_aktiverDateipfad != null &&
+                _aktiverDateipfad.StartsWith(ordnerPfad + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            {
+                _aktiverDateipfad = null;
+                _dokumentGeladen  = false;
+                DateiAusgewählt?.Invoke(null);
+                ZeigeBrowser(mitAbdeckung: false);
+                WordVorschau.Navigate("about:blank");
+            }
+
+            try
+            {
+                Directory.Delete(ordnerPfad, recursive: true);
+                if (_projektPfad != null) AktualisiereDokumentListe();
+                AppZustand.Instanz.SetzeStatus($"Ordner gelöscht: {name}");
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Fehler beim Löschen:\n" + ex.Message, "Fehler",
+                                MessageBoxButton.OK, MessageBoxImage.Error);
+            }
         }
 
         // ── Neues Word-Dokument ───────────────────────────────────────────────
