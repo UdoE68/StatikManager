@@ -20,8 +20,43 @@ namespace StatikManager
         // Log-Pfad liegt im Logger – hier nur noch Weiterleitung
         internal static readonly string LogDatei = Infrastructure.Logger.LogDatei;
 
+        // ── Einzelinstanz-Steuerung ───────────────────────────────────────────
+        private const string MUTEX_NAME = "StatikManager_SingleInstance";
+        private const string PIPE_NAME  = "StatikManagerPipe";
+        private static System.Threading.Mutex _mutex;
+
         protected override void OnStartup(StartupEventArgs e)
         {
+            // ── 0. Einzelinstanz-Prüfung per Mutex ───────────────────────────
+            bool neuInstanz;
+            _mutex = new System.Threading.Mutex(true, MUTEX_NAME, out neuInstanz);
+
+            if (!neuInstanz)
+            {
+                // Bereits eine Instanz aktiv – Pfad per Named Pipe übergeben
+                if (e.Args.Length > 0)
+                {
+                    try
+                    {
+                        using (var client = new System.IO.Pipes.NamedPipeClientStream(
+                            ".", PIPE_NAME, System.IO.Pipes.PipeDirection.Out))
+                        {
+                            client.Connect(1000);
+                            using (var writer = new System.IO.StreamWriter(client))
+                            {
+                                writer.Write(e.Args[0]);
+                                writer.Flush();
+                            }
+                        }
+                    }
+                    catch { }
+                }
+                Environment.Exit(0);
+                return;
+            }
+
+            // Erste Instanz – Pipe-Server starten
+            StarteNamedPipeServer();
             // ── 1. AppDomain – fängt auch Nicht-UI-Thread-Fehler ─────────────
             AppDomain.CurrentDomain.UnhandledException += (s, ex) =>
             {
@@ -78,6 +113,59 @@ namespace StatikManager
 
             SetzeBrowserEmulationsModus();
             base.OnStartup(e);
+
+            // ── Kommandozeilen-Pfad setzen (nach Fenster-Start) ──────────────
+            if (e.Args.Length > 0 && System.IO.Directory.Exists(e.Args[0]))
+            {
+                Dispatcher.BeginInvoke(
+                    System.Windows.Threading.DispatcherPriority.Loaded,
+                    new Action(() =>
+                    {
+                        Core.AppZustand.Instanz.SetzeProjekt(e.Args[0]);
+                    }));
+            }
+        }
+
+        /// <summary>
+        /// Startet den Named-Pipe-Server im Hintergrundthread.
+        /// Wartet auf eingehende Pfade von weiteren Programminstanzen.
+        /// </summary>
+        private void StarteNamedPipeServer()
+        {
+            var pipeThread = new System.Threading.Thread(() =>
+            {
+                while (true)
+                {
+                    try
+                    {
+                        using (var server = new System.IO.Pipes.NamedPipeServerStream(
+                            PIPE_NAME, System.IO.Pipes.PipeDirection.In))
+                        {
+                            server.WaitForConnection();
+                            using (var reader = new System.IO.StreamReader(server))
+                            {
+                                string neuerPfad = reader.ReadToEnd().Trim();
+                                if (!string.IsNullOrEmpty(neuerPfad))
+                                {
+                                    Application.Current.Dispatcher.Invoke(() =>
+                                    {
+                                        var result = MessageBox.Show(
+                                            $"Zum Projektordner wechseln?\n\n{neuerPfad}",
+                                            "StatikManager",
+                                            MessageBoxButton.YesNo,
+                                            MessageBoxImage.Question);
+                                        if (result == MessageBoxResult.Yes)
+                                            Core.AppZustand.Instanz.SetzeProjekt(neuerPfad);
+                                    });
+                                }
+                            }
+                        }
+                    }
+                    catch { }
+                }
+            });
+            pipeThread.IsBackground = true;
+            pipeThread.Start();
         }
 
         /// <summary>
