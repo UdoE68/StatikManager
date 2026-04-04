@@ -1089,11 +1089,19 @@ namespace StatikManager.Modules.Dokumente
         {
             var name = Path.GetFileName(pfad)
                 .Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;");
+            var ext = Path.GetExtension(pfad).ToLowerInvariant();
+
+            string hinweis = DateiTypen.IstGesperrteExtension(ext)
+                ? "<p style='color:#c00;font-size:12px'>&#9888; AxisVM-Modelldateien werden nicht geöffnet, "
+                  + "um einen unbeabsichtigten Start von AxisVM zu verhindern.</p>"
+                : "";
+
             WordVorschau.NavigateToString(
                 "<html><body style='font-family:Segoe UI,sans-serif;padding:40px;color:#555'>"
                 + "<h3 style='color:#333'>Keine Vorschau verfügbar</h3>"
                 + "<p>Die Datei <b>" + name + "</b> kann nicht angezeigt werden.</p>"
-                + "<p style='color:#aaa;font-size:12px'>Dateityp: " + Path.GetExtension(pfad) + "</p>"
+                + hinweis
+                + "<p style='color:#aaa;font-size:12px'>Dateityp: " + ext + "</p>"
                 + "</body></html>");
             _dokumentGeladen = true;
         }

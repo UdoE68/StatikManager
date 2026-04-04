@@ -22,9 +22,10 @@ namespace StatikManager.Infrastructure
         {
             var ext = System.IO.Path.GetExtension(dateipfad).ToLowerInvariant();
             VorschauTyp typ;
-            if      (DateiTypen.IstPdfDatei(ext))  typ = VorschauTyp.SchnittEditor;
+            if      (DateiTypen.IstPdfDatei(ext))   typ = VorschauTyp.SchnittEditor;
             else if (DateiTypen.IstWordDatei(ext))  typ = VorschauTyp.WordVorschau;
             else if (DateiTypen.IstBildDatei(ext))  typ = VorschauTyp.Browser;
+            else if (DateiTypen.IstHtmlDatei(ext))  typ = VorschauTyp.Browser;
             else                                     typ = VorschauTyp.KeinVorschau;
 
             Logger.Debug("Routing", $"{ext} → {typ} ({System.IO.Path.GetFileName(dateipfad)})");

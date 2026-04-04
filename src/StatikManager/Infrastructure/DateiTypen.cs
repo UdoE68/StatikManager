@@ -22,6 +22,12 @@ namespace StatikManager.Infrastructure
                 || e == ".gif" || e == ".bmp"  || e == ".tif" || e == ".tiff";
         }
 
+        public static bool IstHtmlDatei(string ext)
+        {
+            var e = ext.ToLowerInvariant();
+            return e == ".html" || e == ".htm";
+        }
+
         /// <summary>
         /// Dateitypen, die im Statik-Manager nie per Shell geöffnet werden dürfen.
         /// Beispiel: .axs würde AxisVM starten; .exe/.bat sind gefährlich.
