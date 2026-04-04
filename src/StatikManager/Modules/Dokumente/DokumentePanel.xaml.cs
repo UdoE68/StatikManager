@@ -51,7 +51,8 @@ namespace StatikManager.Modules.Dokumente
         private Thread?                  _vorThread;
         private CancellationTokenSource? _vorCts;
         private DispatcherTimer?         _abdeckungTimer;
-        private readonly FileWatcherService _fileWatcher;
+        private readonly FileWatcherService  _fileWatcher;
+        private readonly OrdnerWatcherService _ordnerWatcher;
 
         // Alle pdfium-Zugriffe laufen über AppZustand.RenderSem,
         // das auch PdfSchnittEditor.LadePdf nutzt → keine parallelen nativen Zugriffe.
@@ -101,6 +102,9 @@ namespace StatikManager.Modules.Dokumente
             _fileWatcher = new FileWatcherService(Dispatcher);
             _fileWatcher.DateiGeändert += OnDateiGeändert;
 
+            _ordnerWatcher = new OrdnerWatcherService(Dispatcher);
+            _ordnerWatcher.OrdnerGeändert += AktualisiereDokumentListe;
+
             // UI-Freigabe wenn PdfSchnittEditor SetzeLaden(false) signalisiert
             AppZustand.Instanz.LadeZustandGeändert += aktiv => { if (!aktiv) GibUI(); };
         }
@@ -138,6 +142,7 @@ namespace StatikManager.Modules.Dokumente
                 _cacheDir = System.IO.Path.Combine(Infrastructure.PdfCache.CacheBasis, hash);
                 System.IO.Directory.CreateDirectory(_cacheDir);
                 AppZustand.Instanz.SetzeProjekt(_projektPfad);
+                _ordnerWatcher.Starte(_projektPfad);
                 AktualisiereDokumentListe();
                 // Keine Vorkonvertierung beim Session-Restore (würde Startzeit verlängern)
             }
@@ -169,6 +174,7 @@ namespace StatikManager.Modules.Dokumente
             Directory.CreateDirectory(_cacheDir);
 
             AppZustand.Instanz.SetzeProjekt(_projektPfad);
+            _ordnerWatcher.Starte(_projektPfad);
             AktualisiereDokumentListe();
             StartVorkonvertierung(new DirectoryInfo(_projektPfad), _cacheDir);
         }
@@ -331,6 +337,7 @@ namespace StatikManager.Modules.Dokumente
         {
             _vorCts?.Cancel();
             _fileWatcher.Dispose();
+            _ordnerWatcher.Dispose();
         }
 
         // ── Hintergrundkonvertierung (Word → Basis-PDF) ───────────────────────
