@@ -633,11 +633,10 @@ namespace StatikManager.Modules.Dokumente
                 try { ZeigeBrowser(mitAbdeckung: false); } catch { }
                 try
                 {
-                    WordVorschau.NavigateToString(
-                        "<html><body style='font-family:Segoe UI;padding:30px;color:#c00'>"
-                        + "<b>Fehler beim Laden der Vorschau</b><br><br>"
-                        + System.Security.SecurityElement.Escape(ex.Message)
-                        + "</body></html>");
+                    WordVorschau.NavigateToString(HtmlSeite(
+                        "<b>Fehler beim Laden der Vorschau</b><br><br>"
+                        + HtmlEncode(ex.Message),
+                        bodyStyle: "font-family:Segoe UI;padding:30px;color:#c00"));
                 }
                 catch { }
                 GibUI(); // Sicherheitsnetz: Sperre auch bei unerwarteten Ausnahmen aufheben
@@ -1100,22 +1099,20 @@ namespace StatikManager.Modules.Dokumente
 
         private void ZeigeKeinVorschauHinweis(string pfad)
         {
-            var name = Path.GetFileName(pfad)
-                .Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;");
-            var ext = Path.GetExtension(pfad).ToLowerInvariant();
+            var name = HtmlEncode(Path.GetFileName(pfad));
+            var ext  = Path.GetExtension(pfad).ToLowerInvariant();
 
             string hinweis = DateiTypen.IstGesperrteExtension(ext)
-                ? "<p style='color:#c00;font-size:12px'>&#9888; AxisVM-Modelldateien werden nicht geöffnet, "
+                ? "<p style='color:#c00;font-size:12px'>&#9888; AxisVM-Modelldateien werden nicht ge&ouml;ffnet, "
                   + "um einen unbeabsichtigten Start von AxisVM zu verhindern.</p>"
                 : "";
 
-            WordVorschau.NavigateToString(
-                "<html><body style='font-family:Segoe UI,sans-serif;padding:40px;color:#555'>"
-                + "<h3 style='color:#333'>Keine Vorschau verfügbar</h3>"
+            WordVorschau.NavigateToString(HtmlSeite(
+                "<h3 style='color:#333'>Keine Vorschau verf&uuml;gbar</h3>"
                 + "<p>Die Datei <b>" + name + "</b> kann nicht angezeigt werden.</p>"
                 + hinweis
-                + "<p style='color:#aaa;font-size:12px'>Dateityp: " + ext + "</p>"
-                + "</body></html>");
+                + "<p style='color:#aaa;font-size:12px'>Dateityp: " + ext + "</p>",
+                bodyStyle: "font-family:Segoe UI,sans-serif;padding:40px;color:#555"));
             _dokumentGeladen = true;
         }
 
@@ -1129,18 +1126,17 @@ namespace StatikManager.Modules.Dokumente
             }
             catch (Exception ex)
             {
-                formatiert = $"(Datei konnte nicht gelesen werden: {ex.Message})";
+                formatiert = "(Datei konnte nicht gelesen werden: " + ex.Message + ")";
             }
 
-            var escaped = System.Security.SecurityElement.Escape(formatiert);
-
             WordVorschau.NavigateToString(
-                "<!DOCTYPE html><html><head><meta charset='utf-8'><style>"
+                "<!DOCTYPE html><html><head>"
+                + "<meta http-equiv='Content-Type' content='text/html; charset=utf-16'><style>"
                 + "html,body{margin:0;padding:0;height:100%;background:#1e1e1e;}"
                 + "pre{font-family:Consolas,'Courier New',monospace;font-size:12px;"
                 + "color:#d4d4d4;margin:0;padding:16px;white-space:pre-wrap;"
                 + "word-break:break-all;line-height:1.5;}"
-                + "</style></head><body><pre>" + escaped + "</pre></body></html>");
+                + "</style></head><body><pre>" + HtmlEncode(formatiert) + "</pre></body></html>");
             _dokumentGeladen = true;
         }
 
@@ -1192,6 +1188,42 @@ namespace StatikManager.Modules.Dokumente
                 }
             }
             return sb.ToString();
+        }
+
+        /// <summary>
+        /// Kodiert alle Zeichen, die in HTML-Kontext unsicher sind (inkl. Non-ASCII),
+        /// als numerische HTML-Entities. Verhindert Encoding-Fehler bei NavigateToString.
+        /// </summary>
+        private static string HtmlEncode(string s)
+        {
+            var sb = new System.Text.StringBuilder(s.Length + 32);
+            foreach (char c in s)
+            {
+                switch (c)
+                {
+                    case '&':  sb.Append("&amp;");  break;
+                    case '<':  sb.Append("&lt;");   break;
+                    case '>':  sb.Append("&gt;");   break;
+                    case '"':  sb.Append("&quot;"); break;
+                    default:
+                        if (c > 127) sb.Append("&#").Append((int)c).Append(';');
+                        else         sb.Append(c);
+                        break;
+                }
+            }
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// Erzeugt eine vollständige HTML-Seite mit korrekter charset-Deklaration
+        /// für NavigateToString (utf-16, da C#-Strings intern UTF-16 sind).
+        /// </summary>
+        private static string HtmlSeite(string inhalt, string bodyStyle = "")
+        {
+            var style = string.IsNullOrEmpty(bodyStyle) ? "" : " style='" + bodyStyle + "'";
+            return "<!DOCTYPE html><html><head>"
+                + "<meta http-equiv='Content-Type' content='text/html; charset=utf-16'>"
+                + "</head><body" + style + ">" + inhalt + "</body></html>";
         }
 
         // ── Navigations-Kontrolle ─────────────────────────────────────────────
