@@ -3916,6 +3916,7 @@ namespace StatikManager.Modules.Werkzeuge
             _ausgewählteParts.Clear();
             AktualisiereSchnitteLinien();
             TxtInfo.Text = "Teile verschmolzen – Strg+Z zum Rückgängigmachen";
+            AutoSpeichern();
         }
 
         /// <summary>Verbesserung 6: Schließt die Lücke eines als gelöscht markierten Parts.</summary>
@@ -3986,6 +3987,7 @@ namespace StatikManager.Modules.Werkzeuge
             BtnTeilLöschen.IsEnabled = false;
             string modusText = verschmelzen ? "verschmolzen" : "zusammengeschoben (getrennte Teile)";
             TxtInfo.Text = $"Teile {modusText} – Strg+Z zum Rückgängigmachen";
+            AutoSpeichern();
         }
 
         private BitmapSource? ErzeugeKompositBild(int si, List<int> sichtbareTeilIndizes)
@@ -4069,6 +4071,7 @@ namespace StatikManager.Modules.Werkzeuge
             if (t >= grenzen.Count) return;
 
             var (fracOben, fracUnten) = grenzen[t];
+            int origH   = _seitenBilder[si].PixelHeight; // UNVERÄNDERLICHE Seitenhöhe
             int sourceH = sourceBmp.PixelHeight;
             int sourceW = sourceBmp.PixelWidth;
             const int stripH = 30;
@@ -4086,6 +4089,7 @@ namespace StatikManager.Modules.Werkzeuge
             var visual = new DrawingVisual();
             using (var ctx = visual.RenderOpen())
             {
+                ctx.DrawRectangle(Brushes.White, null, new Rect(0, 0, sourceW, newH));
                 if (insertY > 0)
                 {
                     var top = new CroppedBitmap(sourceBmp, new Int32Rect(0, 0, sourceW, insertY));
@@ -4099,11 +4103,11 @@ namespace StatikManager.Modules.Werkzeuge
                     ctx.DrawImage(bottom, new Rect(0, insertY + stripH, sourceW, below));
                 }
             }
-            var rtb = new RenderTargetBitmap(sourceW, newH, 96, 96, PixelFormats.Pbgra32);
-            rtb.Render(visual);
-            rtb.Freeze();
+            var rtbFull = new RenderTargetBitmap(sourceW, newH, 96, 96, PixelFormats.Pbgra32);
+            rtbFull.Render(visual);
+            rtbFull.Freeze();
 
-            // Schnittlinien dieser Seite unterhalb von insertY verschieben
+            // Schnittlinien dieser Seite unterhalb von insertY verschieben (im newH-Raum)
             double insertFrac = sourceH > 0 ? (double)insertY / sourceH : 0;
             for (int i = 0; i < _scherenschnitte.Count; i++)
             {
@@ -4115,7 +4119,71 @@ namespace StatikManager.Modules.Werkzeuge
                 }
             }
 
-            _kompositBilder[si] = rtb;
+            if (newH <= origH)
+            {
+                // Kein Überlauf: einfach das neue Bitmap mit origH auffüllen (weißer Rand unten)
+                var padVisual = new DrawingVisual();
+                using (var padCtx = padVisual.RenderOpen())
+                {
+                    padCtx.DrawRectangle(Brushes.White, null, new Rect(0, 0, sourceW, origH));
+                    padCtx.DrawImage(rtbFull, new Rect(0, 0, sourceW, newH));
+                }
+                var padRtb = new RenderTargetBitmap(sourceW, origH, 96, 96, PixelFormats.Pbgra32);
+                padRtb.Render(padVisual);
+                padRtb.Freeze();
+                _kompositBilder[si] = padRtb;
+            }
+            else
+            {
+                // Überlauf: Aktuelle Seite auf origH begrenzen, Rest als neue Folgeseite
+                // 1) Aktuelle Seite: obere origH Pixel
+                var obenVisual = new DrawingVisual();
+                using (var obenCtx = obenVisual.RenderOpen())
+                {
+                    obenCtx.DrawRectangle(Brushes.White, null, new Rect(0, 0, sourceW, origH));
+                    obenCtx.DrawImage(rtbFull, new Rect(0, 0, sourceW, newH));
+                }
+                var obenRtb = new RenderTargetBitmap(sourceW, origH, 96, 96, PixelFormats.Pbgra32);
+                obenRtb.Render(obenVisual);
+                obenRtb.Freeze();
+                _kompositBilder[si] = obenRtb;
+
+                // Schnittlinien die über origH hinausgehen auf neue Seite verschieben
+                // (vereinfacht: alle Schnitte dieser Seite die im Überlaufbereich liegen entfernen)
+                _scherenschnitte.RemoveAll(s => s.Seite == si && s.YFraction > (double)origH / newH);
+
+                // 2) Neue Folgeseite: Überlauf-Bitmap (der abgeschnittene Teil, auf origH gepaddert)
+                int überlaufStart = origH;
+                int überlaufH     = newH - überlaufStart;
+                var untenVisual   = new DrawingVisual();
+                using (var untenCtx = untenVisual.RenderOpen())
+                {
+                    untenCtx.DrawRectangle(Brushes.White, null, new Rect(0, 0, sourceW, origH));
+                    var überlaufCrop = new CroppedBitmap(rtbFull, new Int32Rect(0, überlaufStart, sourceW, überlaufH));
+                    untenCtx.DrawImage(überlaufCrop, new Rect(0, 0, sourceW, überlaufH));
+                }
+                var untenRtb = new RenderTargetBitmap(sourceW, origH, 96, 96, PixelFormats.Pbgra32);
+                untenRtb.Render(untenVisual);
+                untenRtb.Freeze();
+
+                // Neue Seite an den Anfang von _seitenBilder hinzufügen
+                int neuIdx = _seitenBilder.Count;
+                _seitenBilder.Add(untenRtb);
+                InitCropEintrag(neuIdx);
+
+                // Komposit für neue Seite eintragen (ist schon fertig)
+                _kompositBilder[neuIdx] = untenRtb;
+
+                // Reihenfolge: neue Seite direkt nach si einfügen
+                EnsureReihenfolge();
+                int siAnzeigePos = _seitenReihenfolge.IndexOf(si);
+                if (siAnzeigePos >= 0)
+                    _seitenReihenfolge.Insert(siAnzeigePos + 1, neuIdx);
+                else
+                    _seitenReihenfolge.Add(neuIdx);
+
+                System.Diagnostics.Debug.WriteLine($"[LEERZEILE] Überlauf: {überlaufH}px auf neue Seite {neuIdx} verschoben");
+            }
 
             ZeicheCanvas();
             AktualisiereSchnitteLinien();
@@ -4175,6 +4243,7 @@ namespace StatikManager.Modules.Werkzeuge
                         _ausgewählteParts.Clear();
                         ZeicheCanvas();
                         TxtInfo.Text = $"Rückgängig ({_undoStack.Count} weitere Schritte)";
+                        AutoSpeichern();
                         e.Handled = true;
                     }
                     else if (_scherenModus && _scherenschnitte.Count > 0)
@@ -4319,6 +4388,7 @@ namespace StatikManager.Modules.Werkzeuge
             }
 
             ZeicheCanvas();
+            AutoSpeichern();
         }
 
         private string ErzeugeEinfacheEingabe(string nachricht, string titel, string standard)
@@ -4428,6 +4498,7 @@ namespace StatikManager.Modules.Werkzeuge
             _seitenReihenfolge.Insert(ziel, seitenIdx);
             ZeicheCanvas();
             TxtInfo.Text = "Seite verschoben – Strg+Z zum Rückgängigmachen";
+            AutoSpeichern();
         }
 
         private void EnsureReihenfolge()
@@ -4498,6 +4569,7 @@ namespace StatikManager.Modules.Werkzeuge
             _seitenReihenfolge.Insert(insertPos, _dragQuellIdx);
             ZeicheCanvas();
             TxtInfo.Text = $"Seite {_dragQuellIdx + 1} verschoben – Strg+Z zum Rückgängigmachen";
+            AutoSpeichern();
         }
 
         // ── Ctrl+S: PDF speichern ─────────────────────────────────────────────────
@@ -4507,26 +4579,24 @@ namespace StatikManager.Modules.Werkzeuge
         {
             if (_pdfPfad == null || _seitenBilder.Count == 0)
             {
-                System.Diagnostics.Debug.WriteLine($"[BUG3-AUTOSAVE] Übersprungen: _pdfPfad={_pdfPfad ?? "null"}, _seitenBilder={_seitenBilder.Count}");
+                System.Diagnostics.Debug.WriteLine($"[AUTOSAVE] Übersprungen: _pdfPfad={_pdfPfad ?? "null"}, _seitenBilder={_seitenBilder.Count}");
                 return;
             }
-            System.Diagnostics.Debug.WriteLine($"[BUG3-AUTOSAVE] Starte AutoSpeichern → {_pdfPfad}");
-            // Sicheres Überschreiben: erst in Temp-Datei, dann umbenennen (verhindert Datei-Sperr-Probleme)
-            string tempPfad = _pdfPfad + ".autosave.tmp";
-            SpeicherNachPfad(tempPfad, autoSave: true);
-            // Wenn erfolgreich: Temp-Datei über Original verschieben
-            if (IO.File.Exists(tempPfad))
+            System.Diagnostics.Debug.WriteLine($"[AUTOSAVE] Starte AutoSpeichern → {_pdfPfad}");
+            string tempPfad = _pdfPfad + ".tmp";
+            try
             {
-                try
-                {
-                    IO.File.Replace(tempPfad, _pdfPfad, null);
-                    System.Diagnostics.Debug.WriteLine($"[BUG3-AUTOSAVE] File.Replace erfolgreich");
-                }
-                catch (Exception ex)
-                {
-                    System.Diagnostics.Debug.WriteLine($"[BUG3-AUTOSAVE] File.Replace FEHLER: {ex.Message}");
-                    LogException(ex, "AutoSpeichern.FileReplace");
-                }
+                SpeicherNachPfad(tempPfad, autoSave: true);
+                IO.File.Replace(tempPfad, _pdfPfad, null);
+                System.Diagnostics.Debug.WriteLine($"[AUTOSAVE] Gespeichert: {_pdfPfad} um {DateTime.Now}");
+            }
+            catch (Exception ex)
+            {
+                if (IO.File.Exists(tempPfad)) try { IO.File.Delete(tempPfad); } catch { }
+                System.Diagnostics.Debug.WriteLine($"[AUTOSAVE] FEHLER: {ex.Message}");
+                LogException(ex, "AutoSpeichern");
+                MessageBox.Show("Auto-Speichern fehlgeschlagen:\n" + ex.Message,
+                    "Speicher-Fehler", MessageBoxButton.OK, MessageBoxImage.Warning);
             }
         }
 
@@ -4618,24 +4688,33 @@ namespace StatikManager.Modules.Werkzeuge
 
                         if (exportBmp != null)
                         {
-                            // Seitenhöhe: niemals kleiner als Original (gelöschter Inhalt → weißer Leerraum).
-                            // Bei eingefügtem Inhalt (Leerzeile) proportional größer.
+                            // SEITENFORMAT-INVARIANTE: Ausgabe-Seite hat EXAKT pageWPts × pageHPts.
+                            // Das Bitmap wird auf die volle Seitenfläche gezeichnet.
+                            // Wenn Komposit kleiner als Original → weißer Leerraum unten (bereits in ErzeugeKompositBild gepaddet).
+                            // Wenn Komposit größer als Original → darf nicht vorkommen (FügeLeerzeileEin übernimmt Überlauf auf neue Seite).
+                            // Zur Sicherheit: Bitmap auf origH begrenzen bevor Export.
                             int origPixH = si < _seitenBilder.Count ? _seitenBilder[si].PixelHeight : exportBmp.PixelHeight;
-                            double exportHPts = exportBmp.PixelHeight <= origPixH
-                                ? pageHPts
-                                : pageHPts * (double)exportBmp.PixelHeight / Math.Max(1, origPixH);
+                            BitmapSource finalExportBmp = exportBmp;
+                            if (exportBmp.PixelHeight > origPixH)
+                            {
+                                // Bitmap auf origH abschneiden (Invariante erzwingen)
+                                var crop = new CroppedBitmap(exportBmp, new Int32Rect(0, 0, exportBmp.PixelWidth, origPixH));
+                                crop.Freeze();
+                                finalExportBmp = crop;
+                                System.Diagnostics.Debug.WriteLine($"[SPEICHERN] Seite {si}: Bitmap auf origH={origPixH} begrenzt (war {exportBmp.PixelHeight})");
+                            }
 
                             using var ms = new IO.MemoryStream();
                             var enc = new PngBitmapEncoder();
-                            enc.Frames.Add(BitmapFrame.Create(exportBmp));
+                            enc.Frames.Add(BitmapFrame.Create(finalExportBmp));
                             enc.Save(ms);
                             ms.Position = 0;
                             using var xImg = PdfSharp.Drawing.XImage.FromStream(ms);
                             var seite = pdfOut.AddPage();
                             seite.Width  = PdfSharp.Drawing.XUnit.FromPoint(pageWPts);
-                            seite.Height = PdfSharp.Drawing.XUnit.FromPoint(exportHPts);
+                            seite.Height = PdfSharp.Drawing.XUnit.FromPoint(pageHPts);
                             using var gfx = PdfSharp.Drawing.XGraphics.FromPdfPage(seite);
-                            gfx.DrawImage(xImg, 0, 0, pageWPts, exportHPts);
+                            gfx.DrawImage(xImg, 0, 0, pageWPts, pageHPts);
                         }
                         else if (pdfIn != null && si < pdfIn.PageCount)
                         {
