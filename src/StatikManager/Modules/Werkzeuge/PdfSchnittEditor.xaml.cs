@@ -154,6 +154,8 @@ namespace StatikManager.Modules.Werkzeuge
         private bool   _dragAktiv;
         private Border _dragGhost;
 
+        private int _markierteSeitenIdx = -1; // Für Seite-einfügen vor/nach Auswahl
+
         private sealed class ScherenZustand
         {
             public List<(int Seite, double YFraction)> Schnitte { get; set; } = new List<(int, double)>();
@@ -276,6 +278,7 @@ namespace StatikManager.Modules.Werkzeuge
             _kompositBilder.Clear();
             _undoStack.Clear();
             _gelöschteSeiten.Clear();
+            _markierteSeitenIdx = -1;
             _seitenReihenfolge = null;
             _eingefügteSeitenInfo.Clear();
             _dragAktiv = false;
@@ -809,6 +812,17 @@ namespace StatikManager.Modules.Werkzeuge
                 _scherenVorschauLinie = null;
                 AktualisiereSchnitteLinien();
                 AktualisiereAuswahlAnzeige();
+                // Markierte Seite mit blauem Rahmen hervorheben
+                if (_markierteSeitenIdx >= 0)
+                {
+                    var seiteEl = PdfCanvas.Children.OfType<Border>()
+                        .FirstOrDefault(b => b.Tag?.ToString() == $"SEITE_{_markierteSeitenIdx}");
+                    if (seiteEl != null)
+                    {
+                        seiteEl.BorderBrush     = new SolidColorBrush(Color.FromRgb(0, 100, 200));
+                        seiteEl.BorderThickness = new Thickness(3);
+                    }
+                }
                 AktualisiereGruppenComboBox();
             }
             catch (Exception ex) { LogException(ex, "ZeicheCanvas"); }
@@ -949,6 +963,17 @@ namespace StatikManager.Modules.Werkzeuge
                 var itemEinfügen = new MenuItem { Header = "\u2795  Nach dieser Seite einfügen" };
                 itemEinfügen.Click += (_, __) => FügeSeiteEinNach(capturedIdx);
                 seitenMenu.Items.Add(itemEinfügen);
+                seitenMenu.Items.Add(new Separator());
+                var itemEinfügenVor = new MenuItem { Header = "\u2795  Vor dieser Seite einfügen" };
+                itemEinfügenVor.Click += (_, __) =>
+                {
+                    var reihenfolge2 = _seitenReihenfolge ?? Enumerable.Range(0, _seitenBilder.Count).ToList();
+                    int pos = reihenfolge2.IndexOf(capturedIdx);
+                    // FügeSeiteEinDialog(p) ruft intern FügeInReihenfolgeEin(neuIdx, p+1) auf.
+                    // Für "vor Seite an pos": FügeInReihenfolgeEin(neuIdx, pos) → übergib pos-1
+                    FügeSeiteEinDialog(Math.Max(0, pos - 1));
+                };
+                seitenMenu.Items.Add(itemEinfügenVor);
             }
             blatt.ContextMenu = seitenMenu;
 
@@ -956,13 +981,16 @@ namespace StatikManager.Modules.Werkzeuge
             blatt.PreviewMouseLeftButtonDown += (_, ev) =>
             {
                 if (_scherenModus || _bearbeitungsModus) return;
+                // Drag-Vorbereitung nur setzen, wenn kein Schnittlinie-Drag aktiv ist
+                if (_schnittDragAktiv) return;
                 _dragQuellIdx    = capturedIdx;
                 _dragStartPunkt  = ev.GetPosition(PdfCanvas);
                 _dragAktiv       = false;
             };
             blatt.MouseMove += (s, ev) =>
             {
-                if (_dragQuellIdx != capturedIdx || ev.LeftButton != MouseButtonState.Pressed) return;
+                if (_dragQuellIdx != capturedIdx || ev.LeftButton != MouseButtonState.Pressed
+                    || _schnittDragAktiv) return;
                 var pos = ev.GetPosition(PdfCanvas);
                 double dx = pos.X - _dragStartPunkt.X;
                 double dy = pos.Y - _dragStartPunkt.Y;
@@ -3275,80 +3303,6 @@ namespace StatikManager.Modules.Werkzeuge
                 };
                 Panel.SetZIndex(linie, 150);
                 PdfCanvas.Children.Add(linie);
-
-                // Verbesserung 4: Hit-Zone für Verschieben (nur wenn NICHT im Scheren-Modus)
-                int capturedK = k;
-                var capturedSi4 = si;
-                double capturedFrac = yFrac;
-                var hitZone = new Line
-                {
-                    X1               = setX,
-                    Y1               = canY,
-                    X2               = setX + pageW,
-                    Y2               = canY,
-                    Stroke           = Brushes.Transparent,
-                    StrokeThickness  = Math.Max(14.0, 14.0 / _zoomFaktor),
-                    IsHitTestVisible = !_scherenModus,
-                    Cursor           = _scherenModus ? null : Cursors.SizeNS,
-                    Tag              = $"SCHERE_{k}_HIT"
-                };
-                Panel.SetZIndex(hitZone, 160);
-
-                hitZone.MouseLeftButtonDown += (_, ev) =>
-                {
-                    if (_scherenModus) return;
-                    _undoStack.Push(SpeichereZustand());
-                    _gezogenesSchnittIdx = capturedK;
-                    _schnittDragAktiv    = true;
-                    _schnittDragOrigFrac = _scherenschnitte[capturedK].YFraction;
-                    hitZone.CaptureMouse();
-                    ev.Handled = true;
-                };
-                hitZone.MouseMove += (_, ev) =>
-                {
-                    if (!_schnittDragAktiv || _gezogenesSchnittIdx != capturedK) return;
-                    var pos  = ev.GetPosition(PdfCanvas);
-                    int dsi  = _scherenschnitte[capturedK].Seite;
-                    if (dsi >= _seitenHöhe.Length || _seitenHöhe[dsi] <= 0) return;
-                    double yBase2 = _layoutHorizontal ? SeiteX : (dsi < _seitenYStart.Length ? _seitenYStart[dsi] : 0);
-                    double newFrac = Math.Max(0.01, Math.Min(0.99, (pos.Y - yBase2) / _seitenHöhe[dsi]));
-
-                    // Nicht über andere Schnitte auf derselben Seite hinaus verschieben
-                    var andereFracs = _scherenschnitte
-                        .Where((s, idx) => idx != capturedK && s.Seite == dsi)
-                        .Select(s => s.YFraction).OrderBy(f => f).ToList();
-                    int myPos = _scherenschnitte
-                        .Select((s2, idx) => (s2, idx))
-                        .Where(x => x.idx != capturedK && x.s2.Seite == dsi)
-                        .OrderBy(x => x.s2.YFraction)
-                        .TakeWhile(x => x.s2.YFraction < _schnittDragOrigFrac)
-                        .Count();
-                    double minF = myPos > 0 ? andereFracs[myPos - 1] + 0.01 : 0.01;
-                    double maxF = myPos < andereFracs.Count ? andereFracs[myPos] - 0.01 : 0.99;
-                    newFrac = Math.Max(minF, Math.Min(maxF, newFrac));
-
-                    var sOld = _scherenschnitte[capturedK];
-                    _scherenschnitte[capturedK] = (sOld.Seite, newFrac);
-                    AktualisiereSchnitteLinien();
-                    ev.Handled = true;
-                };
-                hitZone.MouseLeftButtonUp += (s2, ev) =>
-                {
-                    if (_schnittDragAktiv && _gezogenesSchnittIdx == capturedK)
-                    {
-                        ((UIElement)s2).ReleaseMouseCapture();
-                        _schnittDragAktiv    = false;
-                        _gezogenesSchnittIdx = -1;
-                        TxtInfo.Text = "Schnittlinie verschoben – Strg+Z zum Rückgängigmachen";
-                    }
-                    ev.Handled = true;
-                };
-                hitZone.LostMouseCapture += (_, __) =>
-                {
-                    _schnittDragAktiv    = false;
-                    _gezogenesSchnittIdx = -1;
-                };
-                PdfCanvas.Children.Add(hitZone);
             }
 
             bool hatSchnitte = _scherenschnitte.Count > 0;
@@ -3597,6 +3551,7 @@ namespace StatikManager.Modules.Werkzeuge
                             _ausgewählteParts.Remove((finalSi, finalT));
                         else
                             _ausgewählteParts.Add((finalSi, finalT));
+                        _markierteSeitenIdx = finalSi; // Letzte angeklickte Seite merken
                         AktualisiereTeilOverlays();
                         BtnTeilLöschen.IsEnabled = _ausgewählteParts.Count > 0;
                         int n = _ausgewählteParts.Count;
@@ -3606,6 +3561,99 @@ namespace StatikManager.Modules.Werkzeuge
                         ScrollView.Focus();
                         ev.Handled = true;
                     };
+
+                    // Schnittlinie über diesem Teil draggbar machen (wenn nicht im Scheren-Modus)
+                    if (t > 0 && !_scherenModus)
+                    {
+                        // Index der Schnittlinie über diesem Teil bestimmen
+                        double cutFrac = fracOben; // fracOben dieses Teils = Position der Schnittlinie darüber
+                        int capturedCutIdx = -1;
+                        for (int ci2 = 0; ci2 < _scherenschnitte.Count; ci2++)
+                        {
+                            if (_scherenschnitte[ci2].Seite == si && Math.Abs(_scherenschnitte[ci2].YFraction - cutFrac) < 0.001)
+                            {
+                                capturedCutIdx = ci2; break;
+                            }
+                        }
+
+                        if (capturedCutIdx >= 0)
+                        {
+                            double dragSchwelle = Math.Max(7.0, 7.0 / _zoomFaktor); // px innerhalb des Overlays
+                            int capturedDragSi = si;
+
+                            // Cursor-Wechsel: oben im Overlay = SizeNS, sonst Hand
+                            overlay.MouseMove += (_, ev2) =>
+                            {
+                                if (_schnittDragAktiv && _gezogenesSchnittIdx == capturedCutIdx)
+                                {
+                                    // Im Drag: Schnittposition aktualisieren
+                                    var pos2 = ev2.GetPosition(PdfCanvas);
+                                    int dsi2 = _scherenschnitte[capturedCutIdx].Seite;
+                                    if (dsi2 < _seitenHöhe.Length && _seitenHöhe[dsi2] > 0)
+                                    {
+                                        double yBase3 = _layoutHorizontal ? SeiteX : (dsi2 < _seitenYStart.Length ? _seitenYStart[dsi2] : 0);
+                                        double newFrac = Math.Max(0.01, Math.Min(0.99, (pos2.Y - yBase3) / _seitenHöhe[dsi2]));
+                                        var andereFracs2 = _scherenschnitte
+                                            .Where((s3, ix) => ix != capturedCutIdx && s3.Seite == dsi2)
+                                            .Select(s3 => s3.YFraction).OrderBy(f => f).ToList();
+                                        int myPos2 = _scherenschnitte
+                                            .Select((s3, ix) => (s3, ix))
+                                            .Where(x2 => x2.ix != capturedCutIdx && x2.s3.Seite == dsi2)
+                                            .OrderBy(x2 => x2.s3.YFraction)
+                                            .TakeWhile(x2 => x2.s3.YFraction < _schnittDragOrigFrac)
+                                            .Count();
+                                        double minF2 = myPos2 > 0 ? andereFracs2[myPos2 - 1] + 0.01 : 0.01;
+                                        double maxF2 = myPos2 < andereFracs2.Count ? andereFracs2[myPos2] - 0.01 : 0.99;
+                                        newFrac = Math.Max(minF2, Math.Min(maxF2, newFrac));
+                                        var sOld2 = _scherenschnitte[capturedCutIdx];
+                                        _scherenschnitte[capturedCutIdx] = (sOld2.Seite, newFrac);
+                                        AktualisiereSchnitteLinien();
+                                    }
+                                    ev2.Handled = true;
+                                }
+                                else
+                                {
+                                    var pos2 = ev2.GetPosition(overlay);
+                                    overlay.Cursor = pos2.Y < dragSchwelle ? Cursors.SizeNS : Cursors.Hand;
+                                }
+                            };
+
+                            // Drag starten wenn nahe der Oberkante (= Schnittlinie) gedrückt wird
+                            overlay.PreviewMouseLeftButtonDown += (_, ev2) =>
+                            {
+                                if (_scherenModus || capturedCutIdx < 0) return;
+                                var pos2 = ev2.GetPosition(overlay);
+                                if (pos2.Y > dragSchwelle) return; // Nicht nahe genug an der Schnittlinie
+                                _undoStack.Push(SpeichereZustand());
+                                _gezogenesSchnittIdx = capturedCutIdx;
+                                _schnittDragAktiv    = true;
+                                _schnittDragOrigFrac = _scherenschnitte[capturedCutIdx].YFraction;
+                                overlay.CaptureMouse();
+                                ev2.Handled = true; // WICHTIG: Verhindert Teil-Auswahl und PreviewMouseLeftButtonDown vom SEITE_-Border
+                            };
+
+                            overlay.MouseLeftButtonUp += (s2, ev2) =>
+                            {
+                                if (_schnittDragAktiv && _gezogenesSchnittIdx == capturedCutIdx)
+                                {
+                                    ((UIElement)s2).ReleaseMouseCapture();
+                                    _schnittDragAktiv    = false;
+                                    _gezogenesSchnittIdx = -1;
+                                    TxtInfo.Text = "Schnittlinie verschoben – Strg+Z zum Rückgängigmachen";
+                                    ev2.Handled = true;
+                                }
+                            };
+
+                            overlay.LostMouseCapture += (_, __) =>
+                            {
+                                if (_gezogenesSchnittIdx == capturedCutIdx)
+                                {
+                                    _schnittDragAktiv    = false;
+                                    _gezogenesSchnittIdx = -1;
+                                }
+                            };
+                        }
+                    }
 
                     // Kontext-Menü (Rechtsklick)
                     var menu       = new ContextMenu();
@@ -3956,7 +4004,33 @@ namespace StatikManager.Modules.Werkzeuge
             => SafeExecute(LöscheAusgewählteParts, "BtnTeilLöschen_Click");
 
         private void BtnSeiteEinfügen_Click(object sender, RoutedEventArgs e)
-            => SafeExecute(() => FügeSeiteEinNach(_seitenBilder.Count > 0 ? _seitenBilder.Count - 1 : 0), "BtnSeiteEinfügen_Click");
+            => SafeExecute(() =>
+            {
+                if (_seitenBilder.Count == 0) return;
+                int nachSeitePos;
+                if (_markierteSeitenIdx >= 0 && _markierteSeitenIdx < _seitenBilder.Count)
+                {
+                    // Anzeige-Position der markierten Seite in der Reihenfolge ermitteln
+                    var reihenfolge = _seitenReihenfolge ?? Enumerable.Range(0, _seitenBilder.Count).ToList();
+                    int anzeigePos = reihenfolge.IndexOf(_markierteSeitenIdx);
+                    if (anzeigePos < 0) anzeigePos = reihenfolge.Count;
+
+                    bool vorher = ZeigeBinaryDialog(
+                        "Wo einfügen?",
+                        $"Neue Seite relativ zu Seite {_markierteSeitenIdx + 1} einfügen:",
+                        "Vor dieser Seite",
+                        "Nach dieser Seite");
+                    // FügeSeiteEinDialog ruft intern FügeInReihenfolgeEin(neuIdx, nachSeitenIdx + 1) auf.
+                    // Daher: vorher → anzeigePos - 1 (damit +1 → anzeigePos), nachher → anzeigePos (damit +1 → anzeigePos+1)
+                    nachSeitePos = vorher ? Math.Max(0, anzeigePos - 1) : anzeigePos;
+                }
+                else
+                {
+                    // Keine Seite markiert: ans Ende anhängen
+                    nachSeitePos = _seitenBilder.Count;
+                }
+                FügeSeiteEinDialog(nachSeitePos);
+            }, "BtnSeiteEinfügen_Click");
 
         private void BtnPdfSpeichern_Click(object sender, RoutedEventArgs e)
             => SafeExecute(SpeicherePdfMitÄnderungen, "BtnPdfSpeichern_Click");
