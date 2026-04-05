@@ -4227,6 +4227,7 @@ namespace StatikManager.Modules.Werkzeuge
             _kompositBilder.Remove(seitenIdx);
             ZeicheCanvas();
             TxtInfo.Text = $"Seite {seitenIdx + 1} gelöscht – Strg+Z zum Rückgängigmachen";
+            AutoSpeichern();
         }
 
         // ── Feature 4: Seite einfügen ─────────────────────────────────────────────
@@ -4586,68 +4587,59 @@ namespace StatikManager.Modules.Werkzeuge
 
                 foreach (int si in sichtbar)
                 {
-                    bool hatKomposit       = _kompositBilder.ContainsKey(si);
-                    bool hatSchnitte       = _scherenschnitte.Any(s => s.Seite == si);
+                    bool hatKomposit        = _kompositBilder.ContainsKey(si);
+                    bool hatSchnitte        = _scherenschnitte.Any(s => s.Seite == si);
+                    bool hatGelöschteTeile  = _gelöschteParts.Any(p => p.Seite == si);
                     bool istExternEingefügt = _eingefügteSeitenInfo.ContainsKey(si);
-                    bool hatCrop           = si < _cropLinks.Length
+                    bool hatCrop            = si < _cropLinks.Length
                         && (_cropLinks[si] > 0 || _cropRechts[si] > 0 || _cropOben[si] > 0 || _cropUnten[si] > 0);
 
-                    if (hatKomposit && !hatSchnitte)
+                    if (hatKomposit || (hatSchnitte && hatGelöschteTeile))
                     {
-                        // Komposit-Bitmap als Bildseite exportieren
-                        var kompBmp = _kompositBilder[si];
-                        double scaleH  = (double)kompBmp.PixelHeight / Math.Max(1, _seitenBilder[si].PixelHeight);
-                        double newHPts = Math.Max(1, pageHPts * scaleH);
-                        using var ms = new IO.MemoryStream();
-                        var enc = new PngBitmapEncoder();
-                        enc.Frames.Add(BitmapFrame.Create(kompBmp));
-                        enc.Save(ms);
-                        ms.Position = 0;
-                        using var xImg = PdfSharp.Drawing.XImage.FromStream(ms);
-                        var seite = pdfOut.AddPage();
-                        seite.Width  = PdfSharp.Drawing.XUnit.FromPoint(pageWPts);
-                        seite.Height = PdfSharp.Drawing.XUnit.FromPoint(newHPts);
-                        using var gfx = PdfSharp.Drawing.XGraphics.FromPdfPage(seite);
-                        gfx.DrawImage(xImg, 0, 0, pageWPts, newHPts);
-                    }
-                    else if (hatSchnitte)
-                    {
-                        // Seite mit Schnitten: pro sichtbaren Teil eine Ausgabeseite
-                        var teilGrenzen = GetTeilGrenzen(si);
-                        for (int t = 0; t < teilGrenzen.Count; t++)
+                        // Seite mit gelöschten/zusammengeschobenen Teilen:
+                        // → IMMER als EINE Seite in ORIGINALFORMAT exportieren.
+                        // Gelöschte Bereiche erscheinen als weißer Leerraum.
+                        BitmapSource exportBmp;
+                        if (hatKomposit)
                         {
-                            if (_gelöschteParts.Contains((si, t))) continue;
-                            var (fracOben, fracUnten) = teilGrenzen[t];
-                            if (hatKomposit)
-                            {
-                                // Teilbereich des Komposit-Bitmaps als Bildseite
-                                var kompBmp = _kompositBilder[si];
-                                int y0 = (int)Math.Round(fracOben  * kompBmp.PixelHeight);
-                                int h  = (int)Math.Round(fracUnten * kompBmp.PixelHeight) - y0;
-                                h = Math.Max(1, Math.Min(h, kompBmp.PixelHeight - y0));
-                                var teilBmp = new CroppedBitmap(kompBmp, new Int32Rect(0, y0, kompBmp.PixelWidth, h));
-                                double teilHPts = pageHPts * (fracUnten - fracOben);
-                                using var ms = new IO.MemoryStream();
-                                var enc = new PngBitmapEncoder();
-                                enc.Frames.Add(BitmapFrame.Create(teilBmp));
-                                enc.Save(ms);
-                                ms.Position = 0;
-                                using var xImg = PdfSharp.Drawing.XImage.FromStream(ms);
-                                var seite = pdfOut.AddPage();
-                                seite.Width  = PdfSharp.Drawing.XUnit.FromPoint(pageWPts);
-                                seite.Height = PdfSharp.Drawing.XUnit.FromPoint(teilHPts);
-                                using var gfx = PdfSharp.Drawing.XGraphics.FromPdfPage(seite);
-                                gfx.DrawImage(xImg, 0, 0, pageWPts, teilHPts);
-                            }
-                            else if (pdfIn != null && si < pdfIn.PageCount)
-                            {
-                                double pdfY1 = (1.0 - fracUnten) * pageHPts;
-                                double pdfY2 = (1.0 - fracOben)  * pageHPts;
-                                var seite = pdfOut.AddPage(pdfIn.Pages[si]);
-                                seite.CropBox = new PdfSharp.Pdf.PdfRectangle(
-                                    new PdfSharp.Drawing.XPoint(0,        pdfY1),
-                                    new PdfSharp.Drawing.XPoint(pageWPts, pdfY2));
-                            }
+                            exportBmp = _kompositBilder[si];
+                        }
+                        else
+                        {
+                            // Komposit on-the-fly: sichtbare Teile + weiße Fläche für gelöschte
+                            var grenzen = GetTeilGrenzen(si);
+                            var sichtbareTeilIndizes = Enumerable.Range(0, grenzen.Count)
+                                .Where(t2 => !_gelöschteParts.Contains((si, t2)))
+                                .ToList();
+                            exportBmp = sichtbareTeilIndizes.Count > 0
+                                ? ErzeugeKompositBild(si, sichtbareTeilIndizes)
+                                : null;
+                        }
+
+                        if (exportBmp != null)
+                        {
+                            // Seitenhöhe: niemals kleiner als Original (gelöschter Inhalt → weißer Leerraum).
+                            // Bei eingefügtem Inhalt (Leerzeile) proportional größer.
+                            int origPixH = si < _seitenBilder.Count ? _seitenBilder[si].PixelHeight : exportBmp.PixelHeight;
+                            double exportHPts = exportBmp.PixelHeight <= origPixH
+                                ? pageHPts
+                                : pageHPts * (double)exportBmp.PixelHeight / Math.Max(1, origPixH);
+
+                            using var ms = new IO.MemoryStream();
+                            var enc = new PngBitmapEncoder();
+                            enc.Frames.Add(BitmapFrame.Create(exportBmp));
+                            enc.Save(ms);
+                            ms.Position = 0;
+                            using var xImg = PdfSharp.Drawing.XImage.FromStream(ms);
+                            var seite = pdfOut.AddPage();
+                            seite.Width  = PdfSharp.Drawing.XUnit.FromPoint(pageWPts);
+                            seite.Height = PdfSharp.Drawing.XUnit.FromPoint(exportHPts);
+                            using var gfx = PdfSharp.Drawing.XGraphics.FromPdfPage(seite);
+                            gfx.DrawImage(xImg, 0, 0, pageWPts, exportHPts);
+                        }
+                        else if (pdfIn != null && si < pdfIn.PageCount)
+                        {
+                            pdfOut.AddPage(pdfIn.Pages[si]);
                         }
                     }
                     else if (istExternEingefügt)
