@@ -3578,7 +3578,7 @@ namespace StatikManager.Modules.Werkzeuge
                     // PDF-Seitengröße (Punkte, bottom-up) — via _pdfBytes, kein Datei-Handle
                     (double pageWPts, double pageHPts) = _pdfBytes != null
                         ? HolePdfSeitenGrösse(_pdfBytes)
-                        : HolePdfSeitenGrösse(_pdfPfad!);
+                        : (595.28, 841.89); // A4 Fallback wenn _pdfBytes nicht geladen
 
                     for (int t = 0; t < grenzen.Count - 1; t++)
                     {
@@ -3597,9 +3597,12 @@ namespace StatikManager.Modules.Werkzeuge
                         string zielDatei = IO.Path.Combine(ordner, basis + suffix + ".pdf");
 
                         // MemoryStream statt Dateipfad – verhindert Datei-Sperr-Konflikt mit AutoSpeichern
-                        using var pdfIn = _pdfBytes != null
-                            ? PdfReader.Open(new IO.MemoryStream(_pdfBytes, writable: false), PdfDocumentOpenMode.Import)
-                            : PdfReader.Open(_pdfPfad!, PdfDocumentOpenMode.Import);
+                        if (_pdfBytes == null)
+                        {
+                            System.Diagnostics.Debug.WriteLine("[SAVE] WARNUNG: _pdfBytes ist null, Seite wird übersprungen");
+                            continue;
+                        }
+                        using var pdfIn = PdfReader.Open(new IO.MemoryStream(_pdfBytes), PdfDocumentOpenMode.Import);
                         var pdfOut      = new PdfSharp.Pdf.PdfDocument();
                         var seite       = pdfOut.AddPage(pdfIn.Pages[si]);
                         seite.CropBox   = new PdfSharp.Pdf.PdfRectangle(
@@ -3623,7 +3626,7 @@ namespace StatikManager.Modules.Werkzeuge
 
                     (double pageWPts, double pageHPts) = _pdfBytes != null
                         ? HolePdfSeitenGrösse(_pdfBytes)
-                        : HolePdfSeitenGrösse(_pdfPfad!);
+                        : (595.28, 841.89); // A4 Fallback wenn _pdfBytes nicht geladen
                     double scaleH  = (double)kompBmp.PixelHeight / Math.Max(1, _seitenBilder[si].PixelHeight);
                     double newHPts = Math.Max(1, pageHPts * scaleH);
 
@@ -4828,31 +4831,205 @@ namespace StatikManager.Modules.Werkzeuge
         // ── Ctrl+S: PDF speichern ─────────────────────────────────────────────────
 
         /// <summary>Speichert die bearbeitete PDF ohne Dialog direkt auf _pdfPfad (Auto-Save).</summary>
+        /// <summary>Speichert die bearbeitete PDF ohne Dialog direkt auf _pdfPfad (Auto-Save).</summary>
         private void AutoSpeichern()
         {
             if (_pdfPfad == null || _seitenBilder.Count == 0)
             {
-                System.Diagnostics.Debug.WriteLine($"[AUTOSAVE] Übersprungen: _pdfPfad={_pdfPfad ?? "null"}, _seitenBilder={_seitenBilder.Count}");
+                System.Diagnostics.Debug.WriteLine("[AUTOSAVE] Übersprungen: kein Pfad oder keine Bilder");
                 return;
             }
-            System.Diagnostics.Debug.WriteLine($"[AUTOSAVE] Starte AutoSpeichern → {_pdfPfad}");
-            string tempPfad = _pdfPfad + ".tmp";
+            System.Diagnostics.Debug.WriteLine($"[AUTOSAVE] Starte → {_pdfPfad}");
+
             try
             {
-                SpeicherNachPfad(tempPfad, autoSave: true);
-                IO.File.Replace(tempPfad, _pdfPfad, null);
-                // byte[]-Puffer aktualisieren damit nächstes Rendering die neue Version liest
-                try { _pdfBytes = IO.File.ReadAllBytes(_pdfPfad); } catch { }
-                System.Diagnostics.Debug.WriteLine($"[AUTOSAVE] Gespeichert: {_pdfPfad} um {DateTime.Now}");
+                // Schritt 1: PDF komplett im Speicher zusammenbauen — KEIN Dateizugriff
+                byte[] neueBytes;
+                using (var ms = new IO.MemoryStream())
+                {
+                    SpeicherInStream(ms);
+                    neueBytes = ms.ToArray();
+                }
+
+                if (neueBytes.Length == 0)
+                {
+                    System.Diagnostics.Debug.WriteLine("[AUTOSAVE] FEHLER: SpeicherInStream lieferte 0 Bytes");
+                    return;
+                }
+
+                // Schritt 2: Auf Festplatte schreiben mit Retry bei Sperre
+                Exception letzterFehler = null;
+                for (int versuch = 1; versuch <= 3; versuch++)
+                {
+                    try
+                    {
+                        IO.File.WriteAllBytes(_pdfPfad, neueBytes);
+                        _pdfBytes = neueBytes;
+                        System.Diagnostics.Debug.WriteLine($"[AUTOSAVE] OK: {_pdfPfad} ({neueBytes.Length} Bytes, Versuch {versuch})");
+                        return;
+                    }
+                    catch (IO.IOException ex)
+                    {
+                        letzterFehler = ex;
+                        System.Diagnostics.Debug.WriteLine($"[AUTOSAVE] Versuch {versuch} gesperrt: {ex.Message}");
+                        Thread.Sleep(200);
+                    }
+                }
+
+                // Fallback: unter anderem Namen speichern
+                string fallback = IO.Path.Combine(
+                    IO.Path.GetDirectoryName(_pdfPfad),
+                    IO.Path.GetFileNameWithoutExtension(_pdfPfad) + "_autosave.pdf");
+                IO.File.WriteAllBytes(fallback, neueBytes);
+                _pdfBytes = neueBytes;
+                System.Diagnostics.Debug.WriteLine($"[AUTOSAVE] Fallback gespeichert: {fallback}");
             }
             catch (Exception ex)
             {
-                if (IO.File.Exists(tempPfad)) try { IO.File.Delete(tempPfad); } catch { }
-                System.Diagnostics.Debug.WriteLine($"[AUTOSAVE] FEHLER: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"[AUTOSAVE] FEHLER: {ex.Message}\n{ex.StackTrace}");
                 LogException(ex, "AutoSpeichern");
-                MessageBox.Show("Auto-Speichern fehlgeschlagen:\n" + ex.Message,
-                    "Speicher-Fehler", MessageBoxButton.OK, MessageBoxImage.Warning);
+                // KEINE MessageBox — blockiert UI nicht
             }
+        }
+
+        /// <summary>
+        /// Baut die bearbeitete PDF komplett in den übergebenen MemoryStream —
+        /// KEIN Dateizugriff auf _pdfPfad. Identische Logik wie SpeicherNachPfad.
+        /// </summary>
+        private void SpeicherInStream(IO.MemoryStream zielStream)
+        {
+            System.Diagnostics.Debug.WriteLine($"[SPEICHER-STREAM] Start, _pdfBytes={(_pdfBytes != null ? _pdfBytes.Length + " Bytes" : "null")}");
+
+            var reihenfolge = _seitenReihenfolge ?? Enumerable.Range(0, _seitenBilder.Count).ToList();
+            var sichtbar    = reihenfolge.Where(i => !_gelöschteSeiten.Contains(i) && i < _seitenBilder.Count).ToList();
+
+            var pdfOut = new PdfSharp.Pdf.PdfDocument();
+
+            // Quell-PDF öffnen — IMMER via _pdfBytes, nie _pdfPfad
+            PdfSharp.Pdf.PdfDocument pdfIn = null;
+            if (_pdfBytes != null)
+            {
+                try { pdfIn = PdfReader.Open(new IO.MemoryStream(_pdfBytes), PdfDocumentOpenMode.Import); }
+                catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[SPEICHER-STREAM] PdfReader.Open(bytes) FEHLER: {ex.Message}"); }
+            }
+            else
+            {
+                System.Diagnostics.Debug.WriteLine("[SPEICHER-STREAM] WARNUNG: _pdfBytes ist null, kein pdfIn verfügbar");
+            }
+
+            // Seitengröße — via _pdfBytes oder A4-Fallback
+            (double pageWPts, double pageHPts) = _pdfBytes != null
+                ? HolePdfSeitenGrösse(_pdfBytes)
+                : (595.28, 841.89); // A4 Fallback wenn _pdfBytes nicht geladen
+
+            foreach (int si in sichtbar)
+            {
+                bool hatKomposit        = _kompositBilder.ContainsKey(si);
+                bool hatSchnitte        = _scherenschnitte.Any(s => s.Seite == si);
+                bool hatGelöschteTeile  = _gelöschteParts.Any(p => p.Seite == si);
+                bool istExternEingefügt = _eingefügteSeitenInfo.ContainsKey(si);
+                bool hatCrop            = si < _cropLinks.Length
+                    && (_cropLinks[si] > 0 || _cropRechts[si] > 0 || _cropOben[si] > 0 || _cropUnten[si] > 0);
+
+                if (hatKomposit || (hatSchnitte && hatGelöschteTeile))
+                {
+                    BitmapSource exportBmp;
+                    if (hatKomposit)
+                    {
+                        exportBmp = _kompositBilder[si];
+                    }
+                    else
+                    {
+                        var grenzen = GetTeilGrenzen(si);
+                        var sichtbareTeilIndizes = Enumerable.Range(0, grenzen.Count)
+                            .Where(t2 => !_gelöschteParts.Contains((si, t2)))
+                            .ToList();
+                        exportBmp = sichtbareTeilIndizes.Count > 0
+                            ? ErzeugeKompositBild(si, sichtbareTeilIndizes)
+                            : null;
+                    }
+
+                    if (exportBmp != null)
+                    {
+                        int origPixH = si < _seitenBilder.Count ? _seitenBilder[si].PixelHeight : exportBmp.PixelHeight;
+                        BitmapSource finalExportBmp = exportBmp;
+                        if (exportBmp.PixelHeight > origPixH)
+                        {
+                            var crop = new CroppedBitmap(exportBmp, new Int32Rect(0, 0, exportBmp.PixelWidth, origPixH));
+                            crop.Freeze();
+                            finalExportBmp = crop;
+                        }
+
+                        using var ms = new IO.MemoryStream();
+                        var enc = new PngBitmapEncoder();
+                        enc.Frames.Add(BitmapFrame.Create(finalExportBmp));
+                        enc.Save(ms);
+                        ms.Position = 0;
+                        using var xImg = PdfSharp.Drawing.XImage.FromStream(ms);
+                        var seite = pdfOut.AddPage();
+                        seite.Width  = PdfSharp.Drawing.XUnit.FromPoint(pageWPts);
+                        seite.Height = PdfSharp.Drawing.XUnit.FromPoint(pageHPts);
+                        using var gfx = PdfSharp.Drawing.XGraphics.FromPdfPage(seite);
+                        gfx.DrawImage(xImg, 0, 0, pageWPts, pageHPts);
+                    }
+                    else if (pdfIn != null && si < pdfIn.PageCount)
+                    {
+                        pdfOut.AddPage(pdfIn.Pages[si]);
+                    }
+                }
+                else if (istExternEingefügt)
+                {
+                    var bmp = _seitenBilder[si];
+                    using var ms = new IO.MemoryStream();
+                    var enc = new PngBitmapEncoder();
+                    enc.Frames.Add(BitmapFrame.Create(bmp));
+                    enc.Save(ms);
+                    ms.Position = 0;
+                    using var xImg = PdfSharp.Drawing.XImage.FromStream(ms);
+                    var (extW, extH) = HolePdfSeitenGrösse(_eingefügteSeitenInfo[si].Pfad);
+                    var seite = pdfOut.AddPage();
+                    seite.Width  = PdfSharp.Drawing.XUnit.FromPoint(extW);
+                    seite.Height = PdfSharp.Drawing.XUnit.FromPoint(extH);
+                    using var gfx = PdfSharp.Drawing.XGraphics.FromPdfPage(seite);
+                    gfx.DrawImage(xImg, 0, 0, extW, extH);
+                }
+                else if (pdfIn != null && si < pdfIn.PageCount)
+                {
+                    var seite = pdfOut.AddPage(pdfIn.Pages[si]);
+                    if (hatCrop)
+                    {
+                        double cL = _cropLinks[si], cR = _cropRechts[si];
+                        double cO = _cropOben[si],  cU = _cropUnten[si];
+                        double x1 = cL * pageWPts;
+                        double x2 = (1.0 - cR) * pageWPts;
+                        double y1 = cU * pageHPts;
+                        double y2 = (1.0 - cO) * pageHPts;
+                        seite.CropBox = new PdfSharp.Pdf.PdfRectangle(
+                            new PdfSharp.Drawing.XPoint(x1, y1),
+                            new PdfSharp.Drawing.XPoint(x2, y2));
+                    }
+                }
+                else
+                {
+                    // Eingefügte leere Seite: weißes Bitmap
+                    var bmp = _seitenBilder[si];
+                    using var ms = new IO.MemoryStream();
+                    var enc = new PngBitmapEncoder();
+                    enc.Frames.Add(BitmapFrame.Create(bmp));
+                    enc.Save(ms);
+                    ms.Position = 0;
+                    using var xImg = PdfSharp.Drawing.XImage.FromStream(ms);
+                    var seite = pdfOut.AddPage();
+                    seite.Width  = PdfSharp.Drawing.XUnit.FromPoint(pageWPts);
+                    seite.Height = PdfSharp.Drawing.XUnit.FromPoint(pageHPts);
+                    using var gfx = PdfSharp.Drawing.XGraphics.FromPdfPage(seite);
+                    gfx.DrawImage(xImg, 0, 0, pageWPts, pageHPts);
+                }
+            }
+
+            pdfIn?.Dispose();
+            pdfOut.Save(zielStream, false);
+            System.Diagnostics.Debug.WriteLine($"[SPEICHER-STREAM] Fertig: {zielStream.Length} Bytes");
         }
 
         private void SpeicherePdfMitÄnderungen()
