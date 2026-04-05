@@ -1,7 +1,8 @@
 <UserControl x:Class="StatikManager.Modules.Dokumente.DokumentePanel"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:wz="clr-namespace:StatikManager.Modules.Werkzeuge">
+             xmlns:wz="clr-namespace:StatikManager.Modules.Werkzeuge"
+             xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf">
 
     <Grid>
         <Grid.ColumnDefinitions>
@@ -372,6 +373,18 @@
             <wz:PdfSchnittEditor x:Name="PdfEditor"
                                  Grid.Row="2"
                                  Visibility="Collapsed"/>
+
+            <!-- Versteckter WebView2 für Hintergrund-PDF-Erzeugung (position.html → position.pdf).
+                 Muss im Visual Tree bleiben damit EnsureCoreWebView2Async funktioniert.
+                 ClipToBounds + 0-Größe hält ihn unsichtbar. -->
+            <Border Grid.Row="2"
+                    Width="1" Height="1"
+                    HorizontalAlignment="Left" VerticalAlignment="Top"
+                    IsHitTestVisible="False"
+                    ClipToBounds="True">
+                <wv2:WebView2 x:Name="WebView2PdfGen"
+                              Width="1240" Height="1754"/>
+            </Border>
 
         </Grid>
     </Grid>

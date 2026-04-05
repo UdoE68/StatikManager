@@ -1,5 +1,6 @@
 using Docnet.Core;
 using Docnet.Core.Models;
+using Microsoft.Web.WebView2.Core;
 using Microsoft.Win32;
 using PdfSharp.Drawing;
 using PdfSharp.Pdf;
@@ -10,6 +11,7 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -68,6 +70,10 @@ namespace StatikManager.Modules.Dokumente
 
         // Wird gesetzt wenn nach about:blank automatisch neu geladen werden soll
         private string? _autoRefreshPfad;
+
+        // WebView2 für Hintergrund-PDF-Erzeugung
+        private bool _webView2Initialisiert;
+        private readonly SemaphoreSlim _pdfGenSem = new SemaphoreSlim(1, 1);
 
         // Mehrfachauswahl im Baum (Ctrl+Klick / Shift+Klick)
         private readonly HashSet<string> _baumMehrfachAuswahl = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -683,19 +689,31 @@ namespace StatikManager.Modules.Dokumente
             _selektionDebounce.Start();
         }
 
-        private void DokumentenBaum_SelectedItemChanged(object sender,
+        private async void DokumentenBaum_SelectedItemChanged(object sender,
             RoutedPropertyChangedEventArgs<object> e)
         {
             if (DokumentenBaum.SelectedItem is not TreeViewItem item) return;
             if (item.Tag is not string pfad) return;
 
-            // Ordner angeklickt → prüfen ob position.html darin liegt
+            // Ordner angeklickt → Positions-PDF-Logik
             if (Directory.Exists(pfad))
             {
                 var posHtml = Path.Combine(pfad, "position.html");
-                if (File.Exists(posHtml))
-                    StarteSelektionDebounce(posHtml);
-                // kein else – Ordner ohne position.html zeigt keine Vorschau
+                var posPdf  = Path.Combine(pfad, "position.pdf");
+
+                if (!File.Exists(posHtml)) return;
+
+                // PDF aktuell → direkt als PDF anzeigen
+                if (File.Exists(posPdf) &&
+                    File.GetLastWriteTime(posPdf) >= File.GetLastWriteTime(posHtml))
+                {
+                    StarteSelektionDebounce(posPdf);
+                    return;
+                }
+
+                // PDF fehlt oder veraltet → erzeugen, dann PDF anzeigen
+                try { await LadePositionsOrdnerAsync(posHtml, posPdf); }
+                catch (Exception ex) { Logger.Fehler("PositionsOrdner", ex.Message); }
                 return;
             }
 
@@ -741,7 +759,10 @@ namespace StatikManager.Modules.Dokumente
                         if (DateiTypen.IstHtmlDatei(Path.GetExtension(pfad)))
                         {
                             ZeigeHtmlToolbar(pfad);
-                            AutoPdfAktualisieren(pfad);
+                            // Auto-PDF nur für position.html (fire-and-forget)
+                            if (Path.GetFileName(pfad).Equals("position.html",
+                                    StringComparison.OrdinalIgnoreCase))
+                                _ = AutoPdfImHintergrundAsync(pfad);
                         }
                         AppZustand.Instanz.SetzeStatus("Lade: " + Path.GetFileName(pfad) + " …");
                         WordVorschau.Navigate(new Uri(pfad));
@@ -1252,7 +1273,7 @@ namespace StatikManager.Modules.Dokumente
             _dokumentGeladen = true;
         }
 
-        // ── HTML → PDF (Edge Headless) ────────────────────────────────────────
+        // ── HTML → PDF (WebView2) ─────────────────────────────────────────────
 
         private void ZeigeHtmlToolbar(string htmlPfad)
         {
@@ -1265,7 +1286,7 @@ namespace StatikManager.Modules.Dokumente
                 var htmlZeit = File.GetLastWriteTime(htmlPfad);
                 var pdfZeit  = File.GetLastWriteTime(pdfPfad);
                 TxtHtmlPdfStatus.Text = htmlZeit > pdfZeit
-                    ? "⚠ PDF veraltet – bitte neu speichern"
+                    ? "⚠ PDF veraltet"
                     : "✓ PDF ist aktuell";
             }
             else
@@ -1274,97 +1295,142 @@ namespace StatikManager.Modules.Dokumente
             }
         }
 
-        private void AutoPdfAktualisieren(string htmlPfad)
-        {
-            // Nur vorhandene PDF aktualisieren – keine automatische Erstanlage
-            var pdfPfad = Path.ChangeExtension(htmlPfad, ".pdf");
-            if (!File.Exists(pdfPfad)) return;
-
-            var htmlZeit = File.GetLastWriteTime(htmlPfad);
-            var pdfZeit  = File.GetLastWriteTime(pdfPfad);
-            if (htmlZeit <= pdfZeit) return;
-
-            // HTML ist neuer → still im Hintergrund aktualisieren
-            TxtHtmlPdfStatus.Text   = "PDF wird automatisch aktualisiert …";
-            BtnHtmlAlsPdf.IsEnabled = false;
-            ErzeugeHtmlPdfImHintergrund(htmlPfad, pdfPfad, automatisch: true);
-        }
-
-        private void BtnHtmlAlsPdf_Click(object sender, RoutedEventArgs e)
+        private async void BtnHtmlAlsPdf_Click(object sender, RoutedEventArgs e)
         {
             if (_aktiverDateipfad == null) return;
             var pdfPfad = Path.ChangeExtension(_aktiverDateipfad, ".pdf");
             TxtHtmlPdfStatus.Text   = "PDF wird erzeugt …";
             BtnHtmlAlsPdf.IsEnabled = false;
-            ErzeugeHtmlPdfImHintergrund(_aktiverDateipfad, pdfPfad, automatisch: false);
+            try
+            {
+                var ok = await ErzeugePositionsPdfAsync(_aktiverDateipfad, pdfPfad);
+                TxtHtmlPdfStatus.Text   = ok
+                    ? "✓ " + Path.GetFileName(pdfPfad) + " gespeichert"
+                    : "⚠ PDF konnte nicht erzeugt werden";
+                if (ok) AktualisiereNurStruktur();
+            }
+            catch (Exception ex)
+            {
+                TxtHtmlPdfStatus.Text = "Fehler: " + ex.Message;
+            }
+            finally
+            {
+                BtnHtmlAlsPdf.IsEnabled = true;
+            }
         }
 
-        private void ErzeugeHtmlPdfImHintergrund(string htmlPfad, string pdfPfad, bool automatisch)
+        /// <summary>
+        /// Erzeugt position.pdf via WebView2.PrintToPdfAsync. Nur für position.html aufrufen.
+        /// Läuft im Hintergrund ohne UI zu blockieren (fire-and-forget).
+        /// </summary>
+        private async Task AutoPdfImHintergrundAsync(string htmlPfad)
         {
-            var edgePfad = SucheEdgePfad();
-            if (edgePfad == null)
+            var pdfPfad = Path.ChangeExtension(htmlPfad, ".pdf");
+
+            // Bereits aktuell → nichts tun
+            if (File.Exists(pdfPfad) &&
+                File.GetLastWriteTime(pdfPfad) >= File.GetLastWriteTime(htmlPfad))
             {
-                TxtHtmlPdfStatus.Text   = "Fehler: Microsoft Edge nicht gefunden";
-                BtnHtmlAlsPdf.IsEnabled = true;
-                if (!automatisch)
-                    MessageBox.Show(
-                        "Microsoft Edge (msedge.exe) wurde nicht gefunden.\n" +
-                        "Edge ist auf Windows 10/11 normalerweise unter\n" +
-                        "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\ installiert.",
-                        "Edge nicht gefunden", MessageBoxButton.OK, MessageBoxImage.Warning);
+                TxtHtmlPdfStatus.Text = "✓ PDF ist aktuell";
                 return;
             }
 
-            var htmlUri = new Uri(htmlPfad).AbsoluteUri;
-            // Edge: --headless ohne --disable-gpu, da manche Versionen sonst hängen
-            var args = $"--headless --no-sandbox --print-to-pdf=\"{pdfPfad}\" \"{htmlUri}\"";
-
-            System.Threading.Tasks.Task.Run(() =>
+            TxtHtmlPdfStatus.Text   = "PDF wird automatisch erzeugt …";
+            BtnHtmlAlsPdf.IsEnabled = false;
+            try
             {
-                bool erfolg = false;
-                string fehlerText = "";
-                try
-                {
-                    var psi = new System.Diagnostics.ProcessStartInfo(edgePfad, args)
-                    {
-                        CreateNoWindow  = true,
-                        UseShellExecute = false,
-                    };
-                    using var proc = System.Diagnostics.Process.Start(psi);
-                    // Timeout 30 s – bei sehr großen HTML-Seiten ggf. erhöhen
-                    erfolg = (proc?.WaitForExit(30_000) ?? false) && File.Exists(pdfPfad);
-                }
-                catch (Exception ex) { fehlerText = ex.Message; }
-
-                Dispatcher.BeginInvoke(new Action(() =>
-                {
-                    BtnHtmlAlsPdf.IsEnabled = true;
-                    if (erfolg)
-                    {
-                        TxtHtmlPdfStatus.Text = automatisch
-                            ? "✓ PDF automatisch aktualisiert"
-                            : "✓ " + Path.GetFileName(pdfPfad) + " gespeichert";
-                        // Baum aktualisieren damit die neue PDF erscheint
-                        AktualisiereNurStruktur();
-                    }
-                    else
-                    {
-                        TxtHtmlPdfStatus.Text = string.IsNullOrEmpty(fehlerText)
-                            ? "⚠ PDF konnte nicht erzeugt werden"
-                            : "Fehler: " + fehlerText;
-                    }
-                }));
-            });
+                var ok = await ErzeugePositionsPdfAsync(htmlPfad, pdfPfad);
+                TxtHtmlPdfStatus.Text   = ok ? "✓ PDF automatisch erzeugt" : "⚠ PDF konnte nicht erzeugt werden";
+                if (ok) AktualisiereNurStruktur();
+            }
+            catch (Exception ex)
+            {
+                Logger.Fehler("AutoPdfImHintergrundAsync", ex.Message);
+                TxtHtmlPdfStatus.Text = "⚠ PDF-Erzeugung fehlgeschlagen";
+            }
+            finally
+            {
+                BtnHtmlAlsPdf.IsEnabled = true;
+            }
         }
 
-        private static string? SucheEdgePfad()
+        /// <summary>
+        /// Zeigt PDF direkt oder erzeugt sie zuerst (für Ordner-Klick).
+        /// </summary>
+        private async Task LadePositionsOrdnerAsync(string htmlPfad, string pdfPfad)
         {
-            var kandidaten = new[]
+            AppZustand.Instanz.SetzeStatus("PDF wird erzeugt …");
+            var ok = await ErzeugePositionsPdfAsync(htmlPfad, pdfPfad);
+            if (ok)
             {
-                @"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
-                @"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
-            };
-            return kandidaten.FirstOrDefault(File.Exists);
+                StarteSelektionDebounce(pdfPfad);
+                AktualisiereNurStruktur();
+            }
+            else
+            {
+                // Fallback: HTML anzeigen
+                StarteSelektionDebounce(htmlPfad);
+            }
+        }
+
+        /// <summary>
+        /// Kernmethode: Erzeugt eine PDF aus einer HTML-Datei via WebView2.PrintToPdfAsync.
+        /// Serialisiert via _pdfGenSem – max. eine gleichzeitige Erzeugung.
+        /// </summary>
+        private async Task<bool> ErzeugePositionsPdfAsync(string htmlPfad, string pdfPfad)
+        {
+            await _pdfGenSem.WaitAsync();
+            try
+            {
+                // WebView2 initialisieren (idempotent)
+                if (!_webView2Initialisiert)
+                {
+                    await WebView2PdfGen.EnsureCoreWebView2Async();
+                    _webView2Initialisiert = true;
+                }
+
+                var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                var uri = new Uri(htmlPfad).AbsoluteUri;
+
+                async void OnNavigated(object? s, CoreWebView2NavigationCompletedEventArgs e)
+                {
+                    WebView2PdfGen.CoreWebView2.NavigationCompleted -= OnNavigated;
+                    try
+                    {
+                        // Kurz warten damit JS-Rendering abgeschlossen ist
+                        await Task.Delay(500);
+                        var ok = await WebView2PdfGen.CoreWebView2.PrintToPdfAsync(pdfPfad);
+                        tcs.TrySetResult(ok && File.Exists(pdfPfad));
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Fehler("WebView2PdfGen.PrintToPdf", ex.Message);
+                        tcs.TrySetResult(false);
+                    }
+                }
+
+                WebView2PdfGen.CoreWebView2.NavigationCompleted += OnNavigated;
+                WebView2PdfGen.CoreWebView2.Navigate(uri);
+
+                // Timeout 30 Sekunden
+                using var cts = new CancellationTokenSource(30_000);
+                cts.Token.Register(() =>
+                {
+                    WebView2PdfGen.CoreWebView2.NavigationCompleted -= OnNavigated;
+                    tcs.TrySetResult(false);
+                });
+
+                return await tcs.Task;
+            }
+            catch (Exception ex)
+            {
+                Logger.Fehler("ErzeugePositionsPdfAsync", ex.Message);
+                return false;
+            }
+            finally
+            {
+                _pdfGenSem.Release();
+            }
         }
 
         private void ZeigeJsonVorschau(string pfad)
