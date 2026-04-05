@@ -122,6 +122,11 @@ namespace StatikManager.Modules.Werkzeuge
             = new List<(int, double)>();
         private Line?  _scherenVorschauLinie;
 
+        // Schnittlinie verschieben (Verbesserung 4)
+        private int    _gezogenesSchnittIdx  = -1;
+        private bool   _schnittDragAktiv;
+        private double _schnittDragOrigFrac;
+
         // ── Teil-Auswahl & Löschung ───────────────────────────────────────────
         // Ausgewählte (SeitenIdx, TeilIdx) – TeilIdx=0 ist der erste Teil von oben
         private readonly HashSet<(int Seite, int Teil)> _ausgewählteParts
@@ -276,6 +281,8 @@ namespace StatikManager.Modules.Werkzeuge
             _dragAktiv = false;
             _dragQuellIdx = -1;
             _dragGhost = null;
+            _gezogenesSchnittIdx = -1;
+            _schnittDragAktiv    = false;
             TxtInfo.Text              = "Lade PDF …";
             BtnExport.IsEnabled       = false;
             BtnAuswahlmodus.IsEnabled = false;
@@ -3268,6 +3275,80 @@ namespace StatikManager.Modules.Werkzeuge
                 };
                 Panel.SetZIndex(linie, 150);
                 PdfCanvas.Children.Add(linie);
+
+                // Verbesserung 4: Hit-Zone für Verschieben (nur wenn NICHT im Scheren-Modus)
+                int capturedK = k;
+                var capturedSi4 = si;
+                double capturedFrac = yFrac;
+                var hitZone = new Line
+                {
+                    X1               = setX,
+                    Y1               = canY,
+                    X2               = setX + pageW,
+                    Y2               = canY,
+                    Stroke           = Brushes.Transparent,
+                    StrokeThickness  = Math.Max(14.0, 14.0 / _zoomFaktor),
+                    IsHitTestVisible = !_scherenModus,
+                    Cursor           = _scherenModus ? null : Cursors.SizeNS,
+                    Tag              = $"SCHERE_{k}_HIT"
+                };
+                Panel.SetZIndex(hitZone, 160);
+
+                hitZone.MouseLeftButtonDown += (_, ev) =>
+                {
+                    if (_scherenModus) return;
+                    _undoStack.Push(SpeichereZustand());
+                    _gezogenesSchnittIdx = capturedK;
+                    _schnittDragAktiv    = true;
+                    _schnittDragOrigFrac = _scherenschnitte[capturedK].YFraction;
+                    hitZone.CaptureMouse();
+                    ev.Handled = true;
+                };
+                hitZone.MouseMove += (_, ev) =>
+                {
+                    if (!_schnittDragAktiv || _gezogenesSchnittIdx != capturedK) return;
+                    var pos  = ev.GetPosition(PdfCanvas);
+                    int dsi  = _scherenschnitte[capturedK].Seite;
+                    if (dsi >= _seitenHöhe.Length || _seitenHöhe[dsi] <= 0) return;
+                    double yBase2 = _layoutHorizontal ? SeiteX : (dsi < _seitenYStart.Length ? _seitenYStart[dsi] : 0);
+                    double newFrac = Math.Max(0.01, Math.Min(0.99, (pos.Y - yBase2) / _seitenHöhe[dsi]));
+
+                    // Nicht über andere Schnitte auf derselben Seite hinaus verschieben
+                    var andereFracs = _scherenschnitte
+                        .Where((s, idx) => idx != capturedK && s.Seite == dsi)
+                        .Select(s => s.YFraction).OrderBy(f => f).ToList();
+                    int myPos = _scherenschnitte
+                        .Select((s2, idx) => (s2, idx))
+                        .Where(x => x.idx != capturedK && x.s2.Seite == dsi)
+                        .OrderBy(x => x.s2.YFraction)
+                        .TakeWhile(x => x.s2.YFraction < _schnittDragOrigFrac)
+                        .Count();
+                    double minF = myPos > 0 ? andereFracs[myPos - 1] + 0.01 : 0.01;
+                    double maxF = myPos < andereFracs.Count ? andereFracs[myPos] - 0.01 : 0.99;
+                    newFrac = Math.Max(minF, Math.Min(maxF, newFrac));
+
+                    var sOld = _scherenschnitte[capturedK];
+                    _scherenschnitte[capturedK] = (sOld.Seite, newFrac);
+                    AktualisiereSchnitteLinien();
+                    ev.Handled = true;
+                };
+                hitZone.MouseLeftButtonUp += (s2, ev) =>
+                {
+                    if (_schnittDragAktiv && _gezogenesSchnittIdx == capturedK)
+                    {
+                        ((UIElement)s2).ReleaseMouseCapture();
+                        _schnittDragAktiv    = false;
+                        _gezogenesSchnittIdx = -1;
+                        TxtInfo.Text = "Schnittlinie verschoben – Strg+Z zum Rückgängigmachen";
+                    }
+                    ev.Handled = true;
+                };
+                hitZone.LostMouseCapture += (_, __) =>
+                {
+                    _schnittDragAktiv    = false;
+                    _gezogenesSchnittIdx = -1;
+                };
+                PdfCanvas.Children.Add(hitZone);
             }
 
             bool hatSchnitte = _scherenschnitte.Count > 0;
@@ -3528,6 +3609,14 @@ namespace StatikManager.Modules.Werkzeuge
 
                     // Kontext-Menü (Rechtsklick)
                     var menu       = new ContextMenu();
+
+                    // Verbesserung 1: "Seite löschen" als erstes Item (Fix ZIndex-Problem)
+                    var itemLöschSeite = new MenuItem { Header = "\U0001F5D1  Seite löschen" };
+                    int capSi = finalSi;
+                    itemLöschSeite.Click += (_, __) => LöscheSeiteMitBestätigung(capSi);
+                    menu.Items.Insert(0, itemLöschSeite);
+                    menu.Items.Insert(1, new Separator());
+
                     var itemLösch  = new MenuItem { Header = "✕  Teil löschen" };
                     itemLösch.Click += (_, __) =>
                     {
@@ -3547,8 +3636,42 @@ namespace StatikManager.Modules.Werkzeuge
                         TxtInfo.Text = "";
                     };
                     menu.Items.Add(itemLösch);
+
+                    if (gelöscht)
+                    {
+                        var itemLücke = new MenuItem { Header = "\u2B06  Lücke schließen" };
+                        int capSi2 = finalSi;
+                        int capT2  = finalT;
+                        itemLücke.Click += (_, __) => SchliesseLücke(capSi2, capT2);
+                        menu.Items.Insert(menu.Items.Count, itemLücke); // nach "Teil löschen"
+                    }
+
                     menu.Items.Add(new Separator());
                     menu.Items.Add(itemAbwählen);
+
+                    // Verbesserung 2: "Teile verschmelzen" wenn ≥2 benachbarte Teile ausgewählt
+                    if (_ausgewählteParts.Count >= 2)
+                    {
+                        var seiten = _ausgewählteParts.Select(p => p.Seite).Distinct().ToList();
+                        if (seiten.Count == 1)
+                        {
+                            var sortierteTeilIndizes = _ausgewählteParts
+                                .Where(p => p.Seite == seiten[0])
+                                .Select(p => p.Teil)
+                                .OrderBy(t2 => t2)
+                                .ToList();
+                            bool lückenlos = sortierteTeilIndizes.Last() - sortierteTeilIndizes.First()
+                                             == sortierteTeilIndizes.Count - 1;
+                            if (lückenlos)
+                            {
+                                menu.Items.Add(new Separator());
+                                var itemVerschmelzen = new MenuItem { Header = "\u2702  Teile verschmelzen" };
+                                itemVerschmelzen.Click += (_, __) => VerschmelzeAusgewählteParts();
+                                menu.Items.Add(itemVerschmelzen);
+                            }
+                        }
+                    }
+
                     overlay.ContextMenu = menu;
 
                     Canvas.SetLeft(overlay, setX);
@@ -3570,14 +3693,12 @@ namespace StatikManager.Modules.Werkzeuge
             bool zusammenschieben = false;
             if (hatSchnitte)
             {
-                var dlgResult = MessageBox.Show(
-                    "Verbleibende Teile zusammenschieben?\n\n" +
-                    "Ja  – Lücke schließen, Teile rücken nach oben\n" +
-                    "Nein – Bereich bleibt als Platzhalter sichtbar",
-                    "Zusammenschieben?",
-                    MessageBoxButton.YesNo,
-                    MessageBoxImage.Question);
-                zusammenschieben = (dlgResult == MessageBoxResult.Yes);
+                zusammenschieben = ZeigeBinaryDialog(
+                    "Lücke schließen?",
+                    "Soll der freigewordene Bereich geschlossen werden?\n\n" +
+                    "Die Teile oberhalb und unterhalb rücken zusammen.\nDas Seitenformat (z.B. A4) bleibt erhalten.",
+                    "Lücke schließen",
+                    "Platzhalter behalten");
             }
 
             // Aktuellen Zustand für Undo sichern
@@ -3589,14 +3710,13 @@ namespace StatikManager.Modules.Werkzeuge
                 bool verschmelzen = true;
                 if (hatSchnitte)
                 {
-                    var vResult = MessageBox.Show(
-                        "Teile zu einem Element verschmelzen?\n\n" +
-                        "Ja  – Teile werden zu einem Bild verbunden (kein Schnitt mehr sichtbar)\n" +
-                        "Nein – Teile bleiben separate, einzeln bearbeitbare Elemente",
-                        "Verschmelzen?",
-                        MessageBoxButton.YesNo,
-                        MessageBoxImage.Question);
-                    verschmelzen = (vResult == MessageBoxResult.Yes);
+                    verschmelzen = ZeigeBinaryDialog(
+                        "Teile verschmelzen?",
+                        "Sollen die Teile zu einem Bild verbunden werden?\n\n" +
+                        "Verschmelzen: Teile werden zu einem Bild verbunden, kein Schnitt mehr sichtbar.\n" +
+                        "Getrennt lassen: Teile bleiben einzeln bearbeitbar (Schnittlinie bleibt).",
+                        "Teile verschmelzen",
+                        "Getrennt lassen");
                 }
                 SchiebeTeileZusammen(_ausgewählteParts.ToHashSet(), verschmelzen);
             }
@@ -3627,6 +3747,86 @@ namespace StatikManager.Modules.Werkzeuge
                 GelöschteSeiten   = new HashSet<int>(_gelöschteSeiten),
                 SeitenReihenfolge = _seitenReihenfolge != null ? new List<int>(_seitenReihenfolge) : null,
             };
+
+        /// <summary>Zeigt einen Dialog mit zwei benutzerdefinierten Schaltflächen.
+        /// Gibt true zurück wenn der erste Button geklickt wurde.</summary>
+        private static bool ZeigeBinaryDialog(string titel, string nachricht, string btnErster, string btnZweiter)
+        {
+            var win = new Window
+            {
+                Title                 = titel,
+                SizeToContent         = SizeToContent.WidthAndHeight,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                ResizeMode            = ResizeMode.NoResize,
+                MinWidth              = 320
+            };
+            bool ersterGeklickt = false;
+            var sp = new StackPanel { Margin = new Thickness(20) };
+            sp.Children.Add(new TextBlock
+            {
+                Text         = nachricht,
+                TextWrapping = TextWrapping.Wrap,
+                MaxWidth     = 400,
+                Margin       = new Thickness(0, 0, 0, 16)
+            });
+            var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
+            var btn1 = new Button { Content = btnErster, Padding = new Thickness(16, 6, 16, 6),
+                                    Margin = new Thickness(0, 0, 8, 0), IsDefault = true };
+            var btn2 = new Button { Content = btnZweiter, Padding = new Thickness(16, 6, 16, 6), IsCancel = true };
+            btn1.Click += (_, __) => { ersterGeklickt = true; win.Close(); };
+            btn2.Click += (_, __) => win.Close();
+            buttons.Children.Add(btn1);
+            buttons.Children.Add(btn2);
+            sp.Children.Add(buttons);
+            win.Content = sp;
+            if (Application.Current?.MainWindow is Window mw) win.Owner = mw;
+            win.ShowDialog();
+            return ersterGeklickt;
+        }
+
+        /// <summary>Verbesserung 2: Verschmelzt alle ausgewählten benachbarten Teile.</summary>
+        private void VerschmelzeAusgewählteParts()
+        {
+            if (_ausgewählteParts.Count < 2) return;
+            var seiten = _ausgewählteParts.Select(p => p.Seite).Distinct().ToList();
+            if (seiten.Count != 1) return;
+            int si = seiten[0];
+
+            var sortierteTeilIndizes = _ausgewählteParts
+                .Where(p => p.Seite == si)
+                .Select(p => p.Teil)
+                .OrderBy(t => t)
+                .ToList();
+
+            _undoStack.Push(SpeichereZustand());
+
+            var alleGrenzen = GetTeilGrenzen(si);
+
+            // Schnittlinien zwischen den ausgewählten benachbarten Teilen entfernen
+            for (int k = 0; k < sortierteTeilIndizes.Count - 1; k++)
+            {
+                int t = sortierteTeilIndizes[k];
+                if (t < alleGrenzen.Count)
+                {
+                    double schnittFrac = alleGrenzen[t].Unten;
+                    _scherenschnitte.RemoveAll(s => s.Seite == si
+                                               && Math.Abs(s.YFraction - schnittFrac) < 0.001);
+                }
+            }
+
+            _ausgewählteParts.Clear();
+            AktualisiereSchnitteLinien();
+            TxtInfo.Text = "Teile verschmolzen – Strg+Z zum Rückgängigmachen";
+        }
+
+        /// <summary>Verbesserung 6: Schließt die Lücke eines als gelöscht markierten Parts.</summary>
+        private void SchliesseLücke(int si, int t)
+        {
+            if (!_gelöschteParts.Contains((si, t))) return;
+            _undoStack.Push(SpeichereZustand());
+            var toClose = new HashSet<(int Seite, int Teil)> { (si, t) };
+            SchiebeTeileZusammen(toClose, true); // verschmelzen=true schließt Lücke ohne Dialog
+        }
 
         private void SchiebeTeileZusammen(HashSet<(int Seite, int Teil)> gelöschteParts, bool verschmelzen)
         {
@@ -3710,7 +3910,8 @@ namespace StatikManager.Modules.Werkzeuge
                 }
 
                 if (teile.Count == 0) return null;
-                if (teile.Count == 1) { teile[0].Freeze(); return teile[0]; }
+                // Verbesserung 3: Kein Frühabbruch bei 1 Teil – immer durch Komposit-Erstellung
+                // damit das Seitenformat (origH) immer beibehalten wird.
 
                 int totalH = teile.Sum(t2 => t2.PixelHeight);
                 if (totalH <= 0) return null;
@@ -3719,6 +3920,7 @@ namespace StatikManager.Modules.Werkzeuge
                 using (var ctx = visual.RenderOpen())
                 {
                     double y = 0;
+                    ctx.DrawRectangle(Brushes.White, null, new Rect(0, 0, pW, totalH)); // Hintergrund weiß
                     foreach (var t2 in teile)
                     {
                         ctx.DrawImage(t2, new Rect(0, y, pW, t2.PixelHeight));
@@ -3728,8 +3930,7 @@ namespace StatikManager.Modules.Werkzeuge
                 var rtb = new RenderTargetBitmap(pW, totalH, 96, 96, PixelFormats.Pbgra32);
                 rtb.Render(visual);
 
-                // ── VERBESSERUNG 1: Seitenformat beibehalten ──────────────────
-                // Composite auf Original-Höhe auffüllen (weißer Bereich unten)
+                // Seitenformat beibehalten: auf Original-Höhe auffüllen (weißer Bereich unten)
                 int origH = sourceBmp.PixelHeight;
                 if (totalH < origH)
                 {

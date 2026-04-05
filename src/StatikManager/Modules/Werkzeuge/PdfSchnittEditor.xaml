@@ -207,10 +207,10 @@
                             ToolTip="Alle gesetzten Schnitte entfernen"
                             Click="BtnSchnittZurücksetzen_Click"/>
                     <Button x:Name="BtnTeileExportieren"
-                            Content="&#x1F4E4; Teile als PDF"
+                            Content="&#x1F4E4; Teile einzeln exportieren"
                             Height="26" Padding="6,0"
                             IsEnabled="False"
-                            ToolTip="Jeden Schnitt-Teil als separate PDF-Datei exportieren"
+                            ToolTip="Exportiert jeden sichtbaren Teil als separate PDF-Datei (Schnitte &amp; Zusammenschiebungen)"
                             Click="BtnTeileExportieren_Click"/>
                     <Button x:Name="BtnTeilLöschen"
                             Content="&#x1F5D1; Auswahl l&#246;schen"
