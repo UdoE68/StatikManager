@@ -4,6 +4,23 @@ Chronologische Erkenntnisse aus der Entwicklung. Was funktioniert hat und warum.
 
 ---
 
+## 2026-04-05 – AutoSpeichern ohne Datei-Locking
+
+**Problem:** pdfium (`DocLib.GetDocReader`) und PdfSharp (`PdfReader.Open`) halten PDF-Dateien offen, was `File.Replace` im AutoSpeichern blockiert ("Datei wird von einem anderen Prozess verwendet").
+
+**Loesung:** `_pdfBytes`-Feld haelt die PDF als byte[] im Speicher. ALLE Lese-Zugriffe gehen ueber `new MemoryStream(_pdfBytes)` statt ueber den Dateipfad:
+- `PdfRenderer.RenderiereAlleSeiten(byte[] bytes, ...)` — kein Datei-Handle
+- `PdfReader.Open(new MemoryStream(_pdfBytes), PdfDocumentOpenMode.Import)` in SpeicherNachPfad
+- `PdfReader.Open(new MemoryStream(_pdfBytes), PdfDocumentOpenMode.Import)` im Scheren-Export
+- `HolePdfSeitenGroesse(byte[] bytes)` — PdfReader.Open via MemoryStream
+- `_pdfBytes = File.ReadAllBytes(_pdfPfad)` nach erfolgreichem AutoSpeichern (aktuell halten)
+
+**Beweis:** Build 0 Fehler, Commit 0c22632, PDFs FREI im Sperr-Test
+
+**Dateien:** `Modules/Werkzeuge/PdfSchnittEditor.xaml.cs`, `Infrastructure/PdfRenderer.cs`
+
+---
+
 ## 2026-04-05 – FileSystemWatcher Thundering Herd vermeiden
 
 **Problem:** OrdnerWatcher-Debounce-Timer wurde staendig zurueckgesetzt und feuerte nie, weil `Changed+LastWrite` bei jedem Speichervorgang hunderte Events erzeugte.

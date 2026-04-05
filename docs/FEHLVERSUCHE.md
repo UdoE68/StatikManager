@@ -22,6 +22,15 @@ Was nicht funktioniert hat und warum. Damit niemand denselben Fehler zweimal mac
 **Fehler:** Immer noch Berichte ueber Fehler (nicht verifiziert ob Fix4 funktioniert)
 **Grund:** Unbekannt — moeglicherweise war der Build nicht deployed oder ein weiterer Zugriff existiert.
 
+**Versuch 5 (ERFOLGREICH):** Alle Zugriffe auf MemoryStream umgestellt
+**Was hat funktioniert:**
+- `SpeicherNachPfad` (Zeile ~4903): `PdfReader.Open(new MemoryStream(_pdfBytes), Import)` — war bereits gefixt
+- `HolePdfSeitenGroesse` (Zeile ~2776): `PdfReader.Open(ms, ReadOnly)` mit byte[]-Ueberladung — war bereits gefixt
+- `GetDocReader` in PdfRenderer: `lib.GetDocReader(bytes, ...)` — war bereits gefixt
+- **NEU (Versuch 5):** `RendereTeileExportieren` (Zeile ~3599): `PdfReader.Open(_pdfPfad!, Import)` → `PdfReader.Open(new MemoryStream(_pdfBytes), Import)` — das war die letzte verbliebene Datei-Sperr-Stelle
+- `AutoSpeichern`: `_pdfBytes = File.ReadAllBytes(_pdfPfad)` nach `File.Replace` — bereits vorhanden
+**Beweis:** Build 0 Fehler, Commit 0c22632, EXE-Zeitstempel 05.04.2026 23:51:47
+
 **Lehre:**
 - Mit `grep -r "PdfReader.Open\|File.Open\|FileStream\|GetDocReader" --include="*.cs"` ALLE Dateizugriffe finden
 - JEDER `PdfReader.Open(pfad, ...)` muss zu `PdfReader.Open(new MemoryStream(_pdfBytes), ...)` werden
