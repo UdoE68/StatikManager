@@ -129,9 +129,17 @@ namespace StatikManager.Modules.Werkzeuge
         // Gelöschte (SeitenIdx, TeilIdx) – beim Export übersprungen
         private readonly HashSet<(int Seite, int Teil)> _gelöschteParts
             = new HashSet<(int, int)>();
-        // Undo-Stack: jede Löschaktion speichert den vorherigen Zustand von _gelöschteParts
-        private readonly Stack<HashSet<(int Seite, int Teil)>> _löschUndoStack
-            = new Stack<HashSet<(int, int)>>();
+        // Komposit-Bilder: Schlüssel = SeitenIdx, Wert = zusammengeschobenes Bitmap
+        private readonly Dictionary<int, BitmapSource> _kompositBilder = new Dictionary<int, BitmapSource>();
+        // Unified undo stack
+        private readonly Stack<ScherenZustand> _undoStack = new Stack<ScherenZustand>();
+
+        private sealed class ScherenZustand
+        {
+            public List<(int Seite, double YFraction)> Schnitte { get; set; } = new List<(int, double)>();
+            public HashSet<(int Seite, int Teil)> Gelöscht { get; set; } = new HashSet<(int, int)>();
+            public Dictionary<int, BitmapSource> KompositBilder { get; set; } = new Dictionary<int, BitmapSource>();
+        }
 
         // Abbruch laufender Lade-Aufträge
         private CancellationTokenSource? _ladeCts;
@@ -243,7 +251,8 @@ namespace StatikManager.Modules.Werkzeuge
             _scherenVorschauLinie = null;
             _ausgewählteParts.Clear();
             _gelöschteParts.Clear();
-            _löschUndoStack.Clear();
+            _kompositBilder.Clear();
+            _undoStack.Clear();
             TxtInfo.Text              = "Lade PDF …";
             BtnExport.IsEnabled       = false;
             BtnAuswahlmodus.IsEnabled = false;
@@ -712,12 +721,20 @@ namespace StatikManager.Modules.Werkzeuge
                 if (_seitenYStart.Length != _seitenBilder.Count ||
                     _seitenHöhe.Length   != _seitenBilder.Count) return;
 
+                // Effektive Bitmaps: Komposit wenn vorhanden, sonst Original
+                var effBilder = Enumerable.Range(0, _seitenBilder.Count)
+                    .Select(i => (BitmapSource)(_kompositBilder.TryGetValue(i, out var k) ? k : _seitenBilder[i]))
+                    .ToList();
+
+                // Layout mit effektiven Bitmaps neu berechnen (Komposit kann andere Höhe haben)
+                BerechneLayoutStatic(effBilder, SeitenAbstand, out _seitenYStart, out _seitenHöhe);
+
                 if (_layoutHorizontal)
                 {
-                    BerechneLayoutHorizontalStatic(_seitenBilder, SeitenAbstand, out _seitenXStart);
+                    BerechneLayoutHorizontalStatic(effBilder, SeitenAbstand, out _seitenXStart);
                     int lastH = _seitenXStart.Length - 1;
-                    double gesamtW = _seitenXStart[lastH] + _seitenBilder[lastH].PixelWidth + SeitenAbstand;
-                    double maxH    = _seitenBilder.Max(b => (double)b.PixelHeight);
+                    double gesamtW = _seitenXStart[lastH] + effBilder[lastH].PixelWidth + SeitenAbstand;
+                    double maxH    = effBilder.Max(b => (double)b.PixelHeight);
                     PdfCanvas.Width  = Math.Max(gesamtW, 1);
                     PdfCanvas.Height = Math.Max(maxH + SeiteX * 2, 1);
                 }
@@ -725,7 +742,7 @@ namespace StatikManager.Modules.Werkzeuge
                 {
                     int    last    = _seitenYStart.Length - 1;
                     double gesamtH = _seitenYStart[last] + _seitenHöhe[last] + SeitenAbstand;
-                    double maxBmpW = _seitenBilder.Max(b => (double)b.PixelWidth);
+                    double maxBmpW = effBilder.Max(b => (double)b.PixelWidth);
                     PdfCanvas.Width  = maxBmpW + SeiteX * 2;
                     PdfCanvas.Height = Math.Max(gesamtH, 1);
                 }
@@ -785,9 +802,10 @@ namespace StatikManager.Modules.Werkzeuge
 
         private void ZeicheSeite(int i)
         {
-            if (_seitenBilder[i] == null) return;
+            var displayBmp = _kompositBilder.TryGetValue(i, out var kb) ? kb : _seitenBilder[i];
+            if (displayBmp == null) return;
             // Tatsächliche Bitmap-Abmessungen verwenden – kein Strecken auf RenderBreite
-            double bmpW = _seitenBilder[i].PixelWidth;
+            double bmpW = displayBmp.PixelWidth;
             double bmpH = Math.Max(1, _seitenHöhe[i]); // = PixelHeight
 
             DropShadowEffect? shadow = null;
@@ -811,7 +829,7 @@ namespace StatikManager.Modules.Werkzeuge
                 BorderThickness     = new Thickness(2),
                 Child               = new Image
                 {
-                    Source  = _seitenBilder[i],
+                    Source  = displayBmp,
                     Width   = bmpW,
                     Height  = bmpH,
                     Stretch = Stretch.Uniform,   // Seitenverhältnis bleibt erhalten
@@ -3144,7 +3162,7 @@ namespace StatikManager.Modules.Werkzeuge
 
             bool hatSchnitte = _scherenschnitte.Count > 0;
             BtnSchnittZurücksetzen.IsEnabled = hatSchnitte;
-            BtnTeileExportieren.IsEnabled    = (_scherenschnitte.Count > 0 || _gelöschteParts.Count > 0) && _pdfPfad != null;
+            BtnTeileExportieren.IsEnabled    = (_scherenschnitte.Count > 0 || _gelöschteParts.Count > 0 || _kompositBilder.Count > 0) && _pdfPfad != null;
 
             AktualisiereTeilOverlays();
         }
@@ -3165,7 +3183,7 @@ namespace StatikManager.Modules.Werkzeuge
         private void ExportierteTeile()
         {
             if (_pdfPfad == null || _seitenBilder.Count == 0) return;
-            if (_scherenschnitte.Count == 0 && _gelöschteParts.Count == 0) return;
+            if (_scherenschnitte.Count == 0 && _gelöschteParts.Count == 0 && _kompositBilder.Count == 0) return;
 
             var dlg = new System.Windows.Forms.FolderBrowserDialog
             {
@@ -3227,6 +3245,41 @@ namespace StatikManager.Modules.Werkzeuge
                         pdfOut.Save(zielDatei);
                         exportiert++;
                     }
+                }
+
+                // Komposit-Seiten exportieren (zusammengeschobene Seiten ohne Schnitte)
+                foreach (var kv in _kompositBilder)
+                {
+                    int si = kv.Key;
+                    if (si >= _seitenBilder.Count) continue;
+                    // Seiten die bereits oben exportiert wurden überspringen
+                    if (_scherenschnitte.Any(s => s.Seite == si)) continue;
+
+                    var kompBmp = kv.Value;
+                    if (kompBmp == null) continue;
+
+                    (double pageWPts, double pageHPts) = HolePdfSeitenGrösse(_pdfPfad!);
+                    double scaleH  = (double)kompBmp.PixelHeight / Math.Max(1, _seitenBilder[si].PixelHeight);
+                    double newHPts = Math.Max(1, pageHPts * scaleH);
+
+                    string suffix    = _kompositBilder.Count > 1 ? $"_s{si + 1}_zs" : "_zusammengeschoben";
+                    string zielDatei = IO.Path.Combine(ordner, basis + suffix + ".pdf");
+
+                    using var ms = new IO.MemoryStream();
+                    var enc = new PngBitmapEncoder();
+                    enc.Frames.Add(BitmapFrame.Create(kompBmp));
+                    enc.Save(ms);
+                    ms.Position = 0;
+                    using var xImg = PdfSharp.Drawing.XImage.FromStream(ms);
+
+                    var pdfOut = new PdfSharp.Pdf.PdfDocument();
+                    var seite  = pdfOut.AddPage();
+                    seite.Width  = PdfSharp.Drawing.XUnit.FromPoint(pageWPts);
+                    seite.Height = PdfSharp.Drawing.XUnit.FromPoint(newHPts);
+                    using var gfx = PdfSharp.Drawing.XGraphics.FromPdfPage(seite);
+                    gfx.DrawImage(xImg, 0, 0, pageWPts, newHPts);
+                    pdfOut.Save(zielDatei);
+                    exportiert++;
                 }
 
                 TxtInfo.Text = $"✂ {exportiert} PDF-Teil(e) exportiert";
@@ -3400,25 +3453,141 @@ namespace StatikManager.Modules.Werkzeuge
         {
             if (_ausgewählteParts.Count == 0) return;
 
-            // Zustand für Undo sichern
-            _löschUndoStack.Push(new HashSet<(int, int)>(_gelöschteParts));
-
-            // Ausgewählte löschen (toggle: bereits gelöschte wieder herstellen)
-            foreach (var p in _ausgewählteParts)
+            // Nur fragen wenn es echte Schnitte gibt (sonst macht zusammenschieben keinen Sinn)
+            bool hatSchnitte = _ausgewählteParts.Any(p => GetTeilGrenzen(p.Seite).Count > 1);
+            bool zusammenschieben = false;
+            if (hatSchnitte)
             {
-                if (_gelöschteParts.Contains(p))
-                    _gelöschteParts.Remove(p);
-                else
-                    _gelöschteParts.Add(p);
+                var dlgResult = MessageBox.Show(
+                    "Verbleibende Teile zusammenschieben?\n\n" +
+                    "Ja  – Lücke schließen, Teile rücken nach oben\n" +
+                    "Nein – Bereich bleibt als Platzhalter sichtbar",
+                    "Zusammenschieben?",
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Question);
+                zusammenschieben = (dlgResult == MessageBoxResult.Yes);
             }
-            _ausgewählteParts.Clear();
-            AktualisiereTeilOverlays();
-            BtnTeilLöschen.IsEnabled = false;
 
-            int n = _gelöschteParts.Count;
-            TxtInfo.Text = n > 0
-                ? $"{n} Teil(e) entfernt – Strg+Z zum Rückgängigmachen"
-                : "Alle Löschungen rückgängig";
+            // Aktuellen Zustand für Undo sichern
+            _undoStack.Push(SpeichereZustand());
+
+            if (zusammenschieben)
+            {
+                SchiebeTeileZusammen(_ausgewählteParts.ToHashSet());
+            }
+            else
+            {
+                // Bisheriges Verhalten: als "gelöscht" markieren (grauer Overlay)
+                foreach (var p in _ausgewählteParts)
+                {
+                    if (_gelöschteParts.Contains(p)) _gelöschteParts.Remove(p);
+                    else _gelöschteParts.Add(p);
+                }
+                _ausgewählteParts.Clear();
+                AktualisiereSchnitteLinien();
+                BtnTeilLöschen.IsEnabled = false;
+                int n = _gelöschteParts.Count;
+                TxtInfo.Text = n > 0
+                    ? $"{n} Teil(e) markiert als entfernt – Strg+Z zum Rückgängigmachen"
+                    : "Alle Markierungen aufgehoben";
+            }
+        }
+
+        private ScherenZustand SpeichereZustand()
+            => new ScherenZustand
+            {
+                Schnitte       = new List<(int, double)>(_scherenschnitte),
+                Gelöscht       = new HashSet<(int, int)>(_gelöschteParts),
+                KompositBilder = new Dictionary<int, BitmapSource>(_kompositBilder)
+            };
+
+        private void SchiebeTeileZusammen(HashSet<(int Seite, int Teil)> gelöschteParts)
+        {
+            var betroffeneSeiten = gelöschteParts.Select(p => p.Seite).Distinct().ToList();
+
+            foreach (int si in betroffeneSeiten)
+            {
+                if (si >= _seitenBilder.Count) continue;
+
+                var alleGrenzen = GetTeilGrenzen(si);
+                var sichtbarTeilIndizes = Enumerable.Range(0, alleGrenzen.Count)
+                    .Where(t => !gelöschteParts.Contains((si, t)))
+                    .ToList();
+
+                if (sichtbarTeilIndizes.Count == 0)
+                {
+                    // Alle Teile gelöscht: Komposit-Bild weglassen (Seite behält Original)
+                    _kompositBilder.Remove(si);
+                }
+                else if (sichtbarTeilIndizes.Count == alleGrenzen.Count)
+                {
+                    // Nichts gelöscht auf dieser Seite
+                    continue;
+                }
+                else
+                {
+                    var kompositBmp = ErzeugeKompositBild(si, sichtbarTeilIndizes);
+                    if (kompositBmp != null)
+                        _kompositBilder[si] = kompositBmp;
+                }
+
+                // Schnitte für diese Seite entfernen (Composite hat keine Original-Schnitte mehr)
+                _scherenschnitte.RemoveAll(s => s.Seite == si);
+                // Gelöschte Parts für diese Seite entfernen (sind jetzt physisch weg)
+                _gelöschteParts.RemoveWhere(p => p.Seite == si);
+            }
+
+            _ausgewählteParts.Clear();
+            // Canvas neu aufbauen mit aktualisierten Composite-Bitmaps
+            ZeicheCanvas();
+            BtnTeilLöschen.IsEnabled = false;
+            TxtInfo.Text = $"Zusammengeschoben – Strg+Z zum Rückgängigmachen";
+        }
+
+        private BitmapSource? ErzeugeKompositBild(int si, List<int> sichtbareTeilIndizes)
+        {
+            try
+            {
+                if (sichtbareTeilIndizes.Count == 0) return null;
+
+                var sourceBmp   = _seitenBilder[si];
+                var alleGrenzen = GetTeilGrenzen(si);
+                int pW = sourceBmp.PixelWidth;
+
+                var teile = new List<CroppedBitmap>();
+                foreach (int t in sichtbareTeilIndizes)
+                {
+                    if (t >= alleGrenzen.Count) continue;
+                    var (oben, unten) = alleGrenzen[t];
+                    int y0 = (int)Math.Round(oben  * sourceBmp.PixelHeight);
+                    int h  = (int)Math.Round(unten * sourceBmp.PixelHeight) - y0;
+                    h = Math.Max(1, Math.Min(h, sourceBmp.PixelHeight - y0));
+                    if (y0 < 0 || y0 >= sourceBmp.PixelHeight || h <= 0) continue;
+                    teile.Add(new CroppedBitmap(sourceBmp, new Int32Rect(0, y0, pW, h)));
+                }
+
+                if (teile.Count == 0) return null;
+                if (teile.Count == 1) { teile[0].Freeze(); return teile[0]; }
+
+                int totalH = teile.Sum(t2 => t2.PixelHeight);
+                if (totalH <= 0) return null;
+
+                var visual = new DrawingVisual();
+                using (var ctx = visual.RenderOpen())
+                {
+                    double y = 0;
+                    foreach (var t2 in teile)
+                    {
+                        ctx.DrawImage(t2, new Rect(0, y, pW, t2.PixelHeight));
+                        y += t2.PixelHeight;
+                    }
+                }
+                var rtb = new RenderTargetBitmap(pW, totalH, 96, 96, PixelFormats.Pbgra32);
+                rtb.Render(visual);
+                rtb.Freeze();
+                return rtb;
+            }
+            catch (Exception ex) { LogException(ex, "ErzeugeKompositBild"); return null; }
         }
 
         private void BtnTeilLöschen_Click(object sender, RoutedEventArgs e)
@@ -3430,13 +3599,15 @@ namespace StatikManager.Modules.Werkzeuge
             {
                 if (e.Key == Key.Z && (Keyboard.Modifiers & ModifierKeys.Control) != 0)
                 {
-                    // Priorität: Lösch-Undo > Schnitt-Undo
-                    if (_löschUndoStack.Count > 0)
+                    if (_undoStack.Count > 0)
                     {
-                        _gelöschteParts.Clear();
-                        foreach (var p in _löschUndoStack.Pop()) _gelöschteParts.Add(p);
-                        AktualisiereTeilOverlays();
-                        TxtInfo.Text = $"Löschen rückgängig ({_löschUndoStack.Count} weitere Undo-Schritte)";
+                        var z = _undoStack.Pop();
+                        _scherenschnitte.Clear(); _scherenschnitte.AddRange(z.Schnitte);
+                        _gelöschteParts.Clear();  foreach (var p in z.Gelöscht) _gelöschteParts.Add(p);
+                        _kompositBilder.Clear();  foreach (var kv in z.KompositBilder) _kompositBilder[kv.Key] = kv.Value;
+                        _ausgewählteParts.Clear();
+                        ZeicheCanvas();
+                        TxtInfo.Text = $"Rückgängig ({_undoStack.Count} weitere Schritte)";
                         e.Handled = true;
                     }
                     else if (_scherenModus && _scherenschnitte.Count > 0)
