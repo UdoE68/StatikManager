@@ -69,6 +69,11 @@ namespace StatikManager.Modules.Dokumente
         // Wird gesetzt wenn nach about:blank automatisch neu geladen werden soll
         private string? _autoRefreshPfad;
 
+        // Mehrfachauswahl im Baum (Ctrl+Klick / Shift+Klick)
+        private readonly HashSet<string> _baumMehrfachAuswahl = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private string? _baumAuswahlAnker;
+        private static readonly Brush _mehrfachHintergrund = new SolidColorBrush(Color.FromArgb(80, 7, 99, 191));
+
         public event Action<string?>? DateiAusgewählt;
 
         // ── Initialisierung ───────────────────────────────────────────────────
@@ -417,6 +422,7 @@ namespace StatikManager.Modules.Dokumente
             _selektionDebounce?.Stop();
             _selektionPfadPending = null;
             _autoRefreshPfad      = null;
+            _baumMehrfachAuswahl.Clear();
 
             _aktiverDateipfad = null;
             _dokumentGeladen  = false;
@@ -439,6 +445,7 @@ namespace StatikManager.Modules.Dokumente
         private void AktualisiereNurStruktur()
         {
             if (_projektPfad is null) return;
+            _baumMehrfachAuswahl.Clear();
             var root = new DirectoryInfo(_projektPfad);
             if (RbBaum.IsChecked == true) ZeigeBaum(root);
             else                          ZeigeListe(root);
@@ -1440,26 +1447,39 @@ namespace StatikManager.Modules.Dokumente
             var treeItem = element as TreeViewItem;
             string? pfad = treeItem?.Tag as string;
 
-            bool istOrdner = pfad != null && Directory.Exists(pfad);
-            bool istDatei  = pfad != null && File.Exists(pfad);
-
             var menu = new ContextMenu();
 
-            if (istOrdner)
+            // Mehrfachauswahl hat Vorrang
+            if (_baumMehrfachAuswahl.Count > 1)
             {
-                var itemLöschen = new MenuItem { Header = "🗑 Ordner löschen …" };
-                itemLöschen.Click += (s, ev) => OrdnerLöschen(pfad!);
+                var dateien = _baumMehrfachAuswahl.Where(p => File.Exists(p)).ToList();
+                var ordner  = _baumMehrfachAuswahl.Where(p => Directory.Exists(p)).ToList();
+                int gesamt  = dateien.Count + ordner.Count;
+                var itemLöschen = new MenuItem { Header = $"🗑 {gesamt} Elemente löschen …" };
+                itemLöschen.Click += (s, ev) => LöscheMehrfachAuswahl(dateien, ordner);
                 menu.Items.Add(itemLöschen);
             }
             else
             {
-                var itemLöschen = new MenuItem
+                bool istOrdner = pfad != null && Directory.Exists(pfad);
+                bool istDatei  = pfad != null && File.Exists(pfad);
+
+                if (istOrdner)
                 {
-                    Header    = "🗑 Datei löschen",
-                    IsEnabled = istDatei
-                };
-                itemLöschen.Click += (s, ev) => DateiLöschen(pfad);
-                menu.Items.Add(itemLöschen);
+                    var itemLöschen = new MenuItem { Header = "🗑 Ordner löschen …" };
+                    itemLöschen.Click += (s, ev) => OrdnerLöschen(pfad!);
+                    menu.Items.Add(itemLöschen);
+                }
+                else
+                {
+                    var itemLöschen = new MenuItem
+                    {
+                        Header    = "🗑 Datei löschen",
+                        IsEnabled = istDatei
+                    };
+                    itemLöschen.Click += (s, ev) => DateiLöschen(pfad);
+                    menu.Items.Add(itemLöschen);
+                }
             }
 
             if (_projektPfad != null)
@@ -1530,6 +1550,175 @@ namespace StatikManager.Modules.Dokumente
             {
                 MessageBox.Show("Fehler beim Öffnen:\n" + ex.Message, "Fehler",
                                 MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        // ── Baum-Mehrfachauswahl (Ctrl+Klick / Shift+Klick / Delete) ─────────
+
+        private void DokumentenBaum_PreviewMouseDown(object sender, MouseButtonEventArgs e)
+        {
+            if (e.ChangedButton != MouseButton.Left) return;
+
+            var element = e.OriginalSource as DependencyObject;
+            while (element != null && !(element is TreeViewItem))
+                element = VisualTreeHelper.GetParent(element);
+
+            var item = element as TreeViewItem;
+            if (item?.Tag is not string pfad) return;
+
+            bool ctrl  = (Keyboard.Modifiers & ModifierKeys.Control) != 0;
+            bool shift = (Keyboard.Modifiers & ModifierKeys.Shift)   != 0;
+
+            if (ctrl)
+            {
+                if (_baumMehrfachAuswahl.Contains(pfad))
+                    _baumMehrfachAuswahl.Remove(pfad);
+                else
+                {
+                    _baumMehrfachAuswahl.Add(pfad);
+                    _baumAuswahlAnker = pfad;
+                }
+                AktualisiereTreeViewHervorhebung();
+                e.Handled = true;
+            }
+            else if (shift && _baumAuswahlAnker != null)
+            {
+                var alleItems = OrdneTreeItemsFlach(DokumentenBaum).ToList();
+                int ankerIdx = alleItems.FindIndex(i =>
+                    string.Equals(i.Tag as string, _baumAuswahlAnker, StringComparison.OrdinalIgnoreCase));
+                int zielIdx  = alleItems.FindIndex(i =>
+                    string.Equals(i.Tag as string, pfad, StringComparison.OrdinalIgnoreCase));
+
+                if (ankerIdx >= 0 && zielIdx >= 0)
+                {
+                    int start = Math.Min(ankerIdx, zielIdx);
+                    int ende  = Math.Max(ankerIdx, zielIdx);
+                    _baumMehrfachAuswahl.Clear();
+                    for (int i = start; i <= ende; i++)
+                        if (alleItems[i].Tag is string p)
+                            _baumMehrfachAuswahl.Add(p);
+                }
+                AktualisiereTreeViewHervorhebung();
+                e.Handled = true;
+            }
+            else
+            {
+                // Normaler Klick: Mehrfachauswahl aufheben
+                _baumMehrfachAuswahl.Clear();
+                _baumAuswahlAnker = pfad;
+                AktualisiereTreeViewHervorhebung();
+            }
+        }
+
+        private void DokumentenBaum_PreviewKeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key != Key.Delete) return;
+            e.Handled = true;
+
+            if (_baumMehrfachAuswahl.Count > 0)
+            {
+                var dateien = _baumMehrfachAuswahl.Where(p => File.Exists(p)).ToList();
+                var ordner  = _baumMehrfachAuswahl.Where(p => Directory.Exists(p)).ToList();
+                LöscheMehrfachAuswahl(dateien, ordner);
+            }
+            else if (DokumentenBaum.SelectedItem is TreeViewItem sel && sel.Tag is string pfad)
+            {
+                if      (File.Exists(pfad))      DateiLöschen(pfad);
+                else if (Directory.Exists(pfad)) OrdnerLöschen(pfad);
+            }
+        }
+
+        private void DateiListe_PreviewKeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key != Key.Delete) return;
+            e.Handled = true;
+            var pfade = DateiListe.SelectedItems.OfType<DateiEintrag>().Select(d => d.VollerPfad).ToList();
+            if (pfade.Count > 0) DateienLöschen(pfade);
+        }
+
+        private void LöscheMehrfachAuswahl(IList<string> dateien, IList<string> ordner)
+        {
+            int gesamt = dateien.Count + ordner.Count;
+            if (gesamt == 0) return;
+
+            string frage = gesamt == 1
+                ? $"Element wirklich löschen?\n\n{Path.GetFileName(dateien.Concat(ordner).First())}"
+                : $"{gesamt} Elemente (Dateien und/oder Ordner) wirklich löschen?";
+
+            if (MessageBox.Show(frage, "Löschen bestätigen",
+                    MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No)
+                != MessageBoxResult.Yes) return;
+
+            var fehler = new List<string>();
+            bool vorschauBetroffen = false;
+
+            foreach (var pfad in dateien)
+            {
+                try
+                {
+                    File.Delete(pfad);
+                    if (string.Equals(_aktiverDateipfad, pfad, StringComparison.OrdinalIgnoreCase))
+                        vorschauBetroffen = true;
+                }
+                catch (Exception ex) { fehler.Add($"{Path.GetFileName(pfad)}: {ex.Message}"); }
+            }
+
+            foreach (var pfad in ordner)
+            {
+                try
+                {
+                    if (_aktiverDateipfad != null &&
+                        _aktiverDateipfad.StartsWith(pfad + Path.DirectorySeparatorChar,
+                            StringComparison.OrdinalIgnoreCase))
+                        vorschauBetroffen = true;
+                    Directory.Delete(pfad, recursive: true);
+                }
+                catch (Exception ex) { fehler.Add($"{Path.GetFileName(pfad)}: {ex.Message}"); }
+            }
+
+            _baumMehrfachAuswahl.Clear();
+
+            if (vorschauBetroffen)
+            {
+                _aktiverDateipfad = null;
+                _dokumentGeladen  = false;
+                DateiAusgewählt?.Invoke(null);
+                ZeigeBrowser(mitAbdeckung: false);
+                WordVorschau.Navigate("about:blank");
+            }
+
+            if (_projektPfad != null) AktualisiereDokumentListe();
+
+            int gelöscht = gesamt - fehler.Count;
+            AppZustand.Instanz.SetzeStatus(gelöscht > 0 ? $"{gelöscht} Element(e) gelöscht." : "Nichts gelöscht.");
+
+            if (fehler.Count > 0)
+                MessageBox.Show(
+                    "Folgende Elemente konnten nicht gelöscht werden:\n\n" + string.Join("\n", fehler),
+                    "Fehler beim Löschen", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+
+        private void AktualisiereTreeViewHervorhebung(ItemsControl? parent = null)
+        {
+            parent ??= DokumentenBaum;
+            foreach (var obj in parent.Items)
+            {
+                if (parent.ItemContainerGenerator.ContainerFromItem(obj) is not TreeViewItem item) continue;
+                if (item.Tag is string pfad)
+                    item.Background = _baumMehrfachAuswahl.Contains(pfad) ? _mehrfachHintergrund : null;
+                AktualisiereTreeViewHervorhebung(item);
+            }
+        }
+
+        private IEnumerable<TreeViewItem> OrdneTreeItemsFlach(ItemsControl parent)
+        {
+            foreach (var obj in parent.Items)
+            {
+                if (parent.ItemContainerGenerator.ContainerFromItem(obj) is not TreeViewItem item) continue;
+                if (item.Tag is string) yield return item;
+                if (item.IsExpanded)
+                    foreach (var child in OrdneTreeItemsFlach(item))
+                        yield return child;
             }
         }
 

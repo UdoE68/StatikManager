@@ -89,7 +89,9 @@
                           FontSize="13"
                           ScrollViewer.HorizontalScrollBarVisibility="Auto"
                           ContextMenuOpening="DokumentenBaum_ContextMenuOpening"
-                          TreeViewItem.RequestBringIntoView="DokumentenBaum_RequestBringIntoView">
+                          TreeViewItem.RequestBringIntoView="DokumentenBaum_RequestBringIntoView"
+                          PreviewMouseLeftButtonDown="DokumentenBaum_PreviewMouseDown"
+                          PreviewKeyDown="DokumentenBaum_PreviewKeyDown">
                     <TreeView.ContextMenu>
                         <ContextMenu/>
                     </TreeView.ContextMenu>
@@ -101,7 +103,8 @@
                           SelectionChanged="DateiListe_SelectionChanged"
                           FontSize="13"
                           BorderThickness="0"
-                          ContextMenuOpening="DateiListe_ContextMenuOpening">
+                          ContextMenuOpening="DateiListe_ContextMenuOpening"
+                          PreviewKeyDown="DateiListe_PreviewKeyDown">
                     <ListView.ContextMenu>
                         <ContextMenu/>
                     </ListView.ContextMenu>
