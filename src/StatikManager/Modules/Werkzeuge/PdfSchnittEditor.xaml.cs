@@ -410,10 +410,12 @@ namespace StatikManager.Modules.Werkzeuge
                         double pendingScrollV = ps?.ScrollV ?? 0;
 
                         ZeicheCanvas();
-                        // Pixel-pro-mm fuer Sicherheitsabstand-Konvertierung
-                        if (_pdfPfad != null && bilder!.Count > 0)
+                        // Pixel-pro-mm fuer Sicherheitsabstand-Konvertierung — via _pdfBytes (kein Datei-Handle)
+                        if (bilder!.Count > 0)
                         {
-                            var (wPts, _) = HolePdfSeitenGrösse(_pdfPfad);
+                            var (wPts, _) = _pdfBytes != null
+                                ? HolePdfSeitenGrösse(_pdfBytes)
+                                : (_pdfPfad != null ? HolePdfSeitenGrösse(_pdfPfad) : (595.0, 842.0));
                             _pxPerMm = wPts > 0 ? bilder![0].PixelWidth / (wPts / 72.0 * 25.4) : 4.0;
                         }
                         BtnExport.IsEnabled               = true;
@@ -2759,7 +2761,19 @@ namespace StatikManager.Modules.Werkzeuge
         {
             try
             {
-                using var doc = PdfReader.Open(pfad, PdfDocumentOpenMode.ReadOnly);
+                byte[] bytes = IO.File.ReadAllBytes(pfad);
+                return HolePdfSeitenGrösse(bytes);
+            }
+            catch (Exception ex) { LogException(ex, "HolePdfSeitenGrösse(pfad)"); }
+            return (595.0, 842.0); // A4-Fallback
+        }
+
+        private static (double widthPts, double heightPts) HolePdfSeitenGrösse(byte[] bytes)
+        {
+            try
+            {
+                using var ms  = new IO.MemoryStream(bytes, writable: false);
+                using var doc = PdfReader.Open(ms, PdfDocumentOpenMode.ReadOnly);
                 if (doc.PageCount > 0)
                 {
                     var page = doc.Pages[0];
@@ -2768,7 +2782,7 @@ namespace StatikManager.Modules.Werkzeuge
                     if (w > 0 && h > 0) return (w, h);
                 }
             }
-            catch (Exception ex) { LogException(ex, "HolePdfSeitenGrösse"); }
+            catch (Exception ex) { LogException(ex, "HolePdfSeitenGrösse(bytes)"); }
             return (595.0, 842.0); // A4-Fallback
         }
 
@@ -3561,8 +3575,10 @@ namespace StatikManager.Modules.Werkzeuge
                     grenzen.AddRange(cuts);
                     grenzen.Add(1.0);
 
-                    // PDF-Seitengröße (Punkte, bottom-up)
-                    (double pageWPts, double pageHPts) = HolePdfSeitenGrösse(_pdfPfad!);
+                    // PDF-Seitengröße (Punkte, bottom-up) — via _pdfBytes, kein Datei-Handle
+                    (double pageWPts, double pageHPts) = _pdfBytes != null
+                        ? HolePdfSeitenGrösse(_pdfBytes)
+                        : HolePdfSeitenGrösse(_pdfPfad!);
 
                     for (int t = 0; t < grenzen.Count - 1; t++)
                     {
@@ -3602,7 +3618,9 @@ namespace StatikManager.Modules.Werkzeuge
                     var kompBmp = kv.Value;
                     if (kompBmp == null) continue;
 
-                    (double pageWPts, double pageHPts) = HolePdfSeitenGrösse(_pdfPfad!);
+                    (double pageWPts, double pageHPts) = _pdfBytes != null
+                        ? HolePdfSeitenGrösse(_pdfBytes)
+                        : HolePdfSeitenGrösse(_pdfPfad!);
                     double scaleH  = (double)kompBmp.PixelHeight / Math.Max(1, _seitenBilder[si].PixelHeight);
                     double newHPts = Math.Max(1, pageHPts * scaleH);
 
@@ -4872,16 +4890,24 @@ namespace StatikManager.Modules.Werkzeuge
 
                 var pdfOut = new PdfSharp.Pdf.PdfDocument();
 
-                // Quell-PDF öffnen (für Original-Seiten) — liest immer von _pdfPfad (Original)
+                // Quell-PDF öffnen (für Original-Seiten) — immer via _pdfBytes (kein Datei-Handle auf _pdfPfad!)
                 PdfSharp.Pdf.PdfDocument pdfIn = null;
-                if (IO.File.Exists(_pdfPfad))
+                if (_pdfBytes != null)
+                {
+                    try { pdfIn = PdfReader.Open(new IO.MemoryStream(_pdfBytes, writable: false), PdfDocumentOpenMode.Import); }
+                    catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[BUG3-SPEICHERN] PdfReader.Open(bytes) FEHLER: {ex.Message}"); }
+                }
+                else if (IO.File.Exists(_pdfPfad))
                 {
                     try { pdfIn = PdfReader.Open(_pdfPfad, PdfDocumentOpenMode.Import); }
-                    catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[BUG3-SPEICHERN] PdfReader.Open FEHLER: {ex.Message}"); }
+                    catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[BUG3-SPEICHERN] PdfReader.Open(pfad) FEHLER: {ex.Message}"); }
                 }
 
                 System.Diagnostics.Debug.WriteLine($"[BUG3-SPEICHERN] pdfIn={pdfIn != null}, sichtbare Seiten={sichtbar.Count}");
-                (double pageWPts, double pageHPts) = HolePdfSeitenGrösse(_pdfPfad);
+                // Seitengröße via _pdfBytes (kein Datei-Handle)
+                (double pageWPts, double pageHPts) = _pdfBytes != null
+                    ? HolePdfSeitenGrösse(_pdfBytes)
+                    : HolePdfSeitenGrösse(_pdfPfad);
 
                 foreach (int si in sichtbar)
                 {
