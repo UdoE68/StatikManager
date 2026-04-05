@@ -36,6 +36,13 @@ namespace StatikManager.Modules.Bildschnitt
         private readonly List<UIElement> _linienElemente = new List<UIElement>();
         private readonly List<UIElement> _segmentElemente = new List<UIElement>();
 
+        // ── Scheren-Werkzeug ──────────────────────────────────────────────────────
+        private bool _scherenModus;
+        private readonly List<int> _scherenschnitte = new List<int>(); // Y-Positionen in Bitmap-Pixel
+        private WpfLine? _scherenVorschauLinie;
+        private readonly List<UIElement> _scherenElemente = new List<UIElement>(); // Parts-Images + Rahmen + Labels
+        private const int ScherenAbstand = 8; // px Abstand zwischen Teilen auf dem Canvas
+
         // Drag-State Crop
         private bool _isDragging;
         private string? _dragEdge;
@@ -112,6 +119,28 @@ namespace StatikManager.Modules.Bildschnitt
         public void LadeBitmap(System.Drawing.Bitmap bitmap, string? quelle = null)
         {
             _quellBitmap?.Dispose();
+
+            // Scheren-State zurücksetzen
+            _scherenschnitte.Clear();
+            foreach (var el in _scherenElemente)
+                VorschauCanvas.Children.Remove(el);
+            _scherenElemente.Clear();
+            if (_scherenVorschauLinie != null)
+            {
+                VorschauCanvas.Children.Remove(_scherenVorschauLinie);
+                _scherenVorschauLinie = null;
+            }
+            VorschauBild.Visibility = Visibility.Visible;
+            if (_scherenModus)
+            {
+                _scherenModus = false;
+                Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    if (BtnSchereToggle.IsChecked == true)
+                        BtnSchereToggle.IsChecked = false;
+                }));
+            }
+
             _quellBitmap = bitmap;
             _schnittLinien.Clear();
             _segmente.Clear();
@@ -145,6 +174,10 @@ namespace StatikManager.Modules.Bildschnitt
             BtnSegmenteExportieren.IsEnabled = hatBild && _segmente.Count(s => s.Aktiv) > 0;
             BtnAlsPdfSpeichern.IsEnabled    = _quellPdfPfad != null && _rand != null
                                               && System.IO.File.Exists(_quellPdfPfad ?? "");
+            bool hatSchnitte = _scherenschnitte.Count > 0;
+            BtnSchereToggle.IsEnabled                = hatBild;
+            BtnScherenschnitteZurücksetzen.IsEnabled = hatSchnitte;
+            BtnTeileExportieren.IsEnabled            = hatSchnitte;
         }
 
         // ── Zoom (Strg+Mausrad) ────────────────────────────────────────────────
@@ -170,6 +203,25 @@ namespace StatikManager.Modules.Bildschnitt
                 AktualisiereLinienUndSegmente();
                 AktualisiereButtons();
                 SetzeStatus("Schnittlinie gelöscht");
+                e.Handled = true;
+            }
+
+            // Strg+Z – Letzten Scheren-Schnitt rückgängig
+            if (e.Key == Key.Z &&
+                (Keyboard.IsKeyDown(Key.LeftCtrl) || Keyboard.IsKeyDown(Key.RightCtrl)))
+            {
+                if (_scherenschnitte.Count > 0)
+                {
+                    _scherenschnitte.RemoveAt(_scherenschnitte.Count - 1);
+                    AktualisiereScherenCanvas();
+                    SetzeStatus($"Schnitt rückgängig. {_scherenschnitte.Count} Schnitt(e) verbleiben.");
+                    e.Handled = true;
+                }
+            }
+            // Esc – Scheren-Modus beenden
+            if (e.Key == Key.Escape && _scherenModus)
+            {
+                BtnSchereToggle.IsChecked = false;
                 e.Handled = true;
             }
         }
@@ -839,6 +891,283 @@ namespace StatikManager.Modules.Bildschnitt
             encoder.Save(ms);
             ms.Seek(0, SeekOrigin.Begin);
             return new System.Drawing.Bitmap(ms);
+        }
+
+        // ── Scheren-Werkzeug ──────────────────────────────────────────────────────
+
+        // Gibt für jeden Teil: (BitmapY_Start, Hoehe_Pixel, CanvasY_Start) zurück.
+        private List<(int BmpY, int Hoehe, double CanvasY)> BerechneTeilLayout()
+        {
+            var liste = new List<(int, int, double)>();
+            if (_quellBitmap == null) return liste;
+
+            var grenzen = new List<int> { 0 };
+            grenzen.AddRange(_scherenschnitte.OrderBy(y => y).Where(y => y > 0 && y < _quellBitmap.Height));
+            grenzen.Add(_quellBitmap.Height);
+
+            double canvasY = 0;
+            for (int i = 0; i < grenzen.Count - 1; i++)
+            {
+                int bmpY  = grenzen[i];
+                int hoehe = grenzen[i + 1] - bmpY;
+                if (hoehe <= 0) continue;
+                liste.Add((bmpY, hoehe, canvasY));
+                canvasY += hoehe + ScherenAbstand;
+            }
+            return liste;
+        }
+
+        private int CanvasYZuBitmapY(double canvasY)
+        {
+            var layout = BerechneTeilLayout();
+            if (layout.Count == 0) return (int)canvasY;
+
+            foreach (var (bmpY, hoehe, teilCanvasY) in layout)
+            {
+                if (canvasY >= teilCanvasY && canvasY < teilCanvasY + hoehe)
+                    return bmpY + (int)(canvasY - teilCanvasY);
+            }
+            // In Abstand-Lücke: nearest boundary
+            for (int i = 0; i < layout.Count - 1; i++)
+            {
+                var cur  = layout[i];
+                var next = layout[i + 1];
+                double gapMitte = cur.CanvasY + cur.Hoehe + ScherenAbstand / 2.0;
+                if (canvasY < gapMitte) return cur.BmpY + cur.Hoehe - 1;
+                if (canvasY < next.CanvasY) return next.BmpY;
+            }
+            var last = layout[layout.Count - 1];
+            return last.BmpY + last.Hoehe - 1;
+        }
+
+        private void AktualisiereScherenCanvas()
+        {
+            // Alte Scheren-Elemente entfernen
+            foreach (var el in _scherenElemente)
+                VorschauCanvas.Children.Remove(el);
+            _scherenElemente.Clear();
+
+            if (_quellBitmap == null) return;
+
+            if (_scherenschnitte.Count == 0)
+            {
+                // Kein Schnitt: Original-Bild wieder sichtbar, Canvas-Größe zurücksetzen
+                VorschauBild.Visibility   = Visibility.Visible;
+                VorschauCanvas.Width  = _quellBitmap.Width;
+                VorschauCanvas.Height = _quellBitmap.Height;
+                TxtScherenInfo.Text = "Keine Schnitte";
+                return;
+            }
+
+            // Original-Bild ausblenden (Teile werden separat gerendert)
+            VorschauBild.Visibility = Visibility.Collapsed;
+
+            var layout = BerechneTeilLayout();
+            double totalHöhe = layout.Sum(t => (double)t.Hoehe) + ScherenAbstand * (layout.Count - 1);
+            VorschauCanvas.Width  = _quellBitmap.Width;
+            VorschauCanvas.Height = totalHöhe;
+
+            for (int i = 0; i < layout.Count; i++)
+            {
+                var (bmpY, hoehe, canvasY) = layout[i];
+                var cropRect = new DrawRect(0, bmpY, _quellBitmap.Width, hoehe);
+
+                BitmapSource src;
+                using (var teilBmp = _quellBitmap.Clone(cropRect, _quellBitmap.PixelFormat))
+                    src = BitmapZuBitmapSource(teilBmp);
+
+                // Bild-Element
+                var img = new System.Windows.Controls.Image
+                {
+                    Width   = _quellBitmap.Width,
+                    Height  = hoehe,
+                    Source  = src,
+                    Stretch = Stretch.None,
+                    IsHitTestVisible = false
+                };
+                Canvas.SetLeft(img, 0); Canvas.SetTop(img, canvasY);
+                Canvas.SetZIndex(img, 1);
+                VorschauCanvas.Children.Add(img);
+                _scherenElemente.Add(img);
+
+                // Dünner Rahmen
+                var rahmen = new WpfRect
+                {
+                    Width           = _quellBitmap.Width,
+                    Height          = hoehe,
+                    Stroke          = new SolidColorBrush(System.Windows.Media.Color.FromArgb(160, 180, 180, 180)),
+                    StrokeThickness = 1,
+                    Fill            = System.Windows.Media.Brushes.Transparent,
+                    IsHitTestVisible = false
+                };
+                Canvas.SetLeft(rahmen, 0); Canvas.SetTop(rahmen, canvasY);
+                Canvas.SetZIndex(rahmen, 3);
+                VorschauCanvas.Children.Add(rahmen);
+                _scherenElemente.Add(rahmen);
+
+                // Nummern-Label
+                var label = new System.Windows.Controls.TextBlock
+                {
+                    Text       = (i + 1).ToString(),
+                    Foreground = System.Windows.Media.Brushes.White,
+                    Background = new SolidColorBrush(System.Windows.Media.Color.FromArgb(180, 30, 30, 30)),
+                    FontSize   = 11,
+                    FontWeight = FontWeights.SemiBold,
+                    Padding    = new Thickness(5, 1, 5, 1)
+                };
+                Canvas.SetLeft(label, 5); Canvas.SetTop(label, canvasY + 4);
+                Canvas.SetZIndex(label, 4);
+                VorschauCanvas.Children.Add(label);
+                _scherenElemente.Add(label);
+            }
+
+            TxtScherenInfo.Text = $"{layout.Count} Teile\n{_scherenschnitte.Count} Schnitt(e)";
+            AktualisiereButtons();
+        }
+
+        private void BtnSchereToggle_Checked(object sender, RoutedEventArgs e)
+        {
+            // Platzierungs-Modus beenden falls aktiv
+            if (_platzierungsModus) BeendePlatzierungsModus();
+
+            _scherenModus = true;
+            VorschauCanvas.Cursor = Cursors.Cross;
+            VorschauCanvas.MouseMove            += Schere_MouseMove;
+            VorschauCanvas.MouseLeftButtonDown  += Schere_MouseDown;
+            VorschauCanvas.MouseRightButtonDown += Schere_RechtsklickAbbrechen;
+            SetzeStatus("Scheren-Modus aktiv – Klick setzt Schnitt, Rechtsklick/Esc beendet");
+        }
+
+        private void BtnSchereToggle_Unchecked(object sender, RoutedEventArgs e)
+            => BeendeScherenModus();
+
+        private void BeendeScherenModus()
+        {
+            _scherenModus = false;
+            if (_scherenVorschauLinie != null)
+            {
+                VorschauCanvas.Children.Remove(_scherenVorschauLinie);
+                _scherenVorschauLinie = null;
+            }
+            VorschauCanvas.Cursor = Cursors.Arrow;
+            VorschauCanvas.MouseMove            -= Schere_MouseMove;
+            VorschauCanvas.MouseLeftButtonDown  -= Schere_MouseDown;
+            VorschauCanvas.MouseRightButtonDown -= Schere_RechtsklickAbbrechen;
+
+            int anzahl = _scherenschnitte.Count;
+            SetzeStatus(anzahl > 0 ? $"Scheren-Modus beendet. {anzahl} Schnitt(e) gesetzt." : "Scheren-Modus beendet.");
+        }
+
+        private void Schere_MouseMove(object sender, MouseEventArgs e)
+        {
+            if (_quellBitmap == null) return;
+            var pos = e.GetPosition(VorschauCanvas);
+
+            if (_scherenVorschauLinie == null)
+            {
+                _scherenVorschauLinie = new WpfLine
+                {
+                    Stroke          = new SolidColorBrush(System.Windows.Media.Color.FromArgb(210, 220, 40, 40)),
+                    StrokeThickness = 1.5,
+                    StrokeDashArray = new DoubleCollection(new[] { 10.0, 5.0 }),
+                    IsHitTestVisible = false
+                };
+                Canvas.SetZIndex(_scherenVorschauLinie, 50);
+                VorschauCanvas.Children.Add(_scherenVorschauLinie);
+            }
+
+            double canvasW = VorschauCanvas.Width > 0 ? VorschauCanvas.Width : _quellBitmap.Width;
+            _scherenVorschauLinie.X1 = 0;       _scherenVorschauLinie.Y1 = pos.Y;
+            _scherenVorschauLinie.X2 = canvasW; _scherenVorschauLinie.Y2 = pos.Y;
+        }
+
+        private void Schere_MouseDown(object sender, MouseButtonEventArgs e)
+        {
+            if (_quellBitmap == null || e.LeftButton != MouseButtonState.Pressed) return;
+            var pos     = e.GetPosition(VorschauCanvas);
+            int bitmapY = CanvasYZuBitmapY(pos.Y);
+
+            // Außerhalb des Bitmaps → ignorieren
+            if (bitmapY <= 0 || bitmapY >= _quellBitmap.Height - 1)
+            {
+                SetzeStatus("Schnitt außerhalb des Bildes – ignoriert");
+                return;
+            }
+            // Zu nahe an bestehendem Schnitt (< 8px) → ignorieren
+            if (_scherenschnitte.Any(s => Math.Abs(s - bitmapY) < 8))
+            {
+                SetzeStatus("Zu nahe an bestehendem Schnitt – ignoriert");
+                return;
+            }
+
+            _scherenschnitte.Add(bitmapY);
+            AktualisiereScherenCanvas();
+            SetzeStatus($"Schnitt {_scherenschnitte.Count} bei Y={bitmapY} px gesetzt");
+            e.Handled = true;
+        }
+
+        private void Schere_RechtsklickAbbrechen(object sender, MouseButtonEventArgs e)
+        {
+            if (_scherenModus)
+            {
+                BtnSchereToggle.IsChecked = false; // löst Unchecked-Event aus → BeendeScherenModus()
+                e.Handled = true;
+            }
+        }
+
+        private void BtnScherenschnitteZurücksetzen_Click(object sender, RoutedEventArgs e)
+        {
+            if (_scherenModus)
+            {
+                BtnSchereToggle.IsChecked = false; // BeendeScherenModus()
+            }
+            _scherenschnitte.Clear();
+            foreach (var el in _scherenElemente)
+                VorschauCanvas.Children.Remove(el);
+            _scherenElemente.Clear();
+
+            if (_quellBitmap != null)
+            {
+                VorschauBild.Visibility   = Visibility.Visible;
+                VorschauCanvas.Width  = _quellBitmap.Width;
+                VorschauCanvas.Height = _quellBitmap.Height;
+            }
+            TxtScherenInfo.Text = "Keine Schnitte";
+            AktualisiereButtons();
+            SetzeStatus("Alle Schnitte entfernt");
+        }
+
+        private void BtnTeileExportieren_Click(object sender, RoutedEventArgs e)
+        {
+            if (_quellBitmap == null || _scherenschnitte.Count == 0) return;
+
+            using var dlg = new System.Windows.Forms.FolderBrowserDialog
+            {
+                Description = "Ordner für Teil-Export wählen",
+                ShowNewFolderButton = true
+            };
+            if (dlg.ShowDialog() != System.Windows.Forms.DialogResult.OK) return;
+
+            var layout   = BerechneTeilLayout();
+            string basis = _quellPdfPfad != null
+                ? System.IO.Path.GetFileNameWithoutExtension(_quellPdfPfad)
+                : "bild";
+
+            int ok = 0;
+            for (int i = 0; i < layout.Count; i++)
+            {
+                try
+                {
+                    var (bmpY, hoehe, _) = layout[i];
+                    var cropRect = new DrawRect(0, bmpY, _quellBitmap.Width, hoehe);
+                    using var teilBmp = _quellBitmap.Clone(cropRect, _quellBitmap.PixelFormat);
+                    string datei = System.IO.Path.Combine(dlg.SelectedPath, $"{basis}_teil{i + 1}.png");
+                    teilBmp.Save(datei, ImageFormat.Png);
+                    ok++;
+                }
+                catch (Exception ex) { Logger.Fehler("TeileExport", ex.Message); }
+            }
+            SetzeStatus($"{ok}/{layout.Count} Teile exportiert → {dlg.SelectedPath}");
         }
 
         // ── Hilfsmethoden ──────────────────────────────────────────────────────

@@ -50,6 +50,37 @@
                         Height="24" Padding="8,0" Margin="0,0,4,0"
                         IsEnabled="False"
                         Click="BtnAlsPdfSpeichern_Click"/>
+                <Separator Width="1" Height="18" Background="#BBB" Margin="4,0"/>
+                <!-- Scheren-Toggle -->
+                <ToggleButton x:Name="BtnSchereToggle"
+                              Height="24" Padding="8,0" Margin="0,0,4,0"
+                              IsEnabled="False"
+                              ToolTip="Scheren-Modus: Klick setzt horizontalen Schnitt. Erneuter Klick deaktiviert."
+                              Checked="BtnSchereToggle_Checked"
+                              Unchecked="BtnSchereToggle_Unchecked">
+                    <ToggleButton.Style>
+                        <Style TargetType="ToggleButton">
+                            <Setter Property="Content" Value="&#x2702; Zerschneiden"/>
+                            <Style.Triggers>
+                                <Trigger Property="IsChecked" Value="True">
+                                    <Setter Property="Background" Value="#CC3333"/>
+                                    <Setter Property="Foreground" Value="White"/>
+                                    <Setter Property="Content" Value="&#x2702; Aktiv &#x2013; klicken zum Beenden"/>
+                                </Trigger>
+                            </Style.Triggers>
+                        </Style>
+                    </ToggleButton.Style>
+                </ToggleButton>
+                <Button x:Name="BtnScherenschnitteZurücksetzen"
+                        Content="&#x21A9; Schnitte zurücksetzen"
+                        Height="24" Padding="8,0" Margin="0,0,4,0"
+                        IsEnabled="False"
+                        Click="BtnScherenschnitteZurücksetzen_Click"/>
+                <Button x:Name="BtnTeileExportieren"
+                        Content="&#x1F4E4; Teile exportieren"
+                        Height="24" Padding="8,0" Margin="0,0,4,0"
+                        IsEnabled="False"
+                        Click="BtnTeileExportieren_Click"/>
             </WrapPanel>
         </Border>
 
@@ -109,6 +140,10 @@
                     <TextBlock Text="Segmente" FontWeight="SemiBold" FontSize="12" Margin="0,0,0,6"/>
                     <TextBlock x:Name="TxtSegmentInfo" FontSize="11" Foreground="#555"
                                TextWrapping="Wrap" Margin="0,0,0,8"/>
+                    <Separator Margin="0,4,0,8"/>
+                    <TextBlock Text="Scheren-Teile" FontWeight="SemiBold" FontSize="12" Margin="0,0,0,6"/>
+                    <TextBlock x:Name="TxtScherenInfo" FontSize="11" Foreground="#555"
+                               TextWrapping="Wrap" Margin="0,0,0,8" Text="Keine Schnitte"/>
                     <Separator Margin="0,4,0,8"/>
                     <TextBlock Text="Sicherheitsabstand" FontWeight="SemiBold" FontSize="12" Margin="0,0,0,6"/>
                     <StackPanel Orientation="Horizontal">
