@@ -11,18 +11,31 @@ StatikManager ist eine modulare WPF-Desktopanwendung (.NET Framework 4.8, x64) z
 
 ### .claude/agents/ (Claude Code Sub-Agenten)
 
-| Agent          | Rolle                                                              |
-|----------------|--------------------------------------------------------------------|
-| orchestrator   | Koordiniert Aufgaben, delegiert an Spezial-Agenten                |
-| bibliothekar   | Wissensverwalter: LEARNINGS, PATTERNS, FEHLVERSUCHE                |
-| entwickler     | WPF/C# Implementierung, Build, Git                                 |
-| rechercheur    | Recherche zu Skills, Libraries, Best Practices                     |
-| ui-designer    | XAML, Styles, Themes, Dialog-Design                                |
+| Agent        | Rolle                                                          |
+|--------------|----------------------------------------------------------------|
+| orchestrator | Projektleiter: plant, delegiert, prueft. KEIN Commit ohne @tester |
+| bibliothekar | Wissensverwalter: LEARNINGS, PATTERNS, FEHLVERSUCHE            |
+| entwickler   | WPF/C# Implementierung, Build, Git                             |
+| tester       | Qualitaetssicherung: verifiziert konkret, meldet PASS/FAIL     |
 
 Wissensdatenbank: `docs/` (ARCHITEKTUR.md, LEARNINGS.md, PATTERNS.md, FEHLVERSUCHE.md)
 
-### /agents/ (Legacy Agenten-Definitionen)
-Definitionsdateien fuer Orchestrator, Planner, Fiona, Nolen.
+### Pflicht-Workflow fuer jede Aufgabe
+
+```
+1. User → @orchestrator: Aufgabe beschreiben
+2. @orchestrator → @bibliothekar: "Was wissen wir zu diesem Thema?"
+3. @bibliothekar liefert: Vorwissen, Fehlversuche, Patterns, Fallen
+4. @orchestrator → @entwickler: Aufgabe + Bibliothekar-Wissen
+5. @entwickler: Lesen → Analysieren → Code → Bauen
+6. @orchestrator → @tester: "Verifiziere Fix X"
+7. @tester prueft KONKRET (Zeitstempel, Debug-Output, Datei-Lock)
+8. Bei FAIL → zurueck zu Schritt 4 mit Tester-Feedback
+9. Bei PASS → git commit + push
+10. @orchestrator → @bibliothekar: "Dokumentiere neue Erkenntnisse"
+```
+
+**KEIN COMMIT OHNE TESTER-OK.**
 
 ---
 

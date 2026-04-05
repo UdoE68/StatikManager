@@ -203,6 +203,43 @@ private void AktualisiereTreeViewHervorhebung(ItemsControl? parent = null)
 
 ---
 
+## WPF ToolBarTray (mehrzeilig, kein Gripper)
+
+```xml
+<ToolBarTray Background="{DynamicResource Farbe.Werkzeugleiste}" IsLocked="True">
+  <ToolBar Band="0" BandIndex="0" Background="{DynamicResource Farbe.Werkzeugleiste}">
+    <Button Content="Aktion" ToolTip="Beschreibung" Height="26" Padding="8,0" Click="..."/>
+    <Separator/>
+    <ToggleButton x:Name="BtnModus" Height="26" Padding="8,0"
+                  Checked="Modus_Checked" Unchecked="Modus_Unchecked">
+        <ToggleButton.Style>
+            <Style TargetType="ToggleButton">
+                <Setter Property="Content" Value="&#x2702; Normal"/>
+                <Style.Triggers>
+                    <Trigger Property="IsChecked" Value="True">
+                        <Setter Property="Background" Value="#CC3333"/>
+                        <Setter Property="Foreground" Value="White"/>
+                        <Setter Property="Content" Value="&#x2702; Aktiv – Esc beenden"/>
+                    </Trigger>
+                </Style.Triggers>
+            </Style>
+        </ToggleButton.Style>
+    </ToggleButton>
+  </ToolBar>
+  <ToolBar Band="1" BandIndex="0"><!-- zweite Zeile --></ToolBar>
+</ToolBarTray>
+```
+- `Band` = Zeilennummer (0-basiert), `BandIndex` = Position in der Zeile
+- `IsLocked="True"` blendet Gripper-Handles aus
+- Standard-Button: `Height="26" Padding="8,0"` | Icon-Button: `Width="26" Height="26"`
+- `TxtInfo`-Statustext am Ende: `<TextBlock x:Name="TxtInfo" VerticalAlignment="Center" FontSize="11" FontStyle="Italic" Foreground="#555"/>`
+
+### Unicode-Icons (XML-Entity)
+`&#x2702;` Schere | `&#x270F;` Stift | `&#x1F5D1;` Papierkorb | `&#x2714;` Haken
+`&#x2716;` X | `&#x2795;` Plus | `&#x21A9;` Zurück | `&#x1F4E4;` Export
+
+---
+
 ## Einstellungen XML-Serialisierung
 
 ```csharp
