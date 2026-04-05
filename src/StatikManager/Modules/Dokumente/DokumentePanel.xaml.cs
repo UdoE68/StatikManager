@@ -738,6 +738,11 @@ namespace StatikManager.Modules.Dokumente
                         break;
                     case VorschauTyp.Browser:
                         ZeigeBrowser(mitAbdeckung: false);
+                        if (DateiTypen.IstHtmlDatei(Path.GetExtension(pfad)))
+                        {
+                            ZeigeHtmlToolbar(pfad);
+                            AutoPdfAktualisieren(pfad);
+                        }
                         AppZustand.Instanz.SetzeStatus("Lade: " + Path.GetFileName(pfad) + " …");
                         WordVorschau.Navigate(new Uri(pfad));
                         GibUI(); // synchron: Navigation ist fire-and-forget
@@ -801,6 +806,7 @@ namespace StatikManager.Modules.Dokumente
             WordVorschau.Navigate("about:blank");
             WordVorschau.Visibility    = Visibility.Collapsed;
             AbdeckungsPanel.Visibility = Visibility.Collapsed;
+            HtmlToolbar.Visibility     = Visibility.Collapsed;
             WordInfoPanel.Visibility   = Visibility.Collapsed;
             PdfEditor.Visibility       = Visibility.Visible;
         }
@@ -809,6 +815,7 @@ namespace StatikManager.Modules.Dokumente
         {
             PdfEditor.Visibility       = Visibility.Collapsed;
             WordInfoPanel.Visibility   = Visibility.Collapsed;
+            HtmlToolbar.Visibility     = Visibility.Collapsed; // ggf. per ZeigeHtmlToolbar wieder einblenden
             WordVorschau.Visibility    = Visibility.Visible;
             AbdeckungsPanel.Visibility = mitAbdeckung ? Visibility.Visible : Visibility.Collapsed;
         }
@@ -818,6 +825,7 @@ namespace StatikManager.Modules.Dokumente
             WordVorschau.Navigate("about:blank");
             WordVorschau.Visibility    = Visibility.Collapsed;
             AbdeckungsPanel.Visibility = Visibility.Collapsed;
+            HtmlToolbar.Visibility     = Visibility.Collapsed;
             PdfEditor.Visibility       = Visibility.Collapsed;
             TxtWordDateiname.Text      = Path.GetFileName(pfad);
             TxtWordLadeStatus.Text     = "Vorschau wird geladen …";
@@ -1242,6 +1250,121 @@ namespace StatikManager.Modules.Dokumente
                 + "<p style='color:#aaa;font-size:12px'>Dateityp: " + ext + "</p>",
                 bodyStyle: "font-family:Segoe UI,sans-serif;padding:40px;color:#555"));
             _dokumentGeladen = true;
+        }
+
+        // ── HTML → PDF (Edge Headless) ────────────────────────────────────────
+
+        private void ZeigeHtmlToolbar(string htmlPfad)
+        {
+            HtmlToolbar.Visibility  = Visibility.Visible;
+            BtnHtmlAlsPdf.IsEnabled = true;
+
+            var pdfPfad = Path.ChangeExtension(htmlPfad, ".pdf");
+            if (File.Exists(pdfPfad))
+            {
+                var htmlZeit = File.GetLastWriteTime(htmlPfad);
+                var pdfZeit  = File.GetLastWriteTime(pdfPfad);
+                TxtHtmlPdfStatus.Text = htmlZeit > pdfZeit
+                    ? "⚠ PDF veraltet – bitte neu speichern"
+                    : "✓ PDF ist aktuell";
+            }
+            else
+            {
+                TxtHtmlPdfStatus.Text = "Noch keine PDF vorhanden";
+            }
+        }
+
+        private void AutoPdfAktualisieren(string htmlPfad)
+        {
+            // Nur vorhandene PDF aktualisieren – keine automatische Erstanlage
+            var pdfPfad = Path.ChangeExtension(htmlPfad, ".pdf");
+            if (!File.Exists(pdfPfad)) return;
+
+            var htmlZeit = File.GetLastWriteTime(htmlPfad);
+            var pdfZeit  = File.GetLastWriteTime(pdfPfad);
+            if (htmlZeit <= pdfZeit) return;
+
+            // HTML ist neuer → still im Hintergrund aktualisieren
+            TxtHtmlPdfStatus.Text   = "PDF wird automatisch aktualisiert …";
+            BtnHtmlAlsPdf.IsEnabled = false;
+            ErzeugeHtmlPdfImHintergrund(htmlPfad, pdfPfad, automatisch: true);
+        }
+
+        private void BtnHtmlAlsPdf_Click(object sender, RoutedEventArgs e)
+        {
+            if (_aktiverDateipfad == null) return;
+            var pdfPfad = Path.ChangeExtension(_aktiverDateipfad, ".pdf");
+            TxtHtmlPdfStatus.Text   = "PDF wird erzeugt …";
+            BtnHtmlAlsPdf.IsEnabled = false;
+            ErzeugeHtmlPdfImHintergrund(_aktiverDateipfad, pdfPfad, automatisch: false);
+        }
+
+        private void ErzeugeHtmlPdfImHintergrund(string htmlPfad, string pdfPfad, bool automatisch)
+        {
+            var edgePfad = SucheEdgePfad();
+            if (edgePfad == null)
+            {
+                TxtHtmlPdfStatus.Text   = "Fehler: Microsoft Edge nicht gefunden";
+                BtnHtmlAlsPdf.IsEnabled = true;
+                if (!automatisch)
+                    MessageBox.Show(
+                        "Microsoft Edge (msedge.exe) wurde nicht gefunden.\n" +
+                        "Edge ist auf Windows 10/11 normalerweise unter\n" +
+                        "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\ installiert.",
+                        "Edge nicht gefunden", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            var htmlUri = new Uri(htmlPfad).AbsoluteUri;
+            // Edge: --headless ohne --disable-gpu, da manche Versionen sonst hängen
+            var args = $"--headless --no-sandbox --print-to-pdf=\"{pdfPfad}\" \"{htmlUri}\"";
+
+            System.Threading.Tasks.Task.Run(() =>
+            {
+                bool erfolg = false;
+                string fehlerText = "";
+                try
+                {
+                    var psi = new System.Diagnostics.ProcessStartInfo(edgePfad, args)
+                    {
+                        CreateNoWindow  = true,
+                        UseShellExecute = false,
+                    };
+                    using var proc = System.Diagnostics.Process.Start(psi);
+                    // Timeout 30 s – bei sehr großen HTML-Seiten ggf. erhöhen
+                    erfolg = (proc?.WaitForExit(30_000) ?? false) && File.Exists(pdfPfad);
+                }
+                catch (Exception ex) { fehlerText = ex.Message; }
+
+                Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    BtnHtmlAlsPdf.IsEnabled = true;
+                    if (erfolg)
+                    {
+                        TxtHtmlPdfStatus.Text = automatisch
+                            ? "✓ PDF automatisch aktualisiert"
+                            : "✓ " + Path.GetFileName(pdfPfad) + " gespeichert";
+                        // Baum aktualisieren damit die neue PDF erscheint
+                        AktualisiereNurStruktur();
+                    }
+                    else
+                    {
+                        TxtHtmlPdfStatus.Text = string.IsNullOrEmpty(fehlerText)
+                            ? "⚠ PDF konnte nicht erzeugt werden"
+                            : "Fehler: " + fehlerText;
+                    }
+                }));
+            });
+        }
+
+        private static string? SucheEdgePfad()
+        {
+            var kandidaten = new[]
+            {
+                @"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+                @"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+            };
+            return kandidaten.FirstOrDefault(File.Exists);
         }
 
         private void ZeigeJsonVorschau(string pfad)

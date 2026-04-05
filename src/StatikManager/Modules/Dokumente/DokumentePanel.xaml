@@ -198,6 +198,30 @@
                        FontSize="13"
                        Margin="10,10,10,0"/>
 
+            <!-- HTML-Toolbar (nur für .html/.htm-Dateien sichtbar) -->
+            <Border x:Name="HtmlToolbar"
+                    Grid.Row="1"
+                    Background="{DynamicResource Farbe.Werkzeugleiste}"
+                    BorderBrush="{DynamicResource Farbe.Rahmen}"
+                    BorderThickness="0,1,0,1"
+                    Padding="10,6"
+                    Margin="0,6,0,0"
+                    Visibility="Collapsed">
+                <DockPanel>
+                    <Button x:Name="BtnHtmlAlsPdf"
+                            DockPanel.Dock="Left"
+                            Content="📄 Als PDF speichern"
+                            Height="22" Padding="8,0" FontSize="11"
+                            Style="{StaticResource PrimaryButton}"
+                            Click="BtnHtmlAlsPdf_Click"/>
+                    <TextBlock x:Name="TxtHtmlPdfStatus"
+                               VerticalAlignment="Center"
+                               FontSize="11" Foreground="#666"
+                               FontStyle="Italic"
+                               Margin="10,0,0,0"/>
+                </DockPanel>
+            </Border>
+
             <!-- Abdeckungs-Panel (nur für PDF-Dateien sichtbar) -->
             <Border x:Name="AbdeckungsPanel"
                     Grid.Row="1"
