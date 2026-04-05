@@ -1296,6 +1296,9 @@ namespace StatikManager.Modules.Dokumente
             _aktivesPositionsVerzeichnis    = Path.GetDirectoryName(positionsHtmlPfad);
             WordVorschau.ObjectForScripting = _ausschnittScripting;
             string html = PositionsHtmlHelper.GeneriereHtmlMitXButtons(_aktivesPositionsVerzeichnis!);
+            // Bug 4: IE-WebBrowser cached den alten Inhalt – erst about:blank laden, dann neues HTML
+            // Dadurch wird der Browser gezwungen, die Seite vollständig neu zu rendern
+            WordVorschau.Navigate("about:blank");
             WordVorschau.NavigateToString(html);
         }
 

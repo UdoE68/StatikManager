@@ -265,6 +265,10 @@ namespace StatikManager.Modules.Werkzeuge
             _ladeCts = cts;
             var token = cts.Token;
 
+            // Bearbeitungs- und Scheren-Modus vor dem Laden zurücksetzen (Bug 4: Ansicht-Reste beim Wechsel)
+            if (_scherenModus) BeendeScherenModus();
+            if (_bearbeitungsModus) BeendeBearbeitungsModus(false);
+
             _pdfPfad = pfad;
             PdfCanvas.Children.Clear();
             _seitenBilder.Clear();
@@ -3542,15 +3546,18 @@ namespace StatikManager.Modules.Werkzeuge
                     }
 
                     int finalSi = si, finalT = t;
+                    double capturedFracOben = fracOben, capturedFracUnten = fracUnten;
                     overlay.MouseLeftButtonDown += (_, ev) =>
                     {
                         if (_scherenModus) return;
+                        System.Diagnostics.Debug.WriteLine($"[BUG1-KLICK] Klick auf Overlay si={finalSi} t={finalT} fracOben={capturedFracOben:F3} fracUnten={capturedFracUnten:F3}");
                         bool ctrl = (Keyboard.Modifiers & ModifierKeys.Control) != 0;
                         if (!ctrl) _ausgewählteParts.Clear();
                         if (_ausgewählteParts.Contains((finalSi, finalT)))
                             _ausgewählteParts.Remove((finalSi, finalT));
                         else
                             _ausgewählteParts.Add((finalSi, finalT));
+                        System.Diagnostics.Debug.WriteLine($"[BUG1-KLICK] _ausgewählteParts nach Klick: {string.Join(",", _ausgewählteParts.Select(p => $"si={p.Seite},t={p.Teil}"))}");
                         _markierteSeitenIdx = finalSi; // Letzte angeklickte Seite merken
                         AktualisiereTeilOverlays();
                         BtnTeilLöschen.IsEnabled = _ausgewählteParts.Count > 0;
@@ -3637,9 +3644,24 @@ namespace StatikManager.Modules.Werkzeuge
                                 if (_schnittDragAktiv && _gezogenesSchnittIdx == capturedCutIdx)
                                 {
                                     ((UIElement)s2).ReleaseMouseCapture();
+                                    bool hatBewegt = Math.Abs(_scherenschnitte[capturedCutIdx].YFraction - _schnittDragOrigFrac) > 0.002;
                                     _schnittDragAktiv    = false;
                                     _gezogenesSchnittIdx = -1;
-                                    TxtInfo.Text = "Schnittlinie verschoben – Strg+Z zum Rückgängigmachen";
+                                    if (hatBewegt)
+                                    {
+                                        AktualisiereSchnitteLinien();
+                                        TxtInfo.Text = "Schnittlinie verschoben – Strg+Z zum Rückgängigmachen";
+                                    }
+                                    else
+                                    {
+                                        // Kein echter Drag — als Klick behandeln: Segment selektieren
+                                        if (_undoStack.Count > 0) _undoStack.Pop(); // Drag-Start-Undo rückgängig
+                                        _ausgewählteParts.Clear();
+                                        _ausgewählteParts.Add((capturedDragSi, finalT));
+                                        AktualisiereTeilOverlays();
+                                        BtnTeilLöschen.IsEnabled = true;
+                                        TxtInfo.Text = "1 Teil(e) markiert – Entf oder Rechtsklick zum Löschen";
+                                    }
                                     ev2.Handled = true;
                                 }
                             };
@@ -3695,6 +3717,22 @@ namespace StatikManager.Modules.Werkzeuge
                     }
 
                     menu.Items.Add(new Separator());
+
+                    // Leerzeile einfügen
+                    var itemLeerzeile = new MenuItem { Header = "\u2195  Leerzeile einfügen" };
+                    int capLSi = finalSi, capLT = finalT;
+                    itemLeerzeile.Click += (_, __) =>
+                    {
+                        bool oberhalb = ZeigeBinaryDialog(
+                            "Leerzeile einfügen",
+                            "Wo soll die Leerzeile eingefügt werden?",
+                            "Oberhalb",
+                            "Unterhalb");
+                        FügeLeerzeileEin(capLSi, capLT, oberhalb);
+                    };
+                    menu.Items.Add(itemLeerzeile);
+
+                    menu.Items.Add(new Separator());
                     menu.Items.Add(itemAbwählen);
 
                     // Verbesserung 2: "Teile verschmelzen" wenn ≥2 benachbarte Teile ausgewählt
@@ -3736,10 +3774,20 @@ namespace StatikManager.Modules.Werkzeuge
         {
             if (_ausgewählteParts.Count == 0) return;
 
+            System.Diagnostics.Debug.WriteLine($"[BUG1-LOESCHEN] _ausgewählteParts: {string.Join(",", _ausgewählteParts.Select(p => $"si={p.Seite},t={p.Teil}"))}");
+
             // Nur fragen wenn es echte Schnitte gibt (sonst macht zusammenschieben keinen Sinn)
             bool hatSchnitte = _ausgewählteParts.Any(p => GetTeilGrenzen(p.Seite).Count > 1);
+
+            // Bug 2: Wenn nur das letzte (unterste) Segment gelöscht wird, ergibt "Lücke schliessen" keinen Sinn
+            bool nurLetztesSegment = hatSchnitte && _ausgewählteParts.All(p =>
+            {
+                var grenzen = GetTeilGrenzen(p.Seite);
+                return p.Teil == grenzen.Count - 1;
+            });
+
             bool zusammenschieben = false;
-            if (hatSchnitte)
+            if (hatSchnitte && !nurLetztesSegment)
             {
                 zusammenschieben = ZeigeBinaryDialog(
                     "Lücke schließen?",
@@ -3784,6 +3832,9 @@ namespace StatikManager.Modules.Werkzeuge
                     ? $"{n} Teil(e) markiert als entfernt – Strg+Z zum Rückgängigmachen"
                     : "Alle Markierungen aufgehoben";
             }
+
+            // Bug 3: Nach jeder Lösch-/Schneid-Aktion automatisch speichern
+            AutoSpeichern();
         }
 
         private ScherenZustand SpeichereZustand()
@@ -3878,6 +3929,7 @@ namespace StatikManager.Modules.Werkzeuge
 
         private void SchiebeTeileZusammen(HashSet<(int Seite, int Teil)> gelöschteParts, bool verschmelzen)
         {
+            System.Diagnostics.Debug.WriteLine($"[BUG1-SCHIEBEN] gelöschteParts: {string.Join(",", gelöschteParts.Select(p => $"si={p.Seite},t={p.Teil}"))}");
             var betroffeneSeiten = gelöschteParts.Select(p => p.Seite).Distinct().ToList();
 
             foreach (int si in betroffeneSeiten)
@@ -3888,6 +3940,7 @@ namespace StatikManager.Modules.Werkzeuge
                 var sichtbarTeilIndizes = Enumerable.Range(0, alleGrenzen.Count)
                     .Where(t => !gelöschteParts.Contains((si, t)))
                     .ToList();
+                System.Diagnostics.Debug.WriteLine($"[BUG1-SCHIEBEN] si={si} alleGrenzen={alleGrenzen.Count} sichtbarTeilIndizes=[{string.Join(",", sichtbarTeilIndizes)}]");
 
                 if (sichtbarTeilIndizes.Count == 0)
                 {
@@ -3941,7 +3994,11 @@ namespace StatikManager.Modules.Werkzeuge
             {
                 if (sichtbareTeilIndizes.Count == 0) return null;
 
-                var sourceBmp   = _seitenBilder[si];
+                // Wichtig: Wenn bereits ein Komposit-Bild existiert, dessen Fraktionen
+                // (in _scherenschnitte) im Komposit-Raum liegen – daher das Komposit als Quelle verwenden.
+                var sourceBmp   = _kompositBilder.TryGetValue(si, out var vorhandenesKomposit) && vorhandenesKomposit != null
+                    ? vorhandenesKomposit
+                    : _seitenBilder[si];
                 var alleGrenzen = GetTeilGrenzen(si);
                 int pW = sourceBmp.PixelWidth;
 
@@ -3998,6 +4055,72 @@ namespace StatikManager.Modules.Werkzeuge
                 return rtb;
             }
             catch (Exception ex) { LogException(ex, "ErzeugeKompositBild"); return null; }
+        }
+
+        /// <summary>Fügt einen weißen Leerstreifen (30 px) ober- oder unterhalb des Segments t ein.</summary>
+        private void FügeLeerzeileEin(int si, int t, bool oberhalb)
+        {
+            if (si >= _seitenBilder.Count) return;
+
+            var sourceBmp = _kompositBilder.TryGetValue(si, out var kb) && kb != null
+                ? kb : _seitenBilder[si];
+
+            var grenzen = GetTeilGrenzen(si);
+            if (t >= grenzen.Count) return;
+
+            var (fracOben, fracUnten) = grenzen[t];
+            int sourceH = sourceBmp.PixelHeight;
+            int sourceW = sourceBmp.PixelWidth;
+            const int stripH = 30;
+
+            int insertY = oberhalb
+                ? (int)Math.Round(fracOben  * sourceH)
+                : (int)Math.Round(fracUnten * sourceH);
+            insertY = Math.Max(0, Math.Min(insertY, sourceH));
+
+            // Undo-Snapshot VOR der Änderung
+            _undoStack.Push(SpeichereZustand());
+
+            // Neues Bitmap aufbauen: Bereich über insertY + weißer Streifen + Bereich ab insertY
+            int newH = sourceH + stripH;
+            var visual = new DrawingVisual();
+            using (var ctx = visual.RenderOpen())
+            {
+                if (insertY > 0)
+                {
+                    var top = new CroppedBitmap(sourceBmp, new Int32Rect(0, 0, sourceW, insertY));
+                    ctx.DrawImage(top, new Rect(0, 0, sourceW, insertY));
+                }
+                ctx.DrawRectangle(Brushes.White, null, new Rect(0, insertY, sourceW, stripH));
+                int below = sourceH - insertY;
+                if (below > 0)
+                {
+                    var bottom = new CroppedBitmap(sourceBmp, new Int32Rect(0, insertY, sourceW, below));
+                    ctx.DrawImage(bottom, new Rect(0, insertY + stripH, sourceW, below));
+                }
+            }
+            var rtb = new RenderTargetBitmap(sourceW, newH, 96, 96, PixelFormats.Pbgra32);
+            rtb.Render(visual);
+            rtb.Freeze();
+
+            // Schnittlinien dieser Seite unterhalb von insertY verschieben
+            double insertFrac = sourceH > 0 ? (double)insertY / sourceH : 0;
+            for (int i = 0; i < _scherenschnitte.Count; i++)
+            {
+                var (cSi, cFrac) = _scherenschnitte[i];
+                if (cSi == si && cFrac >= insertFrac)
+                {
+                    double oldY = cFrac * sourceH;
+                    _scherenschnitte[i] = (cSi, (oldY + stripH) / newH);
+                }
+            }
+
+            _kompositBilder[si] = rtb;
+
+            ZeicheCanvas();
+            AktualisiereSchnitteLinien();
+            TxtInfo.Text = $"Leerzeile {(oberhalb ? "ober" : "unter")}halb eingefügt – Strg+Z zum Rückgängigmachen";
+            AutoSpeichern();
         }
 
         private void BtnTeilLöschen_Click(object sender, RoutedEventArgs e)
@@ -4378,6 +4501,34 @@ namespace StatikManager.Modules.Werkzeuge
 
         // ── Ctrl+S: PDF speichern ─────────────────────────────────────────────────
 
+        /// <summary>Speichert die bearbeitete PDF ohne Dialog direkt auf _pdfPfad (Auto-Save).</summary>
+        private void AutoSpeichern()
+        {
+            if (_pdfPfad == null || _seitenBilder.Count == 0)
+            {
+                System.Diagnostics.Debug.WriteLine($"[BUG3-AUTOSAVE] Übersprungen: _pdfPfad={_pdfPfad ?? "null"}, _seitenBilder={_seitenBilder.Count}");
+                return;
+            }
+            System.Diagnostics.Debug.WriteLine($"[BUG3-AUTOSAVE] Starte AutoSpeichern → {_pdfPfad}");
+            // Sicheres Überschreiben: erst in Temp-Datei, dann umbenennen (verhindert Datei-Sperr-Probleme)
+            string tempPfad = _pdfPfad + ".autosave.tmp";
+            SpeicherNachPfad(tempPfad, autoSave: true);
+            // Wenn erfolgreich: Temp-Datei über Original verschieben
+            if (IO.File.Exists(tempPfad))
+            {
+                try
+                {
+                    IO.File.Replace(tempPfad, _pdfPfad, null);
+                    System.Diagnostics.Debug.WriteLine($"[BUG3-AUTOSAVE] File.Replace erfolgreich");
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"[BUG3-AUTOSAVE] File.Replace FEHLER: {ex.Message}");
+                    LogException(ex, "AutoSpeichern.FileReplace");
+                }
+            }
+        }
+
         private void SpeicherePdfMitÄnderungen()
         {
             if (_pdfPfad == null || _seitenBilder.Count == 0) return;
@@ -4407,24 +4558,30 @@ namespace StatikManager.Modules.Werkzeuge
             };
             if (saveDlg.ShowDialog() != true) return;
             string zielPfad = saveDlg.FileName;
+            SpeicherNachPfad(zielPfad, autoSave: false);
+        }
 
+        private void SpeicherNachPfad(string zielPfad, bool autoSave)
+        {
             try
             {
-                TxtInfo.Text = "Speichere PDF …";
+                System.Diagnostics.Debug.WriteLine($"[BUG3-SPEICHERN] SpeicherNachPfad Start: zielPfad={zielPfad}, autoSave={autoSave}");
+                if (!autoSave) TxtInfo.Text = "Speichere PDF …";
 
                 var reihenfolge = _seitenReihenfolge ?? Enumerable.Range(0, _seitenBilder.Count).ToList();
                 var sichtbar    = reihenfolge.Where(i => !_gelöschteSeiten.Contains(i) && i < _seitenBilder.Count).ToList();
 
                 var pdfOut = new PdfSharp.Pdf.PdfDocument();
 
-                // Quell-PDF öffnen (für Original-Seiten)
+                // Quell-PDF öffnen (für Original-Seiten) — liest immer von _pdfPfad (Original)
                 PdfSharp.Pdf.PdfDocument pdfIn = null;
                 if (IO.File.Exists(_pdfPfad))
                 {
                     try { pdfIn = PdfReader.Open(_pdfPfad, PdfDocumentOpenMode.Import); }
-                    catch { /* kein Import möglich – alle als Bitmap */ }
+                    catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[BUG3-SPEICHERN] PdfReader.Open FEHLER: {ex.Message}"); }
                 }
 
+                System.Diagnostics.Debug.WriteLine($"[BUG3-SPEICHERN] pdfIn={pdfIn != null}, sichtbare Seiten={sichtbar.Count}");
                 (double pageWPts, double pageHPts) = HolePdfSeitenGrösse(_pdfPfad);
 
                 foreach (int si in sichtbar)
@@ -4546,16 +4703,22 @@ namespace StatikManager.Modules.Werkzeuge
                 }
 
                 pdfIn?.Dispose();
+                System.Diagnostics.Debug.WriteLine($"[BUG3-SPEICHERN] pdfOut.Save({zielPfad}) startet");
                 pdfOut.Save(zielPfad);
-
-                TxtInfo.Text = $"\u2714 PDF gespeichert: {IO.Path.GetFileName(zielPfad)}";
-                AppZustand.Instanz.SetzeStatus($"PDF gespeichert: {IO.Path.GetFileName(zielPfad)}");
+                string msg = autoSave
+                    ? $"\u2714 Auto-gespeichert: {IO.Path.GetFileName(zielPfad)}"
+                    : $"\u2714 PDF gespeichert: {IO.Path.GetFileName(zielPfad)}";
+                TxtInfo.Text = msg;
+                AppZustand.Instanz.SetzeStatus(msg);
+                System.Diagnostics.Debug.WriteLine($"[BUG3-SPEICHERN] SpeicherNachPfad erfolgreich: {zielPfad}");
             }
             catch (Exception ex)
             {
-                LogException(ex, "SpeicherePdfMitÄnderungen");
-                MessageBox.Show($"Fehler beim Speichern:\n{App.GetExceptionKette(ex)}",
-                    "Speicher-Fehler", MessageBoxButton.OK, MessageBoxImage.Error);
+                System.Diagnostics.Debug.WriteLine($"[BUG3-SPEICHERN] FEHLER: {ex.Message}");
+                LogException(ex, "SpeicherNachPfad");
+                if (!autoSave)
+                    MessageBox.Show($"Fehler beim Speichern:\n{App.GetExceptionKette(ex)}",
+                        "Speicher-Fehler", MessageBoxButton.OK, MessageBoxImage.Error);
                 TxtInfo.Text = "Fehler beim Speichern";
             }
         }
