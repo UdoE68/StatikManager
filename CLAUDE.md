@@ -1,64 +1,117 @@
 # StatikManager V1 — Projektregeln
 
+## Projektbeschreibung
+StatikManager ist eine modulare WPF-Desktopanwendung (.NET Framework 4.8, x64) zur Dokumentenverwaltung fuer Statik-Projekte. Sie zeigt Projektordner als Dateibaum an und ermoeglicht die Vorschau von PDF-, Word-, HTML-, Bild- und JSON-Dateien.
+
+**Verbindung zu PP_ZoomRahmen**: Das AxisVM-Plugin PP_ZoomRahmen erzeugt in Positionsordnern `position.html` und `position.json`. Der StatikManager zeigt diese Dateien in der Vorschau an. Der StatikManager ist read-only – er erstellt keine Positionen, das tut ausschliesslich PP_ZoomRahmen.
+
+---
+
+## Agenten-Struktur
+
+### .claude/agents/ (Claude Code Sub-Agenten)
+
+| Agent          | Rolle                                                              |
+|----------------|--------------------------------------------------------------------|
+| orchestrator   | Koordiniert Aufgaben, delegiert an Spezial-Agenten                |
+| bibliothekar   | Wissensverwalter: LEARNINGS, PATTERNS, FEHLVERSUCHE                |
+| entwickler     | WPF/C# Implementierung, Build, Git                                 |
+| rechercheur    | Recherche zu Skills, Libraries, Best Practices                     |
+| ui-designer    | XAML, Styles, Themes, Dialog-Design                                |
+
+Wissensdatenbank: `docs/` (ARCHITEKTUR.md, LEARNINGS.md, PATTERNS.md, FEHLVERSUCHE.md)
+
+### /agents/ (Legacy Agenten-Definitionen)
+Definitionsdateien fuer Orchestrator, Planner, Fiona, Nolen.
+
+---
+
 ## Allgemeine Arbeitsregeln
 
-### Reihenfolge: Erst analysieren, dann ändern
-Vor jeder Änderung wird der betroffene Code vollständig gelesen und verstanden.
+### Reihenfolge: Erst analysieren, dann aendern
+Vor jeder Aenderung wird der betroffene Code vollstaendig gelesen und verstanden.
 Kein blindes Umschreiben. Kein Raten. Immer zuerst den Ist-Zustand erfassen.
 
-### /original bleibt unberührt
-Der Ordner `/original` enthält den unveränderten Quellstand des Projekts.
-Keine Datei in `/original` wird jemals verändert, verschoben oder gelöscht.
-Er dient als Referenz und Rückfallposition.
+### /original bleibt unberuehrt
+Der Ordner `/original` enthaelt den unveraenderten Quellstand des Projekts.
+Keine Datei in `/original` wird jemals veraendert, verschoben oder geloescht.
+Er dient als Referenz und Rueckfallposition.
 
-### Änderungen nur außerhalb von /original
-Alle Anpassungen, Refactorings, neuen Dateien und Migrationen landen ausschließlich
-im Arbeitsbereich außerhalb von `/original` (z. B. `/src`, `/migration`, etc.).
+### Aenderungen nur ausserhalb von /original
+Alle Anpassungen, Refactorings, neuen Dateien und Migrationen landen ausschliesslich
+im Arbeitsbereich ausserhalb von `/original` (z. B. `/src`, `/migration`, etc.).
 
-### Backup-Prinzip vor größeren Änderungen
-Vor strukturell bedeutsamen Änderungen wird ein Snapshot oder Zwischenstand gesichert.
+### Backup-Prinzip vor groesseren Aenderungen
+Vor strukturell bedeutsamen Aenderungen wird ein Snapshot oder Zwischenstand gesichert.
 Idealerweise als Kopie im `/migration`-Ordner mit Zeitstempel-Suffix.
 
-### Klare Rollentrennung
-| Rolle        | Aufgabe                                      |
-|--------------|----------------------------------------------|
-| Orchestrator | Koordiniert Aufgaben, delegiert an Agenten  |
-| Planner      | Analysiert und zerlegt Aufgaben              |
-| Fiona        | Setzt Änderungen um                          |
-| Nolen        | Prüft Ergebnisse, erkennt Regressionen       |
+---
 
-Kein Agent überschreitet seine Rolle. Planer ändern keinen Code. Umsetzer planen nicht.
+## Build-Anleitung
+
+**Konfiguration:** Debug | x64
+**Voraussetzung:** Visual Studio 2022, .NET Framework 4.8, Microsoft Word installiert
+
+```powershell
+# Build:
+powershell -Command "& 'C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe' 'C:\KI\StatikManager_V1\src\StatikManager\StatikManager.csproj' /p:Configuration=Debug /p:Platform=x64 /t:Build /v:minimal 2>&1"
+
+# Starten:
+C:\KI\StatikManager_V1\src\StatikManager\Start_Debug.bat
+```
+
+**Wichtig vor dem Build:** StatikManager.exe beenden (pdfium.dll wird sonst gesperrt).
 
 ---
 
-## Agentenstruktur
+## Technologie-Stack
 
-Alle Agentendefinitionen liegen unter `/agents/`.
-Skills liegen unter `/skills/`.
-Prompts und Vorlagen liegen unter `/prompts/`.
-Migrationsschritte werden in `/migration/` dokumentiert.
+| Technologie              | Verwendung                                    |
+|--------------------------|-----------------------------------------------|
+| WPF / XAML               | UI-Framework                                  |
+| C# .NET Framework 4.8    | Sprache und Runtime                           |
+| Docnet.Core 2.6.0        | PDF-Rendering (pdfium)                        |
+| PdfSharp                 | PDF-Manipulation                              |
+| Microsoft.Office.Interop | Word COM-Automatisierung                      |
+| WebBrowser (IE-Engine)   | HTML/Bild-Vorschau (kein WebView2!)           |
+| Edge Headless            | HTML -> PDF Export (msedge.exe --headless)    |
+| XmlSerializer            | Einstellungen (AppData\StatikManager\)        |
 
 ---
 
-## Kommunikationsformat zwischen Agenten
+## Bekannte Probleme und Fallstricke
 
-Jeder Auftrag zwischen Agenten enthält:
-- **Ziel**: Was soll erreicht werden?
-- **Kontext**: Welche Dateien / Abhängigkeiten sind relevant?
-- **Einschränkungen**: Was darf nicht verändert werden?
-- **Erfolgskriterium**: Woran erkennt man, dass die Aufgabe erledigt ist?
+| Problem                          | Ursache                          | Loesung                               |
+|----------------------------------|----------------------------------|---------------------------------------|
+| Umlaute in NavigateToString      | IE liest UTF-16 falsch           | HtmlEncode() + charset=utf-16 Meta    |
+| FileSystemWatcher Thundering Herd| Changed+LastWrite bei Speichern  | Nur FileName\|DirectoryName           |
+| WPF TreeView Multi-Select        | Nicht nativ unterstuetzt         | HashSet + PreviewMouseDown manuell    |
+| DataGridCheckBoxColumn 2 Klicks  | WPF-Bug                          | DataGridTemplateColumn mit CheckBox   |
+| C# init-Accessor                 | .NET 4.8 unbekannt               | set statt init verwenden              |
+| pdfium paralleler Zugriff        | Native DLL nicht thread-safe     | AppZustand.RenderSem (Semaphore)      |
+| Word-COM im UI-Thread            | COM STA-Anforderung              | Thread.SetApartmentState(STA)         |
 
 ---
 
 ## Git-Regeln
 
-Nach jeder erfolgreichen Änderung IMMER automatisch:
+Nach jeder erfolgreichen Aenderung IMMER automatisch:
 
-1. git add .
-2. git commit -m "Update: kurze Beschreibung der Änderung"
-3. git push
+1. `git add [Dateien]`
+2. `git commit -m "Beschreibung"`
+3. `git push`
 
-WICHTIG:
-- Keine Änderung ohne Commit + Push abschließen
-- Vor Commit immer Build prüfen
+- Keine Aenderung ohne Commit + Push abschliessen
+- Vor Commit immer Build pruefen (0 Fehler)
 - Keine Nachfrage notwendig
+- Branch: `feature/word-export-next`
+
+---
+
+## Kommunikationsformat zwischen Agenten
+
+Jeder Auftrag zwischen Agenten enthaelt:
+- **Ziel**: Was soll erreicht werden?
+- **Kontext**: Welche Dateien / Abhaengigkeiten sind relevant?
+- **Einschraenkungen**: Was darf nicht veraendert werden?
+- **Erfolgskriterium**: Woran erkennt man, dass die Aufgabe erledigt ist?
