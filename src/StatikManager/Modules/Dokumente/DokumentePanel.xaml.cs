@@ -74,6 +74,10 @@ namespace StatikManager.Modules.Dokumente
         private string? _baumAuswahlAnker;
         private static readonly Brush _mehrfachHintergrund = new SolidColorBrush(Color.FromArgb(80, 7, 99, 191));
 
+        // Drag & Drop im Baum
+        private Point _dragStartPunkt;
+        private bool  _dragAktiv;
+
         public event Action<string?>? DateiAusgewählt;
 
         // ── Initialisierung ───────────────────────────────────────────────────
@@ -1559,6 +1563,8 @@ namespace StatikManager.Modules.Dokumente
         {
             if (e.ChangedButton != MouseButton.Left) return;
 
+            _dragStartPunkt = e.GetPosition(null);
+
             var element = e.OriginalSource as DependencyObject;
             while (element != null && !(element is TreeViewItem))
                 element = VisualTreeHelper.GetParent(element);
@@ -1719,6 +1725,125 @@ namespace StatikManager.Modules.Dokumente
                 if (item.IsExpanded)
                     foreach (var child in OrdneTreeItemsFlach(item))
                         yield return child;
+            }
+        }
+
+        // ── Drag & Drop im Baum ───────────────────────────────────────────────
+
+        private void DokumentenBaum_MouseMove(object sender, MouseEventArgs e)
+        {
+            if (e.LeftButton != MouseButtonState.Pressed || _dragAktiv) return;
+
+            var delta = e.GetPosition(null) - _dragStartPunkt;
+            if (Math.Abs(delta.X) < SystemParameters.MinimumHorizontalDragDistance &&
+                Math.Abs(delta.Y) < SystemParameters.MinimumVerticalDragDistance) return;
+
+            var element = e.OriginalSource as DependencyObject;
+            while (element != null && !(element is TreeViewItem))
+                element = VisualTreeHelper.GetParent(element);
+
+            var item = element as TreeViewItem;
+            if (item?.Tag is not string pfad) return;
+
+            // Nicht den Stammordner verschieben
+            if (string.Equals(pfad, _projektPfad, StringComparison.OrdinalIgnoreCase)) return;
+
+            _dragAktiv = true;
+            DragDrop.DoDragDrop(item, pfad, DragDropEffects.Move);
+            _dragAktiv = false;
+        }
+
+        private void DokumentenBaum_DragOver(object sender, DragEventArgs e)
+        {
+            if (!e.Data.GetDataPresent(DataFormats.StringFormat))
+            {
+                e.Effects = DragDropEffects.None;
+                e.Handled = true;
+                return;
+            }
+
+            var element = e.OriginalSource as DependencyObject;
+            while (element != null && !(element is TreeViewItem))
+                element = VisualTreeHelper.GetParent(element);
+
+            var targetItem = element as TreeViewItem;
+            string? zielPfad = targetItem?.Tag as string;
+
+            if (zielPfad == null || !Directory.Exists(zielPfad))
+            {
+                e.Effects = DragDropEffects.None;
+                e.Handled = true;
+                return;
+            }
+
+            string sourcePfad    = (string)e.Data.GetData(DataFormats.StringFormat);
+            string? sourceEltern = Path.GetDirectoryName(sourcePfad);
+
+            // Kein Drop auf sich selbst oder den eigenen Elternordner
+            bool gleichePfad   = string.Equals(zielPfad, sourcePfad,   StringComparison.OrdinalIgnoreCase);
+            bool gleicheEltern = string.Equals(zielPfad, sourceEltern, StringComparison.OrdinalIgnoreCase);
+            // Kein Drop in eigenen Unterordner (Ordner in sich selbst verschieben)
+            bool zielIstUnter  = zielPfad.StartsWith(sourcePfad + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+
+            e.Effects = (gleichePfad || gleicheEltern || zielIstUnter)
+                ? DragDropEffects.None
+                : DragDropEffects.Move;
+            e.Handled = true;
+        }
+
+        private void DokumentenBaum_Drop(object sender, DragEventArgs e)
+        {
+            if (!e.Data.GetDataPresent(DataFormats.StringFormat)) return;
+
+            string sourcePfad = (string)e.Data.GetData(DataFormats.StringFormat);
+            if (string.IsNullOrEmpty(sourcePfad)) return;
+
+            var element = e.OriginalSource as DependencyObject;
+            while (element != null && !(element is TreeViewItem))
+                element = VisualTreeHelper.GetParent(element);
+
+            var targetItem = element as TreeViewItem;
+            string? zielOrdner = targetItem?.Tag as string;
+
+            if (zielOrdner == null || !Directory.Exists(zielOrdner)) return;
+
+            string name     = Path.GetFileName(sourcePfad);
+            string zielPfad = Path.Combine(zielOrdner, name);
+
+            if (string.Equals(sourcePfad, zielPfad, StringComparison.OrdinalIgnoreCase)) return;
+
+            if (File.Exists(zielPfad) || Directory.Exists(zielPfad))
+            {
+                MessageBox.Show($"Ziel existiert bereits:\n{zielPfad}",
+                    "Verschieben nicht möglich", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            try
+            {
+                bool istDatei  = File.Exists(sourcePfad);
+                bool istOrdner = Directory.Exists(sourcePfad);
+
+                if      (istDatei)  File.Move(sourcePfad, zielPfad);
+                else if (istOrdner) Directory.Move(sourcePfad, zielPfad);
+
+                // Aktive Vorschau-Pfad anpassen wenn betroffen
+                if (_aktiverDateipfad != null)
+                {
+                    if (istDatei && string.Equals(_aktiverDateipfad, sourcePfad, StringComparison.OrdinalIgnoreCase))
+                        _aktiverDateipfad = zielPfad;
+                    else if (istOrdner && _aktiverDateipfad.StartsWith(
+                                sourcePfad + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+                        _aktiverDateipfad = zielPfad + _aktiverDateipfad.Substring(sourcePfad.Length);
+                }
+
+                AktualisiereDokumentListe();
+                AppZustand.Instanz.SetzeStatus($"Verschoben: {name} → {Path.GetFileName(zielOrdner)}");
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Fehler beim Verschieben:\n" + ex.Message,
+                    "Fehler", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 

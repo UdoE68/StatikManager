@@ -91,7 +91,11 @@
                           ContextMenuOpening="DokumentenBaum_ContextMenuOpening"
                           TreeViewItem.RequestBringIntoView="DokumentenBaum_RequestBringIntoView"
                           PreviewMouseLeftButtonDown="DokumentenBaum_PreviewMouseDown"
-                          PreviewKeyDown="DokumentenBaum_PreviewKeyDown">
+                          PreviewKeyDown="DokumentenBaum_PreviewKeyDown"
+                          MouseMove="DokumentenBaum_MouseMove"
+                          AllowDrop="True"
+                          DragOver="DokumentenBaum_DragOver"
+                          Drop="DokumentenBaum_Drop">
                     <TreeView.ContextMenu>
                         <ContextMenu/>
                     </TreeView.ContextMenu>
