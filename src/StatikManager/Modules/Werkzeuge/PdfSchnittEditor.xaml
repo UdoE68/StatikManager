@@ -170,6 +170,44 @@
 
                 <Separator Width="1" Height="18" Background="#BBB" Margin="0,0,8,0"/>
 
+                <!-- ── Scheren-Werkzeug ──────────────────────────────────── -->
+                <ToggleButton x:Name="BtnSchereToggle"
+                              Height="26" Padding="8,0"
+                              Margin="0,0,2,0"
+                              IsEnabled="False"
+                              ToolTip="Scheren-Modus: Klick auf PDF-Seite setzt horizontalen Schnitt. Strg+Z rückgängig, Esc beenden."
+                              Checked="BtnSchereToggle_Checked"
+                              Unchecked="BtnSchereToggle_Unchecked">
+                    <ToggleButton.Style>
+                        <Style TargetType="ToggleButton">
+                            <Setter Property="Content" Value="&#x2702; Zerschneiden"/>
+                            <Style.Triggers>
+                                <Trigger Property="IsChecked" Value="True">
+                                    <Setter Property="Background" Value="#CC3333"/>
+                                    <Setter Property="Foreground" Value="White"/>
+                                    <Setter Property="Content" Value="&#x2702; Aktiv – Esc beenden"/>
+                                </Trigger>
+                            </Style.Triggers>
+                        </Style>
+                    </ToggleButton.Style>
+                </ToggleButton>
+                <Button x:Name="BtnSchnittZurücksetzen"
+                        Content="&#x21A9; Schnitte zurücksetzen"
+                        Height="26" Padding="6,0"
+                        Margin="0,0,2,0"
+                        IsEnabled="False"
+                        ToolTip="Alle gesetzten Schnitte entfernen"
+                        Click="BtnSchnittZurücksetzen_Click"/>
+                <Button x:Name="BtnTeileExportieren"
+                        Content="&#x1F4E4; Teile als PDF"
+                        Height="26" Padding="6,0"
+                        Margin="0,0,8,0"
+                        IsEnabled="False"
+                        ToolTip="Jeden Schnitt-Teil als separate PDF-Datei exportieren"
+                        Click="BtnTeileExportieren_Click"/>
+
+                <Separator Width="1" Height="18" Background="#BBB" Margin="0,0,8,0"/>
+
                 <TextBlock x:Name="TxtInfo"
                            VerticalAlignment="Center"
                            Foreground="#555"
@@ -256,7 +294,9 @@
                       HorizontalScrollBarVisibility="Auto"
                       VerticalScrollBarVisibility="Auto"
                       Background="#4A4A4A"
-                      PreviewMouseWheel="ScrollView_PreviewMouseWheel">
+                      Focusable="True"
+                      PreviewMouseWheel="ScrollView_PreviewMouseWheel"
+                      PreviewKeyDown="ScrollView_PreviewKeyDown">
 
             <!-- LayoutTransform skaliert den gesamten Canvas inkl. Scrollbar-Berechnung -->
             <Canvas x:Name="PdfCanvas"

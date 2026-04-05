@@ -115,6 +115,13 @@ namespace StatikManager.Modules.Werkzeuge
         // Export-Sperre: verhindert Doppelstart
         private volatile bool _exportLäuft;
 
+        // ── Scheren-Werkzeug ──────────────────────────────────────────────────
+        private bool   _scherenModus = false;
+        // (SeitenIdx, YFraction 0..1) – multiple Schnitte pro Seite möglich
+        private readonly List<(int Seite, double YFraction)> _scherenschnitte
+            = new List<(int, double)>();
+        private Line?  _scherenVorschauLinie;
+
         // Abbruch laufender Lade-Aufträge
         private CancellationTokenSource? _ladeCts;
         // Abbruch laufender Auto-Rand-Berechnung
@@ -221,9 +228,14 @@ namespace StatikManager.Modules.Werkzeuge
             _seitenYStart = Array.Empty<double>();
             _seitenHöhe   = Array.Empty<double>();
             _cropLinks = _cropRechts = _cropOben = _cropUnten = Array.Empty<double>();
+            _scherenschnitte.Clear();
+            _scherenVorschauLinie = null;
             TxtInfo.Text              = "Lade PDF …";
             BtnExport.IsEnabled       = false;
             BtnAuswahlmodus.IsEnabled = false;
+            BtnSchereToggle.IsEnabled         = false;
+            BtnSchnittZurücksetzen.IsEnabled  = false;
+            BtnTeileExportieren.IsEnabled     = false;
 
             LogException(new Exception($"[DEBUG] Starte PDF-Laden: {IO.Path.GetFileName(pfad)}"), "LadePdf");
 
@@ -330,8 +342,9 @@ namespace StatikManager.Modules.Werkzeuge
                             var (wPts, _) = HolePdfSeitenGrösse(_pdfPfad);
                             _pxPerMm = wPts > 0 ? bilder![0].PixelWidth / (wPts / 72.0 * 25.4) : 4.0;
                         }
-                        BtnExport.IsEnabled      = true;
-                        BtnAuswahlmodus.IsEnabled = true;
+                        BtnExport.IsEnabled               = true;
+                        BtnAuswahlmodus.IsEnabled         = true;
+                        BtnSchereToggle.IsEnabled         = true;
                         TxtInfo.Text = $"{bilder!.Count} Seite(n) geladen";
 
                         // Zoom und Scroll aus Sitzung anwenden
@@ -706,6 +719,8 @@ namespace StatikManager.Modules.Werkzeuge
                     SafeExecute(() => ZeicheSeite(i), $"ZeicheSeite[{i}]");
 
                 ZeicheCropLinien();
+                _scherenVorschauLinie = null;  // wurde durch Children.Clear() entfernt
+                AktualisiereSchnitteLinien();
                 AktualisiereAuswahlAnzeige();
                 AktualisiereGruppenComboBox();
             }
@@ -2126,10 +2141,20 @@ namespace StatikManager.Modules.Werkzeuge
             {
                 string tag = l.Tag?.ToString() ?? "";
                 if (tag.EndsWith("_HIT"))
+                {
                     l.StrokeThickness = Math.Max(14.0, 14.0 / zoom);
+                    l.StrokeDashArray = null;
+                }
                 else if (tag.StartsWith("CROP_"))
+                {
                     l.StrokeThickness = 2.0 / zoom;
-                l.StrokeDashArray = null;
+                    l.StrokeDashArray = null;
+                }
+                else if (tag.StartsWith("SCHERE_"))
+                {
+                    l.StrokeThickness = 2.0 / zoom;
+                    // StrokeDashArray bleibt erhalten
+                }
             }
         }
 
@@ -2928,5 +2953,293 @@ namespace StatikManager.Modules.Werkzeuge
 
                 ZeicheCanvas();
             }, "BtnLayoutWechsel_Click");
+
+        // ── Scheren-Werkzeug ──────────────────────────────────────────────────
+
+        private void BtnSchereToggle_Checked(object sender, RoutedEventArgs e)
+        {
+            SafeExecute(() =>
+            {
+                if (_seitenBilder.Count == 0) { BtnSchereToggle.IsChecked = false; return; }
+                _scherenModus = true;
+                ScrollView.Cursor                = Cursors.Cross;
+                PdfCanvas.MouseMove              += Schere_MouseMove;
+                PdfCanvas.MouseLeftButtonDown    += Schere_MouseDown;
+                ScrollView.Focus();
+                TxtInfo.Text = "✂ Scheren aktiv – Klick = Schnitt | Strg+Z = rückgängig | Esc = beenden";
+            }, "BtnSchereToggle_Checked");
+        }
+
+        private void BtnSchereToggle_Unchecked(object sender, RoutedEventArgs e)
+            => SafeExecute(BeendeScherenModus, "BtnSchereToggle_Unchecked");
+
+        private void BeendeScherenModus()
+        {
+            _scherenModus = false;
+            ScrollView.Cursor                 = null;
+            PdfCanvas.MouseMove              -= Schere_MouseMove;
+            PdfCanvas.MouseLeftButtonDown    -= Schere_MouseDown;
+
+            if (_scherenVorschauLinie != null)
+            {
+                PdfCanvas.Children.Remove(_scherenVorschauLinie);
+                _scherenVorschauLinie = null;
+            }
+
+            // Toggle-Button zurücksetzen ohne erneutes Unchecked-Ereignis
+            if (BtnSchereToggle.IsChecked == true) BtnSchereToggle.IsChecked = false;
+
+            int anzahl = _scherenschnitte.Count;
+            TxtInfo.Text = anzahl > 0 ? $"{anzahl} Schnitt(e) gesetzt" : "";
+        }
+
+        private void Schere_MouseMove(object sender, MouseEventArgs e)
+        {
+            try
+            {
+                if (!_scherenModus) return;
+                Point pos = e.GetPosition(PdfCanvas);
+                int si = HoleSeitenIndexBeiPos(pos.Y, pos.X);
+
+                if (si < 0)
+                {
+                    if (_scherenVorschauLinie != null)
+                        _scherenVorschauLinie.Visibility = Visibility.Collapsed;
+                    return;
+                }
+
+                double pageW = _seitenBilder[si].PixelWidth;
+                double setX  = _layoutHorizontal && si < _seitenXStart.Length ? _seitenXStart[si] : SeiteX;
+
+                if (_scherenVorschauLinie == null)
+                {
+                    _scherenVorschauLinie = new Line
+                    {
+                        Stroke           = Brushes.Red,
+                        StrokeThickness  = 2.0 / _zoomFaktor,
+                        StrokeDashArray  = new DoubleCollection(new[] { 8.0, 4.0 }),
+                        IsHitTestVisible = false,
+                        Tag              = "SCHERE_PREVIEW"
+                    };
+                    Panel.SetZIndex(_scherenVorschauLinie, 200);
+                    PdfCanvas.Children.Add(_scherenVorschauLinie);
+                }
+
+                _scherenVorschauLinie.X1             = setX;
+                _scherenVorschauLinie.X2             = setX + pageW;
+                _scherenVorschauLinie.Y1             = pos.Y;
+                _scherenVorschauLinie.Y2             = pos.Y;
+                _scherenVorschauLinie.StrokeThickness = 2.0 / _zoomFaktor;
+                _scherenVorschauLinie.Visibility     = Visibility.Visible;
+            }
+            catch (Exception ex) { LogException(ex, "Schere_MouseMove"); }
+        }
+
+        private void Schere_MouseDown(object sender, MouseButtonEventArgs e)
+        {
+            try
+            {
+                if (!_scherenModus || e.ChangedButton != MouseButton.Left) return;
+                Point pos = e.GetPosition(PdfCanvas);
+                int si = HoleSeitenIndexBeiPos(pos.Y, pos.X);
+                if (si < 0) return;
+
+                double pageH = _seitenHöhe[si];
+                if (pageH <= 0) return;
+
+                double yBase = _layoutHorizontal ? SeiteX : (si < _seitenYStart.Length ? _seitenYStart[si] : 0);
+                double yFrac = Math.Max(0.01, Math.Min(0.99, (pos.Y - yBase) / pageH));
+
+                _scherenschnitte.Add((si, yFrac));
+                AktualisiereSchnitteLinien();
+                TxtInfo.Text = $"✂ {_scherenschnitte.Count} Schnitt(e) – Strg+Z rückgängig";
+                e.Handled = true;
+            }
+            catch (Exception ex) { LogException(ex, "Schere_MouseDown"); }
+        }
+
+        /// <summary>Gibt den Seiten-Index zurück, der die Canvas-Position enthält; -1 wenn keine.</summary>
+        private int HoleSeitenIndexBeiPos(double canvasY, double canvasX)
+        {
+            if (_seitenBilder.Count == 0) return -1;
+            if (_layoutHorizontal)
+            {
+                for (int i = 0; i < _seitenBilder.Count; i++)
+                {
+                    if (i >= _seitenXStart.Length) break;
+                    double x0 = _seitenXStart[i];
+                    double x1 = x0 + _seitenBilder[i].PixelWidth;
+                    if (canvasX >= x0 && canvasX <= x1 && canvasY >= SeiteX && canvasY <= SeiteX + _seitenHöhe[i])
+                        return i;
+                }
+            }
+            else
+            {
+                for (int i = 0; i < _seitenBilder.Count; i++)
+                {
+                    if (i >= _seitenYStart.Length || i >= _seitenHöhe.Length) break;
+                    double y0 = _seitenYStart[i];
+                    double y1 = y0 + _seitenHöhe[i];
+                    double x0 = SeiteX;
+                    double x1 = x0 + _seitenBilder[i].PixelWidth;
+                    if (canvasY >= y0 && canvasY <= y1 && canvasX >= x0 && canvasX <= x1)
+                        return i;
+                }
+            }
+            return -1;
+        }
+
+        private void AktualisiereSchnitteLinien()
+        {
+            // Alte feste Schnittlinien entfernen (nicht Vorschau)
+            var alte = PdfCanvas.Children.OfType<Line>()
+                .Where(l => { var t = l.Tag?.ToString() ?? ""; return t.StartsWith("SCHERE_") && t != "SCHERE_PREVIEW"; })
+                .ToList();
+            foreach (var l in alte) PdfCanvas.Children.Remove(l);
+
+            for (int k = 0; k < _scherenschnitte.Count; k++)
+            {
+                var (si, yFrac) = _scherenschnitte[k];
+                if (si >= _seitenBilder.Count || si >= _seitenHöhe.Length) continue;
+
+                double pageW = _seitenBilder[si].PixelWidth;
+                double setX  = _layoutHorizontal && si < _seitenXStart.Length ? _seitenXStart[si] : SeiteX;
+                double yBase = _layoutHorizontal ? SeiteX : (si < _seitenYStart.Length ? _seitenYStart[si] : 0);
+                double canY  = yBase + yFrac * _seitenHöhe[si];
+
+                var linie = new Line
+                {
+                    X1               = setX,
+                    Y1               = canY,
+                    X2               = setX + pageW,
+                    Y2               = canY,
+                    Stroke           = Brushes.Red,
+                    StrokeThickness  = 2.0 / _zoomFaktor,
+                    StrokeDashArray  = new DoubleCollection(new[] { 8.0, 4.0 }),
+                    IsHitTestVisible = false,
+                    Tag              = $"SCHERE_{k}"
+                };
+                Panel.SetZIndex(linie, 150);
+                PdfCanvas.Children.Add(linie);
+            }
+
+            bool hatSchnitte = _scherenschnitte.Count > 0;
+            BtnSchnittZurücksetzen.IsEnabled = hatSchnitte;
+            BtnTeileExportieren.IsEnabled    = hatSchnitte && _pdfPfad != null;
+        }
+
+        private void BtnSchnittZurücksetzen_Click(object sender, RoutedEventArgs e)
+        {
+            SafeExecute(() =>
+            {
+                _scherenschnitte.Clear();
+                AktualisiereSchnitteLinien();
+                TxtInfo.Text = "Alle Schnitte zurückgesetzt.";
+            }, "BtnSchnittZurücksetzen_Click");
+        }
+
+        private void BtnTeileExportieren_Click(object sender, RoutedEventArgs e)
+            => SafeExecute(ExportierteTeile, "BtnTeileExportieren_Click");
+
+        private void ExportierteTeile()
+        {
+            if (_pdfPfad == null || _seitenBilder.Count == 0 || _scherenschnitte.Count == 0) return;
+
+            var dlg = new System.Windows.Forms.FolderBrowserDialog
+            {
+                Description       = "Ordner für PDF-Teile wählen",
+                SelectedPath      = IO.Path.GetDirectoryName(_pdfPfad) ?? "",
+                ShowNewFolderButton = true
+            };
+            if (dlg.ShowDialog() != System.Windows.Forms.DialogResult.OK) return;
+
+            string ordner = dlg.SelectedPath;
+            string basis  = IO.Path.GetFileNameWithoutExtension(_pdfPfad);
+
+            try
+            {
+                var seitenMitSchnitten = _scherenschnitte
+                    .Select(s => s.Seite).Distinct().OrderBy(x => x).ToList();
+
+                int exportiert = 0;
+
+                foreach (int si in seitenMitSchnitten)
+                {
+                    if (si >= _seitenBilder.Count) continue;
+
+                    var cuts = _scherenschnitte
+                        .Where(s => s.Seite == si)
+                        .Select(s => s.YFraction)
+                        .OrderBy(f => f)
+                        .ToList();
+
+                    var grenzen = new List<double> { 0.0 };
+                    grenzen.AddRange(cuts);
+                    grenzen.Add(1.0);
+
+                    // PDF-Seitengröße (Punkte, bottom-up)
+                    (double pageWPts, double pageHPts) = HolePdfSeitenGrösse(_pdfPfad!);
+
+                    for (int t = 0; t < grenzen.Count - 1; t++)
+                    {
+                        double fracOben  = grenzen[t];
+                        double fracUnten = grenzen[t + 1];
+
+                        // PDF-Koordinaten: Y-Achse bottom-up
+                        double pdfY1 = (1.0 - fracUnten) * pageHPts;  // untere Kante des Teils
+                        double pdfY2 = (1.0 - fracOben)  * pageHPts;  // obere Kante des Teils
+
+                        string suffix    = seitenMitSchnitten.Count > 1
+                            ? $"_s{si + 1}_t{t + 1}" : $"_teil{t + 1}";
+                        string zielDatei = IO.Path.Combine(ordner, basis + suffix + ".pdf");
+
+                        using var pdfIn = PdfReader.Open(_pdfPfad!, PdfDocumentOpenMode.Import);
+                        var pdfOut      = new PdfSharp.Pdf.PdfDocument();
+                        var seite       = pdfOut.AddPage(pdfIn.Pages[si]);
+                        seite.CropBox   = new PdfSharp.Pdf.PdfRectangle(
+                            new PdfSharp.Drawing.XPoint(0,        pdfY1),
+                            new PdfSharp.Drawing.XPoint(pageWPts, pdfY2));
+                        pdfOut.Save(zielDatei);
+                        exportiert++;
+                    }
+                }
+
+                TxtInfo.Text = $"✂ {exportiert} PDF-Teil(e) exportiert";
+                AppZustand.Instanz.SetzeStatus($"Scheren-Export: {exportiert} Dateien → {IO.Path.GetFileName(ordner)}");
+            }
+            catch (Exception ex)
+            {
+                LogException(ex, "ExportierteTeile");
+                MessageBox.Show($"Export fehlgeschlagen:\n{App.GetExceptionKette(ex)}",
+                    "Export-Fehler", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private void ScrollView_PreviewKeyDown(object sender, KeyEventArgs e)
+        {
+            try
+            {
+                if (!_scherenModus) return;
+
+                if (e.Key == Key.Z && (Keyboard.Modifiers & ModifierKeys.Control) != 0)
+                {
+                    if (_scherenschnitte.Count > 0)
+                    {
+                        _scherenschnitte.RemoveAt(_scherenschnitte.Count - 1);
+                        AktualisiereSchnitteLinien();
+                        TxtInfo.Text = _scherenschnitte.Count > 0
+                            ? $"✂ {_scherenschnitte.Count} Schnitt(e) – Strg+Z rückgängig"
+                            : "✂ Alle Schnitte rückgängig gemacht";
+                        e.Handled = true;
+                    }
+                }
+                else if (e.Key == Key.Escape)
+                {
+                    BeendeScherenModus();
+                    e.Handled = true;
+                }
+            }
+            catch (Exception ex) { LogException(ex, "ScrollView_PreviewKeyDown"); }
+        }
     }
 }
