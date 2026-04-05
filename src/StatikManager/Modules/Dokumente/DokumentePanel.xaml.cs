@@ -728,6 +728,17 @@ namespace StatikManager.Modules.Dokumente
         {
             if (DokumentenBaum.SelectedItem is not TreeViewItem item) return;
             if (item.Tag is not string pfad) return;
+
+            // Ordner angeklickt → prüfen ob position.html darin liegt
+            if (Directory.Exists(pfad))
+            {
+                var posHtml = Path.Combine(pfad, "position.html");
+                if (File.Exists(posHtml))
+                    StarteSelektionDebounce(posHtml);
+                // kein else – Ordner ohne position.html zeigt keine Vorschau
+                return;
+            }
+
             StarteSelektionDebounce(pfad);
         }
 
