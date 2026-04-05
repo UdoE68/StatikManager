@@ -4266,44 +4266,77 @@ namespace StatikManager.Modules.Werkzeuge
             if (t >= grenzen.Count) return;
 
             var (fracOben, fracUnten) = grenzen[t];
-            int sourceH = sourceBmp.PixelHeight;   // aktueller Arbeits-Bitmap-Height
-            int origH   = _seitenBilder[si].PixelHeight;  // unveränderliche Originalhöhe
+            int origH   = _seitenBilder[si].PixelHeight;  // unveränderliche Originalhöhe (Seitenformat)
             int sourceW = sourceBmp.PixelWidth;
             const int stripH = 30;
 
-            // Einfügeposition in Pixeln
+            // Tatsächliche Inhaltshöhe bestimmen:
+            // Das sourceBmp kann auf origH gepaddet sein (weißer Leerraum unten).
+            // Die echte Inhaltshöhe ist die Summe aller sichtbaren Teile in Pixeln.
+            // So wissen wir wieviel Platz noch auf der Seite frei ist.
+            int inhaltH;
+            {
+                var schnitte = GetSchnitteVonSeite(si);
+                if (schnitte.Count == 0)
+                {
+                    // Keine Schnitte: Inhalt geht von 0 bis letzter sichtbarer Fraktion
+                    // Bei unverändertem Original: Inhalt = origH
+                    // Bei zusammengeschobenem Komposit: Inhalt = totalH der sichtbaren Teile
+                    // Wir ermitteln dies aus dem letzten sichtbaren Schnitt-Abschluss.
+                    // Einfachste Annäherung: wenn Komposit kleiner als origH war (kein Padding nötig),
+                    // dann ist der Inhalt totalH. Da ErzeugeKompositBild auf origH padded,
+                    // können wir den echten Inhalt über die früheren Teil-Grenzen ermitteln.
+                    // Für den Fall ohne Schnitte: nehmen wir origH als Inhalt (konservativ).
+                    inhaltH = origH;
+                }
+                else
+                {
+                    // Mit Schnitten: sichtbare Teile aufsummieren
+                    var alleGrenzen = GetTeilGrenzen(si);
+                    double totalFrac = alleGrenzen
+                        .Where((g, idx) => !_gelöschteParts.Contains((si, idx)))
+                        .Sum(g => g.Unten - g.Oben);
+                    inhaltH = (int)Math.Round(totalFrac * sourceBmp.PixelHeight);
+                    inhaltH = Math.Max(1, Math.Min(inhaltH, origH));
+                }
+            }
+
+            // Einfügeposition in Pixeln (im Quell-Bitmap-Koordinatensystem)
             int insertY = oberhalb
-                ? (int)Math.Round(fracOben  * sourceH)
-                : (int)Math.Round(fracUnten * sourceH);
-            insertY = Math.Max(0, Math.Min(insertY, sourceH));
+                ? (int)Math.Round(fracOben  * sourceBmp.PixelHeight)
+                : (int)Math.Round(fracUnten * sourceBmp.PixelHeight);
+            insertY = Math.Max(0, Math.Min(insertY, sourceBmp.PixelHeight));
 
             // Undo-Snapshot VOR der Änderung
             _undoStack.Push(SpeichereZustand());
 
-            // Neues Gesamt-Bitmap: Inhalt + weißer Streifen dazwischen
-            int newH = sourceH + stripH;
-            var visual = new DrawingVisual();
-            using (var ctx = visual.RenderOpen())
+            // Gesamtes neues Bitmap aufbauen (Quelle + Leerstreifen eingefügt)
+            int sourceH = sourceBmp.PixelHeight;
+            int newH    = inhaltH + stripH;   // tatsächlicher Inhalt + Streifen
+
+            var allVisual = new DrawingVisual();
+            using (var ctx = allVisual.RenderOpen())
             {
+                ctx.DrawRectangle(Brushes.White, null, new Rect(0, 0, sourceW, newH));
                 // Bereich ÜBER der Einfügeposition
                 if (insertY > 0)
                 {
-                    var topCrop = new CroppedBitmap(sourceBmp, new Int32Rect(0, 0, sourceW, insertY));
-                    ctx.DrawImage(topCrop, new Rect(0, 0, sourceW, insertY));
+                    var topCrop = new CroppedBitmap(sourceBmp, new Int32Rect(0, 0, sourceW, Math.Min(insertY, sourceH)));
+                    ctx.DrawImage(topCrop, new Rect(0, 0, sourceW, Math.Min(insertY, sourceH)));
                 }
                 // Weißer Streifen
                 ctx.DrawRectangle(Brushes.White, null, new Rect(0, insertY, sourceW, stripH));
-                // Bereich UNTER der Einfügeposition
-                int below = sourceH - insertY;
+                // Bereich UNTER der Einfügeposition (bis max inhaltH)
+                int below = Math.Min(inhaltH - insertY, sourceH - insertY);
                 if (below > 0)
                 {
                     var botCrop = new CroppedBitmap(sourceBmp, new Int32Rect(0, insertY, sourceW, below));
                     ctx.DrawImage(botCrop, new Rect(0, insertY + stripH, sourceW, below));
                 }
             }
-            var rtb = new RenderTargetBitmap(sourceW, newH, 96, 96, PixelFormats.Pbgra32);
-            rtb.Render(visual);
-            rtb.Freeze();
+            var fullRtb = new RenderTargetBitmap(sourceW, newH, 96, 96, PixelFormats.Pbgra32);
+            fullRtb.Render(allVisual);
+            fullRtb.Freeze();
 
             // Schnittlinien für Seite si verschieben: alle unterhalb insertY um stripH nach unten
             double insertFrac = sourceH > 0 ? (double)insertY / sourceH : 0;
@@ -4318,49 +4351,48 @@ namespace StatikManager.Modules.Werkzeuge
             }
 
             // Seitenformat-Invariante: Bitmap darf origH nicht überschreiten
-            // Wenn newH <= origH: auf origH padden (weißer Rand)
-            // Wenn newH > origH: aktuellen Teil auf origH begrenzen + Überlauf auf neue Seite
             if (newH <= origH)
             {
-                // Auf Originalhöhe padden (Leerzeile passt noch auf Seite)
+                // Leerzeile passt noch auf die Seite → auf origH padden (kein Überlauf, KEINE neue Seite)
                 var padVisual = new DrawingVisual();
                 using (var padCtx = padVisual.RenderOpen())
                 {
                     padCtx.DrawRectangle(Brushes.White, null, new Rect(0, 0, sourceW, origH));
-                    padCtx.DrawImage(rtb, new Rect(0, 0, sourceW, newH));
+                    padCtx.DrawImage(fullRtb, new Rect(0, 0, sourceW, newH));
                 }
                 var paddedRtb = new RenderTargetBitmap(sourceW, origH, 96, 96, PixelFormats.Pbgra32);
                 paddedRtb.Render(padVisual);
                 paddedRtb.Freeze();
                 _kompositBilder[si] = paddedRtb;
+                System.Diagnostics.Debug.WriteLine($"[LEERZEILE] Kein Überlauf: inhaltH={inhaltH}+{stripH}={newH} <= origH={origH}");
             }
             else
             {
-                // Überlauf: aktuelles Bitmap auf origH begrenzen
-                var topPart = new CroppedBitmap(rtb, new Int32Rect(0, 0, sourceW, origH));
+                // Überlauf: oberen Teil (origH Pixel) auf Seite si belassen, Rest auf neue Seite
+                var topV = new DrawingVisual();
+                using (var c = topV.RenderOpen())
+                {
+                    c.DrawRectangle(Brushes.White, null, new Rect(0, 0, sourceW, origH));
+                    c.DrawImage(new CroppedBitmap(fullRtb, new Int32Rect(0, 0, sourceW, origH)),
+                                new Rect(0, 0, sourceW, origH));
+                }
                 var topRtb = new RenderTargetBitmap(sourceW, origH, 96, 96, PixelFormats.Pbgra32);
-                var v2 = new DrawingVisual();
-                using (var c2 = v2.RenderOpen())
-                    c2.DrawImage(topPart, new Rect(0, 0, sourceW, origH));
-                topRtb.Render(v2);
+                topRtb.Render(topV);
                 topRtb.Freeze();
                 _kompositBilder[si] = topRtb;
 
-                // Überlauf-Bitmap (alles ab origH)
-                int overflowH = newH - origH;
-                var overflowPart = new CroppedBitmap(rtb, new Int32Rect(0, origH, sourceW, overflowH));
-
-                // Neue Folgeseite: weißes Bitmap mit origH, Überlauf oben anfangend
-                int newPageOrigH = origH; // gleiche Seitengröße
-                var newPageVisual = new DrawingVisual();
-                using (var npCtx = newPageVisual.RenderOpen())
+                // Überlauf-Teil (newH - origH Pixel), max eine Seite
+                int overH = Math.Min(newH - origH, origH);
+                var botV = new DrawingVisual();
+                using (var c = botV.RenderOpen())
                 {
-                    npCtx.DrawRectangle(Brushes.White, null, new Rect(0, 0, sourceW, newPageOrigH));
-                    npCtx.DrawImage(overflowPart, new Rect(0, 0, sourceW, Math.Min(overflowH, newPageOrigH)));
+                    c.DrawRectangle(Brushes.White, null, new Rect(0, 0, sourceW, origH));
+                    c.DrawImage(new CroppedBitmap(fullRtb, new Int32Rect(0, origH, sourceW, overH)),
+                                new Rect(0, 0, sourceW, overH));
                 }
-                var newPageRtb = new RenderTargetBitmap(sourceW, newPageOrigH, 96, 96, PixelFormats.Pbgra32);
-                newPageRtb.Render(newPageVisual);
-                newPageRtb.Freeze();
+                var botRtb = new RenderTargetBitmap(sourceW, origH, 96, 96, PixelFormats.Pbgra32);
+                botRtb.Render(botV);
+                botRtb.Freeze();
 
                 // Schnittlinien die über origH hinausgehen entfernen
                 _scherenschnitte.RemoveAll(s => s.Seite == si && s.YFraction > (double)origH / newH);
@@ -4369,12 +4401,12 @@ namespace StatikManager.Modules.Werkzeuge
                 EnsureReihenfolge();
                 int anzeigePos = _seitenReihenfolge.IndexOf(si);
                 int neuIdx = _seitenBilder.Count;
-                _seitenBilder.Add(newPageRtb);      // als neues _seitenBilder-Element
-                InitCropEintrag(neuIdx);             // CropArrays erweitern
+                _seitenBilder.Add(botRtb);      // als neues _seitenBilder-Element (ORIGINAL = Überlauf)
+                InitCropEintrag(neuIdx);        // CropArrays erweitern
                 _seitenReihenfolge.Insert(anzeigePos >= 0 ? anzeigePos + 1 : _seitenReihenfolge.Count, neuIdx);
-                _kompositBilder[neuIdx] = newPageRtb;
+                _kompositBilder[neuIdx] = botRtb;
 
-                System.Diagnostics.Debug.WriteLine($"[LEERZEILE] Überlauf: {overflowH}px auf neue Seite {neuIdx} verschoben");
+                System.Diagnostics.Debug.WriteLine($"[LEERZEILE] Überlauf: inhaltH={inhaltH}+{stripH}={newH} > origH={origH}, {overH}px auf neue Seite {neuIdx}");
             }
 
             ZeicheCanvas();
