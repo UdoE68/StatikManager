@@ -4,6 +4,18 @@ Chronologische Erkenntnisse aus der Entwicklung. Was funktioniert hat und warum.
 
 ---
 
+## 2026-04-06 – AutoSpeichern via WriteAllBytes statt File.Replace
+
+**Problem:** File.Replace scheitert wenn Datei von irgend etwas gesperrt ist (z.B. Explorer-Vorschau, Antivirus)
+
+**Loesung:** SpeicherInStream() baut PDF in MemoryStream, File.WriteAllBytes() schreibt direkt + 3x Retry bei IOException. Fallback auf _autosave.pdf wenn alle Versuche scheitern. Keine MessageBox mehr (blockiert UI nicht).
+
+**Warum besser:** WriteAllBytes ist atomarer als Replace, kein Zwischen-Handle, Retry-Schleife faengt temporaere Sperren ab
+
+**Dateien:** PdfSchnittEditor.xaml.cs (AutoSpeichern + neue Methode SpeicherInStream)
+
+---
+
 ## 2026-04-05 – AutoSpeichern ohne Datei-Locking
 
 **Problem:** pdfium (`DocLib.GetDocReader`) und PdfSharp (`PdfReader.Open`) halten PDF-Dateien offen, was `File.Replace` im AutoSpeichern blockiert ("Datei wird von einem anderen Prozess verwendet").

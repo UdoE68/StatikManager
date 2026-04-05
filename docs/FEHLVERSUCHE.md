@@ -22,6 +22,10 @@ Was nicht funktioniert hat und warum. Damit niemand denselben Fehler zweimal mac
 **Fehler:** Immer noch Berichte ueber Fehler (nicht verifiziert ob Fix4 funktioniert)
 **Grund:** Unbekannt — moeglicherweise war der Build nicht deployed oder ein weiterer Zugriff existiert.
 
+**Versuch 6 (neu):** Komplette Neustrategie: AutoSpeichern baut PDF in MemoryStream,
+schreibt dann mit WriteAllBytes (kein File.Replace), Retry-Loop bei IOException
+**Ergebnis:** PASS — Build 0 Fehler, Commit ee2bc04, EXE-Zeitstempel 06.04.2026 00:05:11
+
 **Versuch 5 (ERFOLGREICH):** Alle Zugriffe auf MemoryStream umgestellt
 **Was hat funktioniert:**
 - `SpeicherNachPfad` (Zeile ~4903): `PdfReader.Open(new MemoryStream(_pdfBytes), Import)` — war bereits gefixt
