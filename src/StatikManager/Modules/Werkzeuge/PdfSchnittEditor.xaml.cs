@@ -122,6 +122,10 @@ namespace StatikManager.Modules.Werkzeuge
             = new List<(int, double)>();
         private Line?  _scherenVorschauLinie;
 
+        // ── Seitenwechsel-Werkzeug ────────────────────────────────────────────
+        private bool _seitenwechselModus = false;
+        private Line? _seitenwechselVorschauLinie;
+
         // Schnittlinie verschieben (Verbesserung 4)
         private int    _gezogenesSchnittIdx  = -1;
         private bool   _schnittDragAktiv;
@@ -267,6 +271,7 @@ namespace StatikManager.Modules.Werkzeuge
 
             // Bearbeitungs- und Scheren-Modus vor dem Laden zurücksetzen (Bug 4: Ansicht-Reste beim Wechsel)
             if (_scherenModus) BeendeScherenModus();
+            if (_seitenwechselModus) BeendeSeitenwechselModus();
             if (_bearbeitungsModus) BeendeBearbeitungsModus(false);
 
             _pdfPfad = pfad;
@@ -277,6 +282,7 @@ namespace StatikManager.Modules.Werkzeuge
             _cropLinks = _cropRechts = _cropOben = _cropUnten = Array.Empty<double>();
             _scherenschnitte.Clear();
             _scherenVorschauLinie = null;
+            _seitenwechselVorschauLinie = null;
             _ausgewählteParts.Clear();
             _gelöschteParts.Clear();
             _kompositBilder.Clear();
@@ -294,6 +300,7 @@ namespace StatikManager.Modules.Werkzeuge
             BtnExport.IsEnabled       = false;
             BtnAuswahlmodus.IsEnabled = false;
             BtnSchereToggle.IsEnabled         = false;
+            BtnSeitenwechsel.IsEnabled        = false;
             BtnSchnittZurücksetzen.IsEnabled  = false;
             BtnTeileExportieren.IsEnabled     = false;
             BtnTeilLöschen.IsEnabled          = false;
@@ -406,6 +413,7 @@ namespace StatikManager.Modules.Werkzeuge
                         BtnExport.IsEnabled               = true;
                         BtnAuswahlmodus.IsEnabled         = true;
                         BtnSchereToggle.IsEnabled         = true;
+                        BtnSeitenwechsel.IsEnabled        = true;
                         TxtInfo.Text = $"{bilder!.Count} Seite(n) geladen";
 
                         // Zoom und Scroll aus Sitzung anwenden
@@ -984,7 +992,7 @@ namespace StatikManager.Modules.Werkzeuge
             // Drag & Drop: Seiten umsortieren (Feature 5)
             blatt.PreviewMouseLeftButtonDown += (_, ev) =>
             {
-                if (_scherenModus || _bearbeitungsModus) return;
+                if (_scherenModus || _seitenwechselModus || _bearbeitungsModus) return;
                 // Drag-Vorbereitung nur setzen, wenn kein Schnittlinie-Drag aktiv ist
                 if (_schnittDragAktiv) return;
                 _dragQuellIdx    = capturedIdx;
@@ -2338,6 +2346,11 @@ namespace StatikManager.Modules.Werkzeuge
                     l.StrokeThickness = 2.0 / zoom;
                     // StrokeDashArray bleibt erhalten
                 }
+                else if (tag == "SEITENWECHSEL_PREVIEW")
+                {
+                    l.StrokeThickness = 2.0 / zoom;
+                    // StrokeDashArray bleibt erhalten
+                }
             }
         }
 
@@ -3144,6 +3157,8 @@ namespace StatikManager.Modules.Werkzeuge
             SafeExecute(() =>
             {
                 if (_seitenBilder.Count == 0) { BtnSchereToggle.IsChecked = false; return; }
+                // Seitenwechsel-Modus deaktivieren wenn aktiv
+                if (_seitenwechselModus) BeendeSeitenwechselModus();
                 _scherenModus = true;
                 _ausgewählteParts.Clear();
                 ScrollView.Cursor                = Cursors.Cross;
@@ -3177,6 +3192,179 @@ namespace StatikManager.Modules.Werkzeuge
             AktualisiereTeilOverlays();   // overlays wieder auf IsHitTestVisible=true
             int anzahl = _scherenschnitte.Count;
             TxtInfo.Text = anzahl > 0 ? $"{anzahl} Schnitt(e) – Klick zum Markieren" : "";
+        }
+
+        // ── Seitenwechsel-Werkzeug ────────────────────────────────────────────
+
+        private void BtnSeitenwechsel_Checked(object sender, RoutedEventArgs e)
+        {
+            SafeExecute(() =>
+            {
+                if (_seitenBilder.Count == 0) { BtnSeitenwechsel.IsChecked = false; return; }
+                // Scheren-Modus deaktivieren wenn aktiv
+                if (_scherenModus) BeendeScherenModus();
+                _seitenwechselModus = true;
+                ScrollView.Cursor             = Cursors.Cross;
+                PdfCanvas.MouseMove           += Seitenwechsel_MouseMove;
+                PdfCanvas.MouseLeftButtonDown += Seitenwechsel_MouseDown;
+                ScrollView.Focus();
+                TxtInfo.Text = "\u23CE Seitenwechsel aktiv – Klick = Seite teilen | Esc = beenden";
+            }, "BtnSeitenwechsel_Checked");
+        }
+
+        private void BtnSeitenwechsel_Unchecked(object sender, RoutedEventArgs e)
+            => SafeExecute(BeendeSeitenwechselModus, "BtnSeitenwechsel_Unchecked");
+
+        private void BeendeSeitenwechselModus()
+        {
+            _seitenwechselModus = false;
+            ScrollView.Cursor             = null;
+            PdfCanvas.MouseMove           -= Seitenwechsel_MouseMove;
+            PdfCanvas.MouseLeftButtonDown -= Seitenwechsel_MouseDown;
+
+            if (_seitenwechselVorschauLinie != null)
+            {
+                PdfCanvas.Children.Remove(_seitenwechselVorschauLinie);
+                _seitenwechselVorschauLinie = null;
+            }
+
+            // Toggle-Button zurücksetzen ohne erneutes Unchecked-Ereignis
+            if (BtnSeitenwechsel.IsChecked == true) BtnSeitenwechsel.IsChecked = false;
+
+            TxtInfo.Text = "";
+        }
+
+        private void Seitenwechsel_MouseMove(object sender, MouseEventArgs e)
+        {
+            try
+            {
+                if (!_seitenwechselModus) return;
+                Point pos = e.GetPosition(PdfCanvas);
+                int si = HoleSeitenIndexBeiPos(pos.Y, pos.X);
+
+                if (si < 0)
+                {
+                    if (_seitenwechselVorschauLinie != null)
+                        _seitenwechselVorschauLinie.Visibility = Visibility.Collapsed;
+                    return;
+                }
+
+                double pageW = _seitenBilder[si].PixelWidth;
+                double setX  = _layoutHorizontal && si < _seitenXStart.Length ? _seitenXStart[si] : SeiteX;
+
+                if (_seitenwechselVorschauLinie == null)
+                {
+                    _seitenwechselVorschauLinie = new Line
+                    {
+                        Stroke           = new SolidColorBrush(Color.FromRgb(0, 100, 204)),
+                        StrokeThickness  = 2.0 / _zoomFaktor,
+                        StrokeDashArray  = new DoubleCollection(new[] { 8.0, 4.0 }),
+                        IsHitTestVisible = false,
+                        Tag              = "SEITENWECHSEL_PREVIEW"
+                    };
+                    Panel.SetZIndex(_seitenwechselVorschauLinie, 200);
+                    PdfCanvas.Children.Add(_seitenwechselVorschauLinie);
+                }
+
+                _seitenwechselVorschauLinie.X1             = setX;
+                _seitenwechselVorschauLinie.X2             = setX + pageW;
+                _seitenwechselVorschauLinie.Y1             = pos.Y;
+                _seitenwechselVorschauLinie.Y2             = pos.Y;
+                _seitenwechselVorschauLinie.StrokeThickness = 2.0 / _zoomFaktor;
+                _seitenwechselVorschauLinie.Visibility     = Visibility.Visible;
+            }
+            catch (Exception ex) { LogException(ex, "Seitenwechsel_MouseMove"); }
+        }
+
+        private void Seitenwechsel_MouseDown(object sender, MouseButtonEventArgs e)
+        {
+            try
+            {
+                if (!_seitenwechselModus || e.ChangedButton != MouseButton.Left) return;
+                Point pos = e.GetPosition(PdfCanvas);
+                int si = HoleSeitenIndexBeiPos(pos.Y, pos.X);
+                if (si < 0) return;
+
+                double pageH = _seitenHöhe[si];
+                if (pageH <= 0) return;
+
+                double yBase  = _layoutHorizontal ? SeiteX : (si < _seitenYStart.Length ? _seitenYStart[si] : 0);
+                double yFrac  = Math.Max(0.01, Math.Min(0.99, (pos.Y - yBase) / pageH));
+
+                // Seitenwechsel sofort ausführen und Modus beenden
+                BeendeSeitenwechselModus();
+                SetzeSeitenwechsel(si, yFrac);
+                e.Handled = true;
+            }
+            catch (Exception ex) { LogException(ex, "Seitenwechsel_MouseDown"); }
+        }
+
+        private void SetzeSeitenwechsel(int si, double yFraction)
+        {
+            if (si >= _seitenBilder.Count) return;
+
+            // Undo-Snapshot
+            _undoStack.Push(SpeichereZustand());
+
+            // Quell-Bitmap
+            var sourceBmp = _kompositBilder.TryGetValue(si, out var kb) && kb != null
+                ? kb : _seitenBilder[si];
+            int origH   = _seitenBilder[si].PixelHeight;
+            int sourceH = sourceBmp.PixelHeight;
+            int sourceW = sourceBmp.PixelWidth;
+
+            int cutY = (int)Math.Round(yFraction * sourceH);
+            cutY = Math.Max(1, Math.Min(cutY, sourceH - 1));
+
+            // Oberer Teil: auf origH padden
+            var topVisual = new DrawingVisual();
+            using (var ctx = topVisual.RenderOpen())
+            {
+                ctx.DrawRectangle(Brushes.White, null, new Rect(0, 0, sourceW, origH));
+                if (cutY > 0)
+                {
+                    var topCrop = new CroppedBitmap(sourceBmp, new Int32Rect(0, 0, sourceW, cutY));
+                    ctx.DrawImage(topCrop, new Rect(0, 0, sourceW, cutY));
+                }
+            }
+            var topRtb = new RenderTargetBitmap(sourceW, origH, 96, 96, PixelFormats.Pbgra32);
+            topRtb.Render(topVisual);
+            topRtb.Freeze();
+            _kompositBilder[si] = topRtb;
+
+            // Unterer Teil: auf origH padden (oben anfangend)
+            int belowH = sourceH - cutY;
+            var botVisual = new DrawingVisual();
+            using (var ctx = botVisual.RenderOpen())
+            {
+                ctx.DrawRectangle(Brushes.White, null, new Rect(0, 0, sourceW, origH));
+                if (belowH > 0)
+                {
+                    var botCrop = new CroppedBitmap(sourceBmp, new Int32Rect(0, cutY, sourceW, belowH));
+                    ctx.DrawImage(botCrop, new Rect(0, 0, sourceW, Math.Min(belowH, origH)));
+                }
+            }
+            var botRtb = new RenderTargetBitmap(sourceW, origH, 96, 96, PixelFormats.Pbgra32);
+            botRtb.Render(botVisual);
+            botRtb.Freeze();
+
+            // Neue Seite einfügen
+            EnsureReihenfolge();
+            int anzeigePos = _seitenReihenfolge.IndexOf(si);
+            int neuIdx = _seitenBilder.Count;
+            _seitenBilder.Add(botRtb);
+            InitCropEintrag(neuIdx);
+            _seitenReihenfolge.Insert(anzeigePos >= 0 ? anzeigePos + 1 : _seitenReihenfolge.Count, neuIdx);
+            _kompositBilder[neuIdx] = botRtb;
+
+            // Schnittlinien der alten Seite entfernen (Seite wurde geteilt)
+            _scherenschnitte.RemoveAll(s => s.Seite == si);
+            _gelöschteParts.RemoveWhere(p => p.Seite == si);
+
+            ZeicheCanvas();
+            AktualisiereSchnitteLinien();
+            TxtInfo.Text = $"Seitenwechsel gesetzt – Seite {si + 1} geteilt in 2 – Strg+Z zum R\u00fckg\u00e4ngigmachen";
+            AutoSpeichern();
         }
 
         private void Schere_MouseMove(object sender, MouseEventArgs e)
@@ -4064,6 +4252,7 @@ namespace StatikManager.Modules.Werkzeuge
         {
             if (si >= _seitenBilder.Count) return;
 
+            // Quell-Bitmap: Komposit wenn vorhanden, sonst Original
             var sourceBmp = _kompositBilder.TryGetValue(si, out var kb) && kb != null
                 ? kb : _seitenBilder[si];
 
@@ -4071,11 +4260,12 @@ namespace StatikManager.Modules.Werkzeuge
             if (t >= grenzen.Count) return;
 
             var (fracOben, fracUnten) = grenzen[t];
-            int origH   = _seitenBilder[si].PixelHeight; // UNVERÄNDERLICHE Seitenhöhe
-            int sourceH = sourceBmp.PixelHeight;
+            int sourceH = sourceBmp.PixelHeight;   // aktueller Arbeits-Bitmap-Height
+            int origH   = _seitenBilder[si].PixelHeight;  // unveränderliche Originalhöhe
             int sourceW = sourceBmp.PixelWidth;
             const int stripH = 30;
 
+            // Einfügeposition in Pixeln
             int insertY = oberhalb
                 ? (int)Math.Round(fracOben  * sourceH)
                 : (int)Math.Round(fracUnten * sourceH);
@@ -4084,105 +4274,101 @@ namespace StatikManager.Modules.Werkzeuge
             // Undo-Snapshot VOR der Änderung
             _undoStack.Push(SpeichereZustand());
 
-            // Neues Bitmap aufbauen: Bereich über insertY + weißer Streifen + Bereich ab insertY
+            // Neues Gesamt-Bitmap: Inhalt + weißer Streifen dazwischen
             int newH = sourceH + stripH;
             var visual = new DrawingVisual();
             using (var ctx = visual.RenderOpen())
             {
-                ctx.DrawRectangle(Brushes.White, null, new Rect(0, 0, sourceW, newH));
+                // Bereich ÜBER der Einfügeposition
                 if (insertY > 0)
                 {
-                    var top = new CroppedBitmap(sourceBmp, new Int32Rect(0, 0, sourceW, insertY));
-                    ctx.DrawImage(top, new Rect(0, 0, sourceW, insertY));
+                    var topCrop = new CroppedBitmap(sourceBmp, new Int32Rect(0, 0, sourceW, insertY));
+                    ctx.DrawImage(topCrop, new Rect(0, 0, sourceW, insertY));
                 }
+                // Weißer Streifen
                 ctx.DrawRectangle(Brushes.White, null, new Rect(0, insertY, sourceW, stripH));
+                // Bereich UNTER der Einfügeposition
                 int below = sourceH - insertY;
                 if (below > 0)
                 {
-                    var bottom = new CroppedBitmap(sourceBmp, new Int32Rect(0, insertY, sourceW, below));
-                    ctx.DrawImage(bottom, new Rect(0, insertY + stripH, sourceW, below));
+                    var botCrop = new CroppedBitmap(sourceBmp, new Int32Rect(0, insertY, sourceW, below));
+                    ctx.DrawImage(botCrop, new Rect(0, insertY + stripH, sourceW, below));
                 }
             }
-            var rtbFull = new RenderTargetBitmap(sourceW, newH, 96, 96, PixelFormats.Pbgra32);
-            rtbFull.Render(visual);
-            rtbFull.Freeze();
+            var rtb = new RenderTargetBitmap(sourceW, newH, 96, 96, PixelFormats.Pbgra32);
+            rtb.Render(visual);
+            rtb.Freeze();
 
-            // Schnittlinien dieser Seite unterhalb von insertY verschieben (im newH-Raum)
+            // Schnittlinien für Seite si verschieben: alle unterhalb insertY um stripH nach unten
             double insertFrac = sourceH > 0 ? (double)insertY / sourceH : 0;
             for (int i = 0; i < _scherenschnitte.Count; i++)
             {
                 var (cSi, cFrac) = _scherenschnitte[i];
                 if (cSi == si && cFrac >= insertFrac)
                 {
-                    double oldY = cFrac * sourceH;
-                    _scherenschnitte[i] = (cSi, (oldY + stripH) / newH);
+                    double oldYPx = cFrac * sourceH;
+                    _scherenschnitte[i] = (cSi, (oldYPx + stripH) / newH);
                 }
             }
 
+            // Seitenformat-Invariante: Bitmap darf origH nicht überschreiten
+            // Wenn newH <= origH: auf origH padden (weißer Rand)
+            // Wenn newH > origH: aktuellen Teil auf origH begrenzen + Überlauf auf neue Seite
             if (newH <= origH)
             {
-                // Kein Überlauf: einfach das neue Bitmap mit origH auffüllen (weißer Rand unten)
+                // Auf Originalhöhe padden (Leerzeile passt noch auf Seite)
                 var padVisual = new DrawingVisual();
                 using (var padCtx = padVisual.RenderOpen())
                 {
                     padCtx.DrawRectangle(Brushes.White, null, new Rect(0, 0, sourceW, origH));
-                    padCtx.DrawImage(rtbFull, new Rect(0, 0, sourceW, newH));
+                    padCtx.DrawImage(rtb, new Rect(0, 0, sourceW, newH));
                 }
-                var padRtb = new RenderTargetBitmap(sourceW, origH, 96, 96, PixelFormats.Pbgra32);
-                padRtb.Render(padVisual);
-                padRtb.Freeze();
-                _kompositBilder[si] = padRtb;
+                var paddedRtb = new RenderTargetBitmap(sourceW, origH, 96, 96, PixelFormats.Pbgra32);
+                paddedRtb.Render(padVisual);
+                paddedRtb.Freeze();
+                _kompositBilder[si] = paddedRtb;
             }
             else
             {
-                // Überlauf: Aktuelle Seite auf origH begrenzen, Rest als neue Folgeseite
-                // 1) Aktuelle Seite: obere origH Pixel
-                var obenVisual = new DrawingVisual();
-                using (var obenCtx = obenVisual.RenderOpen())
-                {
-                    obenCtx.DrawRectangle(Brushes.White, null, new Rect(0, 0, sourceW, origH));
-                    obenCtx.DrawImage(rtbFull, new Rect(0, 0, sourceW, newH));
-                }
-                var obenRtb = new RenderTargetBitmap(sourceW, origH, 96, 96, PixelFormats.Pbgra32);
-                obenRtb.Render(obenVisual);
-                obenRtb.Freeze();
-                _kompositBilder[si] = obenRtb;
+                // Überlauf: aktuelles Bitmap auf origH begrenzen
+                var topPart = new CroppedBitmap(rtb, new Int32Rect(0, 0, sourceW, origH));
+                var topRtb = new RenderTargetBitmap(sourceW, origH, 96, 96, PixelFormats.Pbgra32);
+                var v2 = new DrawingVisual();
+                using (var c2 = v2.RenderOpen())
+                    c2.DrawImage(topPart, new Rect(0, 0, sourceW, origH));
+                topRtb.Render(v2);
+                topRtb.Freeze();
+                _kompositBilder[si] = topRtb;
 
-                // Schnittlinien die über origH hinausgehen auf neue Seite verschieben
-                // (vereinfacht: alle Schnitte dieser Seite die im Überlaufbereich liegen entfernen)
+                // Überlauf-Bitmap (alles ab origH)
+                int overflowH = newH - origH;
+                var overflowPart = new CroppedBitmap(rtb, new Int32Rect(0, origH, sourceW, overflowH));
+
+                // Neue Folgeseite: weißes Bitmap mit origH, Überlauf oben anfangend
+                int newPageOrigH = origH; // gleiche Seitengröße
+                var newPageVisual = new DrawingVisual();
+                using (var npCtx = newPageVisual.RenderOpen())
+                {
+                    npCtx.DrawRectangle(Brushes.White, null, new Rect(0, 0, sourceW, newPageOrigH));
+                    npCtx.DrawImage(overflowPart, new Rect(0, 0, sourceW, Math.Min(overflowH, newPageOrigH)));
+                }
+                var newPageRtb = new RenderTargetBitmap(sourceW, newPageOrigH, 96, 96, PixelFormats.Pbgra32);
+                newPageRtb.Render(newPageVisual);
+                newPageRtb.Freeze();
+
+                // Schnittlinien die über origH hinausgehen entfernen
                 _scherenschnitte.RemoveAll(s => s.Seite == si && s.YFraction > (double)origH / newH);
 
-                // 2) Neue Folgeseite: Überlauf-Bitmap (der abgeschnittene Teil, auf origH gepaddert)
-                int überlaufStart = origH;
-                int überlaufH     = newH - überlaufStart;
-                var untenVisual   = new DrawingVisual();
-                using (var untenCtx = untenVisual.RenderOpen())
-                {
-                    untenCtx.DrawRectangle(Brushes.White, null, new Rect(0, 0, sourceW, origH));
-                    var überlaufCrop = new CroppedBitmap(rtbFull, new Int32Rect(0, überlaufStart, sourceW, überlaufH));
-                    untenCtx.DrawImage(überlaufCrop, new Rect(0, 0, sourceW, überlaufH));
-                }
-                var untenRtb = new RenderTargetBitmap(sourceW, origH, 96, 96, PixelFormats.Pbgra32);
-                untenRtb.Render(untenVisual);
-                untenRtb.Freeze();
-
-                // Neue Seite an den Anfang von _seitenBilder hinzufügen
-                int neuIdx = _seitenBilder.Count;
-                _seitenBilder.Add(untenRtb);
-                InitCropEintrag(neuIdx);
-
-                // Komposit für neue Seite eintragen (ist schon fertig)
-                _kompositBilder[neuIdx] = untenRtb;
-
-                // Reihenfolge: neue Seite direkt nach si einfügen
+                // Neue Seite nach si einfügen
                 EnsureReihenfolge();
-                int siAnzeigePos = _seitenReihenfolge.IndexOf(si);
-                if (siAnzeigePos >= 0)
-                    _seitenReihenfolge.Insert(siAnzeigePos + 1, neuIdx);
-                else
-                    _seitenReihenfolge.Add(neuIdx);
+                int anzeigePos = _seitenReihenfolge.IndexOf(si);
+                int neuIdx = _seitenBilder.Count;
+                _seitenBilder.Add(newPageRtb);      // als neues _seitenBilder-Element
+                InitCropEintrag(neuIdx);             // CropArrays erweitern
+                _seitenReihenfolge.Insert(anzeigePos >= 0 ? anzeigePos + 1 : _seitenReihenfolge.Count, neuIdx);
+                _kompositBilder[neuIdx] = newPageRtb;
 
-                System.Diagnostics.Debug.WriteLine($"[LEERZEILE] Überlauf: {überlaufH}px auf neue Seite {neuIdx} verschoben");
+                System.Diagnostics.Debug.WriteLine($"[LEERZEILE] Überlauf: {overflowH}px auf neue Seite {neuIdx} verschoben");
             }
 
             ZeicheCanvas();
@@ -4267,6 +4453,7 @@ namespace StatikManager.Modules.Werkzeuge
                 else if (e.Key == Key.Escape)
                 {
                     if (_scherenModus) { BeendeScherenModus(); e.Handled = true; }
+                    else if (_seitenwechselModus) { BeendeSeitenwechselModus(); e.Handled = true; }
                     else if (_ausgewählteParts.Count > 0)
                     {
                         _ausgewählteParts.Clear();
