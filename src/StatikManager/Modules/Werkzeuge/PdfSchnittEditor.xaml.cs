@@ -4357,7 +4357,10 @@ namespace StatikManager.Modules.Werkzeuge
             fullRtb.Render(allVisual);
             fullRtb.Freeze();
 
-            // Schnittlinien für Seite si verschieben: alle unterhalb insertY um stripH nach unten
+            // Schnittlinien für Seite si verschieben: alle unterhalb insertY um stripH nach unten.
+            // Wichtig: Fraktionen müssen auf origH normiert sein, weil das Komposit-Bitmap
+            // immer origH Pixel hoch ist (ErzeugeKompositBild paddet auf origH).
+            // Nicht auf newH normieren (newH < origH bei kein Überlauf)!
             double insertFrac = sourceH > 0 ? (double)insertY / sourceH : 0;
             for (int i = 0; i < _scherenschnitte.Count; i++)
             {
@@ -4365,7 +4368,9 @@ namespace StatikManager.Modules.Werkzeuge
                 if (cSi == si && cFrac >= insertFrac)
                 {
                     double oldYPx = cFrac * sourceH;
-                    _scherenschnitte[i] = (cSi, (oldYPx + stripH) / newH);
+                    double newYPx = oldYPx + stripH;
+                    // Normieren auf origH (die tatsächliche Bitmap-Höhe nach Padding)
+                    _scherenschnitte[i] = (cSi, Math.Min(newYPx / origH, 1.0));
                 }
             }
 
@@ -4413,8 +4418,9 @@ namespace StatikManager.Modules.Werkzeuge
                 botRtb.Render(botV);
                 botRtb.Freeze();
 
-                // Schnittlinien die über origH hinausgehen entfernen
-                _scherenschnitte.RemoveAll(s => s.Seite == si && s.YFraction > (double)origH / newH);
+                // Schnittlinien die auf die neue Seite überlaufen entfernen
+                // (Fraktionen > 1.0 sind durch Math.Min bereits auf 1.0 geklemmmt → diese entfernen)
+                _scherenschnitte.RemoveAll(s => s.Seite == si && s.YFraction >= 1.0);
 
                 // Neue Seite nach si einfügen
                 EnsureReihenfolge();
