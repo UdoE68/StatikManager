@@ -9,233 +9,228 @@
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
-        <!-- ── Werkzeugleiste ──────────────────────────────────────────────── -->
+        <!-- ── Werkzeugzeilen ────────────────────────────────────────────── -->
         <Border Grid.Row="0"
-                Background="{DynamicResource Farbe.Werkzeugleiste}"
                 BorderBrush="{DynamicResource Farbe.Rahmen}"
-                BorderThickness="0,0,0,1"
-                Padding="8,5">
-            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                BorderThickness="0,0,0,1">
+            <ToolBarTray Background="{DynamicResource Farbe.Werkzeugleiste}"
+                         IsLocked="True">
 
-                <!-- ── Zoom ──────────────────────────────────────────────── -->
-                <TextBlock Text="Zoom:" VerticalAlignment="Center"
-                           Margin="0,0,4,0" FontSize="11"/>
-                <Button Content="&#x1F50D;&#x2212;" Width="32" Height="22"
-                        Margin="0,0,2,0" FontSize="12"
-                        ToolTip="Verkleinern (Strg + Mausrad)"
-                        Click="BtnZoomMinus_Click"/>
-                <Border BorderBrush="#AAA" BorderThickness="1" CornerRadius="3"
-                        Padding="4,1" Margin="0,0,2,0" VerticalAlignment="Center"
-                        Background="White">
-                    <TextBlock x:Name="TxtZoom" Text="100%"
-                               Width="36" TextAlignment="Center"
-                               FontSize="12" FontWeight="Bold"/>
-                </Border>
-                <Button Content="&#x1F50D;+" Width="32" Height="22"
-                        Margin="0,0,2,0" FontSize="12"
-                        ToolTip="Vergr&#246;&#223;ern (Strg + Mausrad)"
-                        Click="BtnZoomPlus_Click"/>
-                <Button Content="1:1" Width="30" Height="22"
-                        Margin="0,0,2,0" FontSize="10"
-                        ToolTip="Zoom auf 100 % zur&#252;cksetzen"
-                        Click="BtnZoomReset_Click"/>
-                <Button Content="Ganzes Fenster" Height="22"
-                        Padding="6,0"
-                        Margin="0,0,6,0" FontSize="11"
-                        ToolTip="Zeigt eine Seite vollständig im Fenster"
-                        Click="BtnZoomFit_Click"/>
+                <!-- ── Band 0: Ansicht &amp; schnelle Aktionen ────────────── -->
+                <ToolBar Band="0" BandIndex="0"
+                         Background="{DynamicResource Farbe.Werkzeugleiste}">
 
-                <Separator Width="1" Height="18" Background="#BBB" Margin="0,0,8,0"/>
+                    <!-- Zoom -->
+                    <TextBlock Text="Zoom:" VerticalAlignment="Center"
+                               Margin="2,0,4,0" FontSize="11"/>
+                    <Button Content="&#x1F50D;&#x2212;" Width="32" Height="22"
+                            FontSize="12"
+                            ToolTip="Verkleinern (Strg+Mausrad)"
+                            Click="BtnZoomMinus_Click"/>
+                    <Border BorderBrush="#AAA" BorderThickness="1" CornerRadius="3"
+                            Padding="4,1" VerticalAlignment="Center" Background="White">
+                        <TextBlock x:Name="TxtZoom" Text="100%"
+                                   Width="36" TextAlignment="Center"
+                                   FontSize="12" FontWeight="Bold"/>
+                    </Border>
+                    <Button Content="&#x1F50D;+" Width="32" Height="22"
+                            FontSize="12"
+                            ToolTip="Vergr&#246;&#223;ern (Strg+Mausrad)"
+                            Click="BtnZoomPlus_Click"/>
+                    <Button Content="1:1" Width="30" Height="22"
+                            FontSize="10"
+                            ToolTip="Zoom auf 100&#160;% zur&#252;cksetzen"
+                            Click="BtnZoomReset_Click"/>
+                    <Button Content="Ganzes Fenster" Height="22" Padding="6,0"
+                            FontSize="11"
+                            ToolTip="Seite vollst&#228;ndig im Fenster anzeigen"
+                            Click="BtnZoomFit_Click"/>
+                    <Separator/>
 
-                <!-- ── Rand-Bearbeitung ──────────────────────────────────── -->
-                <TextBlock Text="Rand:" VerticalAlignment="Center"
-                           Margin="0,0,4,0" FontSize="11"/>
-                <ToggleButton x:Name="BtnRandAnzeigen"
-                              Content="&#x25A1;"
-                              Width="28" Height="26"
-                              Margin="0,0,2,0"
-                              IsChecked="False"
-                              ToolTip="Beschnittrahmen ein-/ausblenden"
-                              Checked="BtnRandAnzeigen_Checked"
-                              Unchecked="BtnRandAnzeigen_Unchecked"/>
-                <Button x:Name="BtnRandAuto"
-                        Content="&#x1F50D; Auto"
-                        Height="26" Padding="6,0"
-                        Margin="0,0,2,0"
-                        Style="{StaticResource GreenButton}"
-                        ToolTip="Rand automatisch aus Wei&#223;raum erkennen und setzen"
-                        Click="BtnRandAuto_Click"/>
-                <Button x:Name="BtnRandBearbeiten"
-                        Content="&#x270F; Werte"
-                        Height="26" Padding="6,0"
-                        Margin="0,0,8,0"
-                        Style="{StaticResource PrimaryButton}"
-                        ToolTip="Rand in mm numerisch eingeben"
-                        Click="BtnRandBearbeiten_Click"/>
+                    <!-- Layout-Modus -->
+                    <Button x:Name="BtnLayoutWechsel"
+                            Content="&#x29C9; Nebeneinander"
+                            Height="26" Padding="6,0"
+                            ToolTip="Seiten nebeneinander / untereinander anzeigen"
+                            Click="BtnLayoutWechsel_Click"/>
+                    <Separator/>
 
-                <!-- ── Anwendungsmodus ───────────────────────────────────── -->
-                <TextBlock Text="Anwenden auf:" VerticalAlignment="Center"
-                           Margin="0,0,4,0" FontSize="11"
-                           ToolTip="Auf welche Seiten werden Rand-&#196;nderungen angewendet (Drag, Dialog, Auto-Rand)"/>
-                <ComboBox x:Name="CmbCropModus"
-                          Height="24" MinWidth="130"
-                          Margin="0,0,4,0" FontSize="11"
-                          ToolTip="Auf welche Seiten werden Rand-&#196;nderungen angewendet"
-                          SelectionChanged="CmbCropModus_SelectionChanged">
-                    <ComboBoxItem Content="Nur diese Seite" IsSelected="True"/>
-                    <ComboBoxItem Content="Alle Seiten"/>
-                    <ComboBoxItem Content="Ausgew&#228;hlte Seiten &#8230;"/>
-                    <ComboBoxItem Content="Als Standard"/>
-                </ComboBox>
-                <ToggleButton x:Name="BtnAuswahlmodus"
-                              Content="&#x270E; Gruppe bearbeiten"
-                              Height="26" Padding="6,0"
-                              Margin="0,0,8,0"
-                              IsEnabled="False"
-                              ToolTip="Bearbeitungsmodus: Seiten der aktiven Gruppe per Klick hinzufügen / entfernen"
-                              Checked="BtnAuswahlmodus_Checked"
-                              Unchecked="BtnAuswahlmodus_Unchecked"/>
+                    <!-- Seiten-Verwaltung -->
+                    <Button x:Name="BtnSeiteEinfügen"
+                            Content="&#x2795; Seite einf&#252;gen"
+                            Height="26" Padding="8,0"
+                            ToolTip="Neue Seite einf&#252;gen (leer oder aus anderer PDF) &#x2013; Rechtsklick auf Seite f&#252;r genaue Position"
+                            Click="BtnSeiteEinfügen_Click"/>
+                    <Button x:Name="BtnPdfSpeichern"
+                            Content="&#x1F4BE; PDF speichern"
+                            Height="26" Padding="8,0"
+                            Style="{StaticResource PrimaryButton}"
+                            ToolTip="Alle &#196;nderungen in neue PDF-Datei speichern (Strg+S)"
+                            Click="BtnPdfSpeichern_Click"/>
+                    <Separator/>
 
-                <!-- ── Gruppen ──────────────────────────────────────────────── -->
-                <TextBlock Text="Gruppe:" VerticalAlignment="Center"
-                           Margin="0,0,4,0" FontSize="11"/>
-                <ComboBox x:Name="CmbGruppe"
-                          Height="26" MinWidth="110"
-                          Margin="0,0,2,0" FontSize="11"
-                          IsEditable="True"
-                          ToolTip="Aktive Gruppe ausw&#228;hlen oder umbenennen (Enter best&#228;tigt)"
-                          SelectionChanged="CmbGruppe_SelectionChanged"
-                          KeyDown="CmbGruppe_KeyDown"
-                          LostFocus="CmbGruppe_LostFocus"/>
-                <Button x:Name="BtnGruppeNeu"
-                        Content="+"
-                        Width="26" Height="26"
-                        Margin="0,0,2,0"
-                        FontSize="14" FontWeight="Bold"
-                        ToolTip="Neue Gruppe anlegen"
-                        Click="BtnGruppeNeu_Click"/>
-                <Button x:Name="BtnGruppeLöschen"
-                        Content="&#x00D7;"
-                        Width="26" Height="26"
-                        Margin="0,0,8,0"
-                        FontSize="14"
-                        ToolTip="Aktive Gruppe l&#246;schen (letzte Gruppe kann nicht gel&#246;scht werden)"
-                        Click="BtnGruppeLöschen_Click"/>
+                    <!-- Word-Export -->
+                    <Button x:Name="BtnExport"
+                            Content="&#x1F4C4; Nach Word exportieren"
+                            Height="26" Padding="8,0"
+                            Style="{StaticResource PrimaryButton}"
+                            ToolTip="Alle PDF-Seiten als Bilder in eine Word-Datei exportieren"
+                            Click="BtnExport_Click"/>
 
-                <!-- ── Sicherheitsabstand für Auto-Rand ──────────────────── -->
-                <TextBlock Text="Abstand:"
-                           VerticalAlignment="Center" Margin="0,0,3,0"
-                           FontSize="11"
-                           ToolTip="Sicherheitsabstand beim automatischen Rand (0 = kein Abstand)"/>
-                <RepeatButton x:Name="BtnSicherheitMinus"
-                              Content="&#x2212;" Width="20" Height="22"
-                              Margin="0,0,1,0" FontSize="12" FontWeight="Bold"
-                              ToolTip="Sicherheitsabstand verringern"
-                              Click="BtnSicherheitMinus_Click"/>
-                <Border BorderBrush="#AAA" BorderThickness="1" CornerRadius="3"
-                        Padding="4,1" Margin="0,0,1,0" VerticalAlignment="Center"
-                        Background="White">
-                    <TextBlock x:Name="TxtSicherheit" Text="2"
-                               Width="22" TextAlignment="Center"
-                               FontSize="12" FontWeight="Bold"/>
-                </Border>
-                <RepeatButton x:Name="BtnSicherheitPlus"
-                              Content="+" Width="20" Height="22"
-                              Margin="0,0,1,0" FontSize="12" FontWeight="Bold"
-                              ToolTip="Sicherheitsabstand erh&#246;hen"
-                              Click="BtnSicherheitPlus_Click"/>
-                <TextBlock Text="mm" VerticalAlignment="Center"
-                           Margin="0,0,8,0" FontSize="11"/>
+                </ToolBar>
 
-                <Separator Width="1" Height="18" Background="#BBB" Margin="0,0,8,0"/>
+                <!-- ── Band 1: Rand-Bearbeitung &amp; Schneiden ───────────── -->
+                <ToolBar Band="1" BandIndex="0"
+                         Background="{DynamicResource Farbe.Werkzeugleiste}">
 
-                <!-- ── Layout-Modus ──────────────────────────────────────── -->
-                <Button x:Name="BtnLayoutWechsel"
-                        Content="&#x29C9; Nebeneinander"
-                        Height="26" Padding="6,0"
-                        Margin="0,0,6,0"
-                        ToolTip="Seiten nebeneinander / untereinander anzeigen"
-                        Click="BtnLayoutWechsel_Click"/>
+                    <!-- Rand -->
+                    <TextBlock Text="Rand:" VerticalAlignment="Center"
+                               Margin="2,0,4,0" FontSize="11"/>
+                    <ToggleButton x:Name="BtnRandAnzeigen"
+                                  Content="&#x25A1;"
+                                  Width="28" Height="26"
+                                  IsChecked="False"
+                                  ToolTip="Beschnittrahmen ein-/ausblenden"
+                                  Checked="BtnRandAnzeigen_Checked"
+                                  Unchecked="BtnRandAnzeigen_Unchecked"/>
+                    <Button x:Name="BtnRandAuto"
+                            Content="&#x1F50D; Auto"
+                            Height="26" Padding="6,0"
+                            Style="{StaticResource GreenButton}"
+                            ToolTip="Rand automatisch aus Wei&#223;raum erkennen und setzen"
+                            Click="BtnRandAuto_Click"/>
+                    <Button x:Name="BtnRandBearbeiten"
+                            Content="&#x270F; Werte"
+                            Height="26" Padding="6,0"
+                            Style="{StaticResource PrimaryButton}"
+                            ToolTip="Rand in mm numerisch eingeben"
+                            Click="BtnRandBearbeiten_Click"/>
+                    <Separator/>
 
-                <Separator Width="1" Height="18" Background="#BBB" Margin="0,0,8,0"/>
+                    <!-- Anwendungsmodus -->
+                    <TextBlock Text="Anwenden auf:" VerticalAlignment="Center"
+                               Margin="0,0,4,0" FontSize="11"
+                               ToolTip="Auf welche Seiten werden Rand-&#196;nderungen angewendet"/>
+                    <ComboBox x:Name="CmbCropModus"
+                              Height="24" MinWidth="130"
+                              FontSize="11"
+                              ToolTip="Auf welche Seiten werden Rand-&#196;nderungen angewendet"
+                              SelectionChanged="CmbCropModus_SelectionChanged">
+                        <ComboBoxItem Content="Nur diese Seite" IsSelected="True"/>
+                        <ComboBoxItem Content="Alle Seiten"/>
+                        <ComboBoxItem Content="Ausgew&#228;hlte Seiten &#8230;"/>
+                        <ComboBoxItem Content="Als Standard"/>
+                    </ComboBox>
+                    <ToggleButton x:Name="BtnAuswahlmodus"
+                                  Content="&#x270E; Gruppe bearbeiten"
+                                  Height="26" Padding="6,0"
+                                  IsEnabled="False"
+                                  ToolTip="Bearbeitungsmodus: Seiten der aktiven Gruppe per Klick hinzuf&#252;gen / entfernen"
+                                  Checked="BtnAuswahlmodus_Checked"
+                                  Unchecked="BtnAuswahlmodus_Unchecked"/>
+                    <Separator/>
 
-                <!-- Word-Export -->
-                <Button x:Name="BtnExport"
-                        Content="&#x1F4C4; Nach Word exportieren"
-                        Height="26" Padding="8,0"
-                        Margin="0,0,8,0"
-                        Style="{StaticResource PrimaryButton}"
-                        ToolTip="Alle PDF-Seiten als Bilder in eine Word-Datei exportieren"
-                        Click="BtnExport_Click"/>
+                    <!-- Gruppen -->
+                    <TextBlock Text="Gruppe:" VerticalAlignment="Center"
+                               Margin="0,0,4,0" FontSize="11"/>
+                    <ComboBox x:Name="CmbGruppe"
+                              Height="26" MinWidth="110"
+                              FontSize="11"
+                              IsEditable="True"
+                              ToolTip="Aktive Gruppe ausw&#228;hlen oder umbenennen (Enter best&#228;tigt)"
+                              SelectionChanged="CmbGruppe_SelectionChanged"
+                              KeyDown="CmbGruppe_KeyDown"
+                              LostFocus="CmbGruppe_LostFocus"/>
+                    <Button x:Name="BtnGruppeNeu"
+                            Content="+"
+                            Width="26" Height="26"
+                            FontSize="14" FontWeight="Bold"
+                            ToolTip="Neue Gruppe anlegen"
+                            Click="BtnGruppeNeu_Click"/>
+                    <Button x:Name="BtnGruppeLöschen"
+                            Content="&#x00D7;"
+                            Width="26" Height="26"
+                            FontSize="14"
+                            ToolTip="Aktive Gruppe l&#246;schen (letzte Gruppe kann nicht gel&#246;scht werden)"
+                            Click="BtnGruppeLöschen_Click"/>
+                    <Separator/>
 
-                <!-- Seite einfügen / PDF speichern -->
-                <Button x:Name="BtnSeiteEinfügen"
-                        Content="&#x2795; Seite einfügen"
-                        Height="26" Padding="8,0"
-                        Margin="0,0,4,0"
-                        ToolTip="Neue Seite am Ende einfügen (leer oder aus anderer PDF). Rechtsklick auf Seite für positionsgenaues Einfügen."
-                        Click="BtnSeiteEinfügen_Click"/>
-                <Button x:Name="BtnPdfSpeichern"
-                        Content="&#x1F4BE; PDF speichern"
-                        Height="26" Padding="8,0"
-                        Margin="0,0,8,0"
-                        Style="{StaticResource PrimaryButton}"
-                        ToolTip="Bearbeitete PDF speichern (Strg+S)"
-                        Click="BtnPdfSpeichern_Click"/>
+                    <!-- Sicherheitsabstand für Auto-Rand -->
+                    <TextBlock Text="Abstand:"
+                               VerticalAlignment="Center" Margin="0,0,3,0"
+                               FontSize="11"
+                               ToolTip="Sicherheitsabstand beim automatischen Rand (0&#160;=&#160;kein Abstand)"/>
+                    <RepeatButton x:Name="BtnSicherheitMinus"
+                                  Content="&#x2212;" Width="20" Height="22"
+                                  FontSize="12" FontWeight="Bold"
+                                  ToolTip="Sicherheitsabstand verringern"
+                                  Click="BtnSicherheitMinus_Click"/>
+                    <Border BorderBrush="#AAA" BorderThickness="1" CornerRadius="3"
+                            Padding="4,1" VerticalAlignment="Center" Background="White">
+                        <TextBlock x:Name="TxtSicherheit" Text="2"
+                                   Width="22" TextAlignment="Center"
+                                   FontSize="12" FontWeight="Bold"/>
+                    </Border>
+                    <RepeatButton x:Name="BtnSicherheitPlus"
+                                  Content="+" Width="20" Height="22"
+                                  FontSize="12" FontWeight="Bold"
+                                  ToolTip="Sicherheitsabstand erh&#246;hen"
+                                  Click="BtnSicherheitPlus_Click"/>
+                    <TextBlock Text="mm" VerticalAlignment="Center"
+                               Margin="2,0,4,0" FontSize="11"/>
+                    <Separator/>
 
-                <Separator Width="1" Height="18" Background="#BBB" Margin="0,0,8,0"/>
+                    <!-- Scheren-Werkzeug -->
+                    <ToggleButton x:Name="BtnSchereToggle"
+                                  Height="26" Padding="8,0"
+                                  IsEnabled="False"
+                                  ToolTip="Scheren-Modus: Klick auf PDF-Seite setzt horizontalen Schnitt. Strg+Z r&#252;ckg&#228;ngig, Esc beenden."
+                                  Checked="BtnSchereToggle_Checked"
+                                  Unchecked="BtnSchereToggle_Unchecked">
+                        <ToggleButton.Style>
+                            <Style TargetType="ToggleButton">
+                                <Setter Property="Content" Value="&#x2702; Zerschneiden"/>
+                                <Style.Triggers>
+                                    <Trigger Property="IsChecked" Value="True">
+                                        <Setter Property="Background" Value="#CC3333"/>
+                                        <Setter Property="Foreground" Value="White"/>
+                                        <Setter Property="Content" Value="&#x2702; Aktiv &#x2013; Esc beenden"/>
+                                    </Trigger>
+                                </Style.Triggers>
+                            </Style>
+                        </ToggleButton.Style>
+                    </ToggleButton>
+                    <Button x:Name="BtnSchnittZurücksetzen"
+                            Content="&#x21A9; Zur&#252;cksetzen"
+                            Height="26" Padding="6,0"
+                            IsEnabled="False"
+                            ToolTip="Alle gesetzten Schnitte entfernen"
+                            Click="BtnSchnittZurücksetzen_Click"/>
+                    <Button x:Name="BtnTeileExportieren"
+                            Content="&#x1F4E4; Teile als PDF"
+                            Height="26" Padding="6,0"
+                            IsEnabled="False"
+                            ToolTip="Jeden Schnitt-Teil als separate PDF-Datei exportieren"
+                            Click="BtnTeileExportieren_Click"/>
+                    <Button x:Name="BtnTeilLöschen"
+                            Content="&#x1F5D1; Auswahl l&#246;schen"
+                            Height="26" Padding="6,0"
+                            IsEnabled="False"
+                            ToolTip="Markierte Teile / Seiten aus dem Export entfernen (Entf-Taste)"
+                            Click="BtnTeilLöschen_Click"/>
+                    <Separator/>
 
-                <!-- ── Scheren-Werkzeug ──────────────────────────────────── -->
-                <ToggleButton x:Name="BtnSchereToggle"
-                              Height="26" Padding="8,0"
-                              Margin="0,0,2,0"
-                              IsEnabled="False"
-                              ToolTip="Scheren-Modus: Klick auf PDF-Seite setzt horizontalen Schnitt. Strg+Z rückgängig, Esc beenden."
-                              Checked="BtnSchereToggle_Checked"
-                              Unchecked="BtnSchereToggle_Unchecked">
-                    <ToggleButton.Style>
-                        <Style TargetType="ToggleButton">
-                            <Setter Property="Content" Value="&#x2702; Zerschneiden"/>
-                            <Style.Triggers>
-                                <Trigger Property="IsChecked" Value="True">
-                                    <Setter Property="Background" Value="#CC3333"/>
-                                    <Setter Property="Foreground" Value="White"/>
-                                    <Setter Property="Content" Value="&#x2702; Aktiv – Esc beenden"/>
-                                </Trigger>
-                            </Style.Triggers>
-                        </Style>
-                    </ToggleButton.Style>
-                </ToggleButton>
-                <Button x:Name="BtnSchnittZurücksetzen"
-                        Content="&#x21A9; Schnitte zurücksetzen"
-                        Height="26" Padding="6,0"
-                        Margin="0,0,2,0"
-                        IsEnabled="False"
-                        ToolTip="Alle gesetzten Schnitte entfernen"
-                        Click="BtnSchnittZurücksetzen_Click"/>
-                <Button x:Name="BtnTeileExportieren"
-                        Content="&#x1F4E4; Teile als PDF"
-                        Height="26" Padding="6,0"
-                        Margin="0,0,4,0"
-                        IsEnabled="False"
-                        ToolTip="Jeden Schnitt-Teil als separate PDF-Datei exportieren"
-                        Click="BtnTeileExportieren_Click"/>
-                <Button x:Name="BtnTeilLöschen"
-                        Content="&#x1F5D1; Auswahl l&#246;schen"
-                        Height="26" Padding="6,0"
-                        Margin="0,0,8,0"
-                        IsEnabled="False"
-                        ToolTip="Markierte Teile / Seiten aus dem Export entfernen (Entf-Taste)"
-                        Click="BtnTeilLöschen_Click"/>
+                    <!-- Statusinfo -->
+                    <TextBlock x:Name="TxtInfo"
+                               VerticalAlignment="Center"
+                               Foreground="#555"
+                               FontSize="11"
+                               FontStyle="Italic"
+                               Margin="4,0"/>
 
-                <Separator Width="1" Height="18" Background="#BBB" Margin="0,0,8,0"/>
+                </ToolBar>
 
-                <TextBlock x:Name="TxtInfo"
-                           VerticalAlignment="Center"
-                           Foreground="#555"
-                           FontSize="11"
-                           FontStyle="Italic"/>
-            </StackPanel>
+            </ToolBarTray>
         </Border>
 
         <!-- ── Bearbeitungs-Toolbar (nur im Bearbeitungsmodus sichtbar) ──── -->
