@@ -201,10 +201,17 @@
                 <Button x:Name="BtnTeileExportieren"
                         Content="&#x1F4E4; Teile als PDF"
                         Height="26" Padding="6,0"
-                        Margin="0,0,8,0"
+                        Margin="0,0,4,0"
                         IsEnabled="False"
                         ToolTip="Jeden Schnitt-Teil als separate PDF-Datei exportieren"
                         Click="BtnTeileExportieren_Click"/>
+                <Button x:Name="BtnTeilLöschen"
+                        Content="&#x1F5D1; Auswahl l&#246;schen"
+                        Height="26" Padding="6,0"
+                        Margin="0,0,8,0"
+                        IsEnabled="False"
+                        ToolTip="Markierte Teile / Seiten aus dem Export entfernen (Entf-Taste)"
+                        Click="BtnTeilLöschen_Click"/>
 
                 <Separator Width="1" Height="18" Background="#BBB" Margin="0,0,8,0"/>
 

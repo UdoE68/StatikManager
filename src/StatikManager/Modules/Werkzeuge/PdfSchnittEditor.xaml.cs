@@ -122,6 +122,17 @@ namespace StatikManager.Modules.Werkzeuge
             = new List<(int, double)>();
         private Line?  _scherenVorschauLinie;
 
+        // ── Teil-Auswahl & Löschung ───────────────────────────────────────────
+        // Ausgewählte (SeitenIdx, TeilIdx) – TeilIdx=0 ist der erste Teil von oben
+        private readonly HashSet<(int Seite, int Teil)> _ausgewählteParts
+            = new HashSet<(int, int)>();
+        // Gelöschte (SeitenIdx, TeilIdx) – beim Export übersprungen
+        private readonly HashSet<(int Seite, int Teil)> _gelöschteParts
+            = new HashSet<(int, int)>();
+        // Undo-Stack: jede Löschaktion speichert den vorherigen Zustand von _gelöschteParts
+        private readonly Stack<HashSet<(int Seite, int Teil)>> _löschUndoStack
+            = new Stack<HashSet<(int, int)>>();
+
         // Abbruch laufender Lade-Aufträge
         private CancellationTokenSource? _ladeCts;
         // Abbruch laufender Auto-Rand-Berechnung
@@ -230,12 +241,16 @@ namespace StatikManager.Modules.Werkzeuge
             _cropLinks = _cropRechts = _cropOben = _cropUnten = Array.Empty<double>();
             _scherenschnitte.Clear();
             _scherenVorschauLinie = null;
+            _ausgewählteParts.Clear();
+            _gelöschteParts.Clear();
+            _löschUndoStack.Clear();
             TxtInfo.Text              = "Lade PDF …";
             BtnExport.IsEnabled       = false;
             BtnAuswahlmodus.IsEnabled = false;
             BtnSchereToggle.IsEnabled         = false;
             BtnSchnittZurücksetzen.IsEnabled  = false;
             BtnTeileExportieren.IsEnabled     = false;
+            BtnTeilLöschen.IsEnabled          = false;
 
             LogException(new Exception($"[DEBUG] Starte PDF-Laden: {IO.Path.GetFileName(pfad)}"), "LadePdf");
 
@@ -720,6 +735,7 @@ namespace StatikManager.Modules.Werkzeuge
 
                 ZeicheCropLinien();
                 _scherenVorschauLinie = null;  // wurde durch Children.Clear() entfernt
+                // AktualisiereSchnitteLinien ruft intern AktualisiereTeilOverlays auf
                 AktualisiereSchnitteLinien();
                 AktualisiereAuswahlAnzeige();
                 AktualisiereGruppenComboBox();
@@ -2962,9 +2978,11 @@ namespace StatikManager.Modules.Werkzeuge
             {
                 if (_seitenBilder.Count == 0) { BtnSchereToggle.IsChecked = false; return; }
                 _scherenModus = true;
+                _ausgewählteParts.Clear();
                 ScrollView.Cursor                = Cursors.Cross;
                 PdfCanvas.MouseMove              += Schere_MouseMove;
                 PdfCanvas.MouseLeftButtonDown    += Schere_MouseDown;
+                AktualisiereTeilOverlays();   // overlays auf IsHitTestVisible=false setzen
                 ScrollView.Focus();
                 TxtInfo.Text = "✂ Scheren aktiv – Klick = Schnitt | Strg+Z = rückgängig | Esc = beenden";
             }, "BtnSchereToggle_Checked");
@@ -2989,8 +3007,9 @@ namespace StatikManager.Modules.Werkzeuge
             // Toggle-Button zurücksetzen ohne erneutes Unchecked-Ereignis
             if (BtnSchereToggle.IsChecked == true) BtnSchereToggle.IsChecked = false;
 
+            AktualisiereTeilOverlays();   // overlays wieder auf IsHitTestVisible=true
             int anzahl = _scherenschnitte.Count;
-            TxtInfo.Text = anzahl > 0 ? $"{anzahl} Schnitt(e) gesetzt" : "";
+            TxtInfo.Text = anzahl > 0 ? $"{anzahl} Schnitt(e) – Klick zum Markieren" : "";
         }
 
         private void Schere_MouseMove(object sender, MouseEventArgs e)
@@ -3125,7 +3144,9 @@ namespace StatikManager.Modules.Werkzeuge
 
             bool hatSchnitte = _scherenschnitte.Count > 0;
             BtnSchnittZurücksetzen.IsEnabled = hatSchnitte;
-            BtnTeileExportieren.IsEnabled    = hatSchnitte && _pdfPfad != null;
+            BtnTeileExportieren.IsEnabled    = (_scherenschnitte.Count > 0 || _gelöschteParts.Count > 0) && _pdfPfad != null;
+
+            AktualisiereTeilOverlays();
         }
 
         private void BtnSchnittZurücksetzen_Click(object sender, RoutedEventArgs e)
@@ -3143,7 +3164,8 @@ namespace StatikManager.Modules.Werkzeuge
 
         private void ExportierteTeile()
         {
-            if (_pdfPfad == null || _seitenBilder.Count == 0 || _scherenschnitte.Count == 0) return;
+            if (_pdfPfad == null || _seitenBilder.Count == 0) return;
+            if (_scherenschnitte.Count == 0 && _gelöschteParts.Count == 0) return;
 
             var dlg = new System.Windows.Forms.FolderBrowserDialog
             {
@@ -3182,6 +3204,9 @@ namespace StatikManager.Modules.Werkzeuge
 
                     for (int t = 0; t < grenzen.Count - 1; t++)
                     {
+                        // Gelöschte Teile überspringen
+                        if (_gelöschteParts.Contains((si, t))) continue;
+
                         double fracOben  = grenzen[t];
                         double fracUnten = grenzen[t + 1];
 
@@ -3215,15 +3240,206 @@ namespace StatikManager.Modules.Werkzeuge
             }
         }
 
+        // ── Teil-Auswahl & Löschung ───────────────────────────────────────────
+
+        /// <summary>Gibt sortierte Schnitt-Y-Fraktionen für eine Seite zurück.</summary>
+        private List<double> GetSchnitteVonSeite(int si)
+            => _scherenschnitte.Where(s => s.Seite == si)
+                               .Select(s => s.YFraction)
+                               .OrderBy(f => f)
+                               .ToList();
+
+        /// <summary>Gibt die Teil-Grenzen (FracOben, FracUnten) für eine Seite zurück.</summary>
+        private List<(double Oben, double Unten)> GetTeilGrenzen(int si)
+        {
+            var cuts    = GetSchnitteVonSeite(si);
+            var grenzen = new List<double> { 0.0 };
+            grenzen.AddRange(cuts);
+            grenzen.Add(1.0);
+            var result = new List<(double, double)>();
+            for (int t = 0; t < grenzen.Count - 1; t++)
+                result.Add((grenzen[t], grenzen[t + 1]));
+            return result;
+        }
+
+        /// <summary>Gibt den Teil-Index zurück, in dem die canvas-Y-Koordinate auf Seite si liegt.</summary>
+        private int GetTeilBeiCanvasY(int si, double canvasY)
+        {
+            if (si < 0 || si >= _seitenHöhe.Length || _seitenHöhe[si] <= 0) return 0;
+            double yBase = _layoutHorizontal ? SeiteX : (si < _seitenYStart.Length ? _seitenYStart[si] : 0);
+            double yFrac = Math.Max(0, Math.Min(1, (canvasY - yBase) / _seitenHöhe[si]));
+            var grenzen  = GetTeilGrenzen(si);
+            for (int t = 0; t < grenzen.Count; t++)
+                if (yFrac < grenzen[t].Unten) return t;
+            return grenzen.Count - 1;
+        }
+
+        /// <summary>Zeichnet klickbare Teil-Overlays auf den Canvas (Auswahl + Lösch-Markierung).</summary>
+        private void AktualisiereTeilOverlays()
+        {
+            // Alte Overlays entfernen
+            var alte = PdfCanvas.Children.OfType<Border>()
+                .Where(b => (b.Tag?.ToString() ?? "").StartsWith("TEIL_"))
+                .ToList();
+            foreach (var b in alte) PdfCanvas.Children.Remove(b);
+
+            if (_seitenBilder.Count == 0) return;
+
+            for (int si = 0; si < _seitenBilder.Count; si++)
+            {
+                if (si >= _seitenHöhe.Length) continue;
+                if (!_layoutHorizontal && si >= _seitenYStart.Length) continue;
+
+                double pageW = _seitenBilder[si].PixelWidth;
+                double setX  = _layoutHorizontal && si < _seitenXStart.Length ? _seitenXStart[si] : SeiteX;
+                double yBase = _layoutHorizontal ? SeiteX : _seitenYStart[si];
+                double pH    = _seitenHöhe[si];
+
+                var teilGrenzen = GetTeilGrenzen(si);
+
+                for (int t = 0; t < teilGrenzen.Count; t++)
+                {
+                    var (fracOben, fracUnten) = teilGrenzen[t];
+                    double y1 = yBase + fracOben  * pH;
+                    double h  = Math.Max(1, (fracUnten - fracOben) * pH);
+
+                    bool ausgewählt = _ausgewählteParts.Contains((si, t));
+                    bool gelöscht   = _gelöschteParts.Contains((si, t));
+
+                    var overlay = new Border
+                    {
+                        Tag             = $"TEIL_{si}_{t}",
+                        Width           = pageW,
+                        Height          = h,
+                        Background      = gelöscht
+                            ? new SolidColorBrush(Color.FromArgb(150, 80, 80, 80))
+                            : ausgewählt
+                                ? new SolidColorBrush(Color.FromArgb(55, 30, 100, 220))
+                                : Brushes.Transparent,
+                        BorderBrush     = ausgewählt
+                            ? new SolidColorBrush(Color.FromRgb(30, 100, 220))
+                            : gelöscht
+                                ? new SolidColorBrush(Color.FromRgb(120, 40, 40))
+                                : Brushes.Transparent,
+                        BorderThickness = new Thickness(ausgewählt || gelöscht ? 2.0 / _zoomFaktor : 0),
+                        IsHitTestVisible = !_scherenModus,
+                        Cursor           = _scherenModus ? null : Cursors.Hand,
+                        ClipToBounds     = true
+                    };
+
+                    if (gelöscht)
+                    {
+                        overlay.Child = new TextBlock
+                        {
+                            Text                = "✕  entfernt",
+                            HorizontalAlignment = HorizontalAlignment.Center,
+                            VerticalAlignment   = VerticalAlignment.Center,
+                            Foreground          = Brushes.White,
+                            FontSize            = Math.Max(10, Math.Min(18, h / 4)),
+                            FontWeight          = FontWeights.Bold,
+                            IsHitTestVisible    = false
+                        };
+                    }
+
+                    int finalSi = si, finalT = t;
+                    overlay.MouseLeftButtonDown += (_, ev) =>
+                    {
+                        if (_scherenModus) return;
+                        bool ctrl = (Keyboard.Modifiers & ModifierKeys.Control) != 0;
+                        if (!ctrl) _ausgewählteParts.Clear();
+                        if (_ausgewählteParts.Contains((finalSi, finalT)))
+                            _ausgewählteParts.Remove((finalSi, finalT));
+                        else
+                            _ausgewählteParts.Add((finalSi, finalT));
+                        AktualisiereTeilOverlays();
+                        BtnTeilLöschen.IsEnabled = _ausgewählteParts.Count > 0;
+                        int n = _ausgewählteParts.Count;
+                        TxtInfo.Text = n > 0
+                            ? $"{n} Teil(e) markiert – Entf oder Rechtsklick zum Löschen"
+                            : "";
+                        ScrollView.Focus();
+                        ev.Handled = true;
+                    };
+
+                    // Kontext-Menü (Rechtsklick)
+                    var menu       = new ContextMenu();
+                    var itemLösch  = new MenuItem { Header = "✕  Teil löschen" };
+                    itemLösch.Click += (_, __) =>
+                    {
+                        if (!_ausgewählteParts.Contains((finalSi, finalT)))
+                        {
+                            _ausgewählteParts.Clear();
+                            _ausgewählteParts.Add((finalSi, finalT));
+                        }
+                        LöscheAusgewählteParts();
+                    };
+                    var itemAbwählen = new MenuItem { Header = "Auswahl aufheben" };
+                    itemAbwählen.Click += (_, __) =>
+                    {
+                        _ausgewählteParts.Clear();
+                        AktualisiereTeilOverlays();
+                        BtnTeilLöschen.IsEnabled = false;
+                        TxtInfo.Text = "";
+                    };
+                    menu.Items.Add(itemLösch);
+                    menu.Items.Add(new Separator());
+                    menu.Items.Add(itemAbwählen);
+                    overlay.ContextMenu = menu;
+
+                    Canvas.SetLeft(overlay, setX);
+                    Canvas.SetTop(overlay,  y1);
+                    Panel.SetZIndex(overlay, 50);
+                    PdfCanvas.Children.Add(overlay);
+                }
+            }
+
+            BtnTeilLöschen.IsEnabled = _ausgewählteParts.Count > 0;
+        }
+
+        private void LöscheAusgewählteParts()
+        {
+            if (_ausgewählteParts.Count == 0) return;
+
+            // Zustand für Undo sichern
+            _löschUndoStack.Push(new HashSet<(int, int)>(_gelöschteParts));
+
+            // Ausgewählte löschen (toggle: bereits gelöschte wieder herstellen)
+            foreach (var p in _ausgewählteParts)
+            {
+                if (_gelöschteParts.Contains(p))
+                    _gelöschteParts.Remove(p);
+                else
+                    _gelöschteParts.Add(p);
+            }
+            _ausgewählteParts.Clear();
+            AktualisiereTeilOverlays();
+            BtnTeilLöschen.IsEnabled = false;
+
+            int n = _gelöschteParts.Count;
+            TxtInfo.Text = n > 0
+                ? $"{n} Teil(e) entfernt – Strg+Z zum Rückgängigmachen"
+                : "Alle Löschungen rückgängig";
+        }
+
+        private void BtnTeilLöschen_Click(object sender, RoutedEventArgs e)
+            => SafeExecute(LöscheAusgewählteParts, "BtnTeilLöschen_Click");
+
         private void ScrollView_PreviewKeyDown(object sender, KeyEventArgs e)
         {
             try
             {
-                if (!_scherenModus) return;
-
                 if (e.Key == Key.Z && (Keyboard.Modifiers & ModifierKeys.Control) != 0)
                 {
-                    if (_scherenschnitte.Count > 0)
+                    // Priorität: Lösch-Undo > Schnitt-Undo
+                    if (_löschUndoStack.Count > 0)
+                    {
+                        _gelöschteParts.Clear();
+                        foreach (var p in _löschUndoStack.Pop()) _gelöschteParts.Add(p);
+                        AktualisiereTeilOverlays();
+                        TxtInfo.Text = $"Löschen rückgängig ({_löschUndoStack.Count} weitere Undo-Schritte)";
+                        e.Handled = true;
+                    }
+                    else if (_scherenModus && _scherenschnitte.Count > 0)
                     {
                         _scherenschnitte.RemoveAt(_scherenschnitte.Count - 1);
                         AktualisiereSchnitteLinien();
@@ -3233,10 +3449,20 @@ namespace StatikManager.Modules.Werkzeuge
                         e.Handled = true;
                     }
                 }
+                else if (e.Key == Key.Delete && !_scherenModus)
+                {
+                    if (_ausgewählteParts.Count > 0) { LöscheAusgewählteParts(); e.Handled = true; }
+                }
                 else if (e.Key == Key.Escape)
                 {
-                    BeendeScherenModus();
-                    e.Handled = true;
+                    if (_scherenModus) { BeendeScherenModus(); e.Handled = true; }
+                    else if (_ausgewählteParts.Count > 0)
+                    {
+                        _ausgewählteParts.Clear();
+                        AktualisiereTeilOverlays();
+                        TxtInfo.Text = "";
+                        e.Handled = true;
+                    }
                 }
             }
             catch (Exception ex) { LogException(ex, "ScrollView_PreviewKeyDown"); }
