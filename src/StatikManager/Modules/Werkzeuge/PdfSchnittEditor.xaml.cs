@@ -827,7 +827,8 @@ namespace StatikManager.Modules.Werkzeuge
                     SafeExecute(() => ZeicheSeite(i), $"ZeicheSeite[{i}]");
 
                 ZeicheCropLinien();
-                _scherenVorschauLinie = null;
+                _scherenVorschauLinie      = null;  // Canvas.Clear() hat Linie entfernt; Pointer resetten
+                _seitenwechselVorschauLinie = null;  // Canvas.Clear() hat Linie entfernt; Pointer resetten
                 AktualisiereSchnitteLinien();
                 AktualisiereAuswahlAnzeige();
                 // Markierte Seite mit blauem Rahmen hervorheben
@@ -4135,7 +4136,7 @@ namespace StatikManager.Modules.Werkzeuge
                 var sichtbarTeilIndizes = Enumerable.Range(0, alleGrenzen.Count)
                     .Where(t => !gelöschteParts.Contains((si, t)))
                     .ToList();
-                System.Diagnostics.Debug.WriteLine($"[BUG1-SCHIEBEN] si={si} alleGrenzen={alleGrenzen.Count} sichtbarTeilIndizes=[{string.Join(",", sichtbarTeilIndizes)}]");
+                System.Diagnostics.Debug.WriteLine($"[BUG1-SCHIEBEN] si={si} alleGrenzen=[{string.Join(", ", alleGrenzen.Select(g => $"{g.Oben:F3}-{g.Unten:F3}"))}] sichtbar=[{string.Join(",", sichtbarTeilIndizes)}]");
 
                 if (sichtbarTeilIndizes.Count == 0)
                 {
