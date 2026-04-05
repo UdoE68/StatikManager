@@ -31,7 +31,7 @@ namespace StatikManager.Modules.Dokumente
         private bool    _dokumentGeladen;
         private bool    _panelBereit;
         private string  _filterTyp = "Alle";
-        private int     _baumTiefe = 0;   // 0 = alle Ebenen
+        private int     _baumTiefe = 1;   // 0 = alle Ebenen; 1 = nur Ebene 1 sichtbar/zugeklappt
 
         // Word-Vorschau
         private List<BitmapSource> _wordSeitenBilder = new();
@@ -104,7 +104,7 @@ namespace StatikManager.Modules.Dokumente
 
             foreach (var t in new[] { "1 Ebene", "2 Ebenen", "3 Ebenen", "Alle" })
                 CbBaumTiefe.Items.Add(t);
-            CbBaumTiefe.SelectedIndex = 3; // "Alle"
+            CbBaumTiefe.SelectedIndex = 0; // "1 Ebene"
 
             _panelBereit = true;
 
