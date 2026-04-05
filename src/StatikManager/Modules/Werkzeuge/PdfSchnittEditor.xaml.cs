@@ -41,6 +41,7 @@ namespace StatikManager.Modules.Werkzeuge
 
         // ── Zustand ───────────────────────────────────────────────────────────
         private string?            _pdfPfad;
+        private byte[]?            _pdfBytes;      // PDF als byte[] – verhindert Datei-Sperr-Probleme beim AutoSpeichern
         private List<BitmapSource> _seitenBilder  = new();
         private double[]           _seitenYStart   = Array.Empty<double>();
         private double[]           _seitenHöhe     = Array.Empty<double>();
@@ -274,7 +275,8 @@ namespace StatikManager.Modules.Werkzeuge
             if (_seitenwechselModus) BeendeSeitenwechselModus();
             if (_bearbeitungsModus) BeendeBearbeitungsModus(false);
 
-            _pdfPfad = pfad;
+            _pdfPfad  = pfad;
+            _pdfBytes = null;
             PdfCanvas.Children.Clear();
             _seitenBilder.Clear();
             _seitenYStart = Array.Empty<double>();
@@ -314,6 +316,7 @@ namespace StatikManager.Modules.Werkzeuge
                 List<BitmapSource>? bilder = null;
                 double[]? yStart = null, höhe = null;
                 string? fehler = null;
+                byte[]? pdfBytesLoaded = null;
 
                 // Serialisierung: kein paralleler pdfium-Zugriff mit Word-Vorschau-Threads.
                 try { AppZustand.RenderSem.Wait(token); }
@@ -323,7 +326,9 @@ namespace StatikManager.Modules.Werkzeuge
                 try
                 {
                     if (token.IsCancellationRequested) return;
-                    bilder = PdfRenderer.RenderiereAlleSeiten(pfadKopie, RenderBreite, token: token);
+                    // PDF in byte[] laden – pdfium hält damit keine Datei-Handle offen
+                    pdfBytesLoaded = IO.File.ReadAllBytes(pfadKopie);
+                    bilder = PdfRenderer.RenderiereAlleSeiten(pdfBytesLoaded, RenderBreite, token: token);
                     if (token.IsCancellationRequested) return;
                     if (bilder.Count == 0) { fehler = "PDF enthält keine lesbaren Seiten."; }
                     else
@@ -351,6 +356,7 @@ namespace StatikManager.Modules.Werkzeuge
                         _seitenBilder = bilder!;
                         _seitenYStart = yStart!;
                         _seitenHöhe   = höhe!;
+                        _pdfBytes     = pdfBytesLoaded;   // byte[]-Puffer für spätere Operationen
                         InitCropArrays(_seitenBilder.Count);
 
                         // Sitzungs-Crop wiederherstellen (überschreibt Default-Crop wenn Länge passt)
@@ -4775,6 +4781,8 @@ namespace StatikManager.Modules.Werkzeuge
             {
                 SpeicherNachPfad(tempPfad, autoSave: true);
                 IO.File.Replace(tempPfad, _pdfPfad, null);
+                // byte[]-Puffer aktualisieren damit nächstes Rendering die neue Version liest
+                try { _pdfBytes = IO.File.ReadAllBytes(_pdfPfad); } catch { }
                 System.Diagnostics.Debug.WriteLine($"[AUTOSAVE] Gespeichert: {_pdfPfad} um {DateTime.Now}");
             }
             catch (Exception ex)

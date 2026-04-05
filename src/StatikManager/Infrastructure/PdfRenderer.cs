@@ -18,8 +18,22 @@ namespace StatikManager.Infrastructure
         /// <summary>
         /// Rendert alle Seiten einer PDF-Datei als Bitmap-Liste.
         /// Transparente Pixel werden gegen Weiß kompositioniert.
+        /// Überladung mit Dateipfad: liest Datei in byte[] und delegiert an die byte[]-Überladung.
         /// </summary>
         public static List<BitmapSource> RenderiereAlleSeiten(string pfad, int breite, int höhe = 0,
+                                                               CancellationToken token = default)
+        {
+            byte[] bytes;
+            try { bytes = System.IO.File.ReadAllBytes(pfad); }
+            catch (Exception ex) { App.LogFehler("RenderiereAlleSeiten/ReadBytes", App.GetExceptionKette(ex)); return new List<BitmapSource>(); }
+            return RenderiereAlleSeiten(bytes, breite, höhe, token);
+        }
+
+        /// <summary>
+        /// Rendert alle Seiten einer PDF aus einem byte[]-Puffer als Bitmap-Liste.
+        /// Transparente Pixel werden gegen Weiß kompositioniert.
+        /// </summary>
+        public static List<BitmapSource> RenderiereAlleSeiten(byte[] bytes, int breite, int höhe = 0,
                                                                CancellationToken token = default)
         {
             if (höhe <= 0) höhe = breite * 2;
@@ -32,7 +46,7 @@ namespace StatikManager.Infrastructure
                 // Die tatsächliche Render-Größe liefert GetPageWidth/Height().
                 int dimMin = Math.Min(breite, höhe);
                 int dimMax = Math.Max(breite, höhe);
-                using var docReader = lib.GetDocReader(pfad, new PageDimensions(dimMin, dimMax));
+                using var docReader = lib.GetDocReader(bytes, new PageDimensions(dimMin, dimMax));
                 int n = docReader.GetPageCount();
                 for (int i = 0; i < n; i++)
                 {
