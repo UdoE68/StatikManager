@@ -1,4 +1,5 @@
 using StatikManager.Core;
+using StatikManager.Modules.Bildschnitt;
 using StatikManager.Modules.Dokumente;
 using System.Windows;
 using System.Windows.Controls;
@@ -62,6 +63,7 @@ namespace StatikManager
             // ── Module registrieren ──────────────────────────────────────────
             // Neues Modul hinzufügen: einfach eine weitere Zeile hier.
             _modulManager.Registrieren(new DokumenteModul());
+            _modulManager.Registrieren(new BildschnittModul());
 
             // ── Module in die Shell integrieren ─────────────────────────────
             IntegriereModule();

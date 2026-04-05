@@ -1,0 +1,122 @@
+<UserControl x:Class="StatikManager.Modules.Bildschnitt.BildschnittPanel"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>   <!-- Toolbar -->
+            <RowDefinition Height="*"/>      <!-- Hauptbereich -->
+            <RowDefinition Height="Auto"/>   <!-- Statusleiste -->
+        </Grid.RowDefinitions>
+
+        <!-- Toolbar -->
+        <Border Grid.Row="0"
+                Background="{DynamicResource Farbe.Werkzeugleiste}"
+                BorderBrush="{DynamicResource Farbe.Rahmen}"
+                BorderThickness="0,0,0,1"
+                Padding="8,6">
+            <WrapPanel Orientation="Horizontal">
+                <Button x:Name="BtnBildLaden" Content="&#x1F5BC; Bild laden"
+                        Height="24" Padding="8,0" Margin="0,0,4,0"
+                        Click="BtnBildLaden_Click"/>
+                <Separator Width="1" Height="18" Background="#BBB" Margin="4,0"/>
+                <Button x:Name="BtnAutoErkennen" Content="&#x1F50D; Auto-Erkennen"
+                        Height="24" Padding="8,0" Margin="0,0,4,0"
+                        IsEnabled="False"
+                        Click="BtnAutoErkennen_Click"/>
+                <Button x:Name="BtnHLinie" Content="&#x2500;&#x2500; H-Linie"
+                        Height="24" Padding="8,0" Margin="0,0,4,0"
+                        IsEnabled="False"
+                        Click="BtnHLinie_Click"/>
+                <Button x:Name="BtnVLinie" Content="| V-Linie"
+                        Height="24" Padding="8,0" Margin="0,0,4,0"
+                        IsEnabled="False"
+                        Click="BtnVLinie_Click"/>
+                <Button x:Name="BtnLinienZurücksetzen" Content="&#x2715; Linien löschen"
+                        Height="24" Padding="8,0" Margin="0,0,4,0"
+                        IsEnabled="False"
+                        Click="BtnLinienZurücksetzen_Click"/>
+                <Separator Width="1" Height="18" Background="#BBB" Margin="4,0"/>
+                <Button x:Name="BtnAlsPngSpeichern" Content="&#x1F4BE; Als PNG speichern"
+                        Height="24" Padding="8,0" Margin="0,0,4,0"
+                        IsEnabled="False"
+                        Click="BtnAlsPngSpeichern_Click"/>
+            </WrapPanel>
+        </Border>
+
+        <!-- Hauptbereich: Canvas links, Info rechts -->
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="200"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- Bild + Canvas -->
+            <Border Grid.Column="0" Background="#3C3C3C" ClipToBounds="True">
+                <ScrollViewer x:Name="BildScroll"
+                              HorizontalScrollBarVisibility="Auto"
+                              VerticalScrollBarVisibility="Auto">
+                    <Grid>
+                        <!-- Platzhalter wenn kein Bild geladen -->
+                        <TextBlock x:Name="PnlPlatzhalter"
+                                   Text="Kein Bild geladen.&#x0a;Bild über 'Bild laden' auswählen."
+                                   HorizontalAlignment="Center"
+                                   VerticalAlignment="Center"
+                                   TextAlignment="Center"
+                                   Foreground="#888"
+                                   FontSize="14"
+                                   Margin="20"/>
+                        <!-- Interaktiver Canvas -->
+                        <Canvas x:Name="VorschauCanvas"
+                                HorizontalAlignment="Left"
+                                VerticalAlignment="Top">
+                            <Image x:Name="VorschauBild"
+                                   Canvas.Left="0" Canvas.Top="0"
+                                   Stretch="None"/>
+                        </Canvas>
+                    </Grid>
+                </ScrollViewer>
+            </Border>
+
+            <!-- Info-Panel -->
+            <Border Grid.Column="1"
+                    Background="{DynamicResource Farbe.Fläche}"
+                    BorderBrush="{DynamicResource Farbe.Rahmen}"
+                    BorderThickness="1,0,0,0"
+                    Padding="10,8">
+                <StackPanel>
+                    <TextBlock Text="Bildinfo" FontWeight="SemiBold" FontSize="12" Margin="0,0,0,8"/>
+                    <TextBlock x:Name="TxtBildInfo" FontSize="11" Foreground="#555"
+                               TextWrapping="Wrap" Margin="0,0,0,8"/>
+                    <Separator Margin="0,4,0,8"/>
+                    <TextBlock Text="Crop-Bereich" FontWeight="SemiBold" FontSize="12" Margin="0,0,0,6"/>
+                    <TextBlock x:Name="TxtRandInfo" FontSize="11" Foreground="#555"
+                               TextWrapping="Wrap" Margin="0,0,0,8"/>
+                    <Separator Margin="0,4,0,8"/>
+                    <TextBlock Text="Segmente" FontWeight="SemiBold" FontSize="12" Margin="0,0,0,6"/>
+                    <TextBlock x:Name="TxtSegmentInfo" FontSize="11" Foreground="#555"
+                               TextWrapping="Wrap" Margin="0,0,0,8"/>
+                    <Separator Margin="0,4,0,8"/>
+                    <TextBlock Text="Sicherheitsabstand" FontWeight="SemiBold" FontSize="12" Margin="0,0,0,6"/>
+                    <StackPanel Orientation="Horizontal">
+                        <TextBox x:Name="TxtSicherheitsabstand" Text="0" Width="50"
+                                 VerticalAlignment="Center"/>
+                        <TextBlock Text=" mm" VerticalAlignment="Center" FontSize="11"/>
+                        <Button x:Name="BtnSpinUp" Content="&#x25B2;" Width="20" Height="20"
+                                Margin="4,0,2,0" Click="BtnSpinUp_Click"/>
+                        <Button x:Name="BtnSpinDown" Content="&#x25BC;" Width="20" Height="20"
+                                Click="BtnSpinDown_Click"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </Grid>
+
+        <!-- Statusleiste -->
+        <Border Grid.Row="2"
+                Background="{DynamicResource Farbe.Werkzeugleiste}"
+                BorderBrush="{DynamicResource Farbe.Rahmen}"
+                BorderThickness="0,1,0,0"
+                Padding="8,4">
+            <TextBlock x:Name="TxtStatus" FontSize="11" Foreground="#555"/>
+        </Border>
+    </Grid>
+</UserControl>
