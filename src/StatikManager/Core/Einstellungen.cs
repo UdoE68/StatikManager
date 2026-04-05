@@ -33,6 +33,11 @@ namespace StatikManager.Core
         [XmlArrayItem("Vorlage")]
         public List<WordVorlage> WordVorlagen { get; set; } = new List<WordVorlage>();
 
+        /// <summary>Zuletzt verwendete Projektpfade (keine Dateilöschung beim Entfernen).</summary>
+        [XmlArray("ProjektPfade")]
+        [XmlArrayItem("Pfad")]
+        public List<string> ProjektPfade { get; set; } = new List<string>();
+
         // ── Persistenz ────────────────────────────────────────────────────────
 
         private static readonly string DateiPfad = Path.Combine(

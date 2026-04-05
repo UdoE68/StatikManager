@@ -108,6 +108,8 @@ namespace StatikManager.Modules.Dokumente
 
             _panelBereit = true;
 
+            AktualisiereProjectComboBox();
+
             _fileWatcher = new FileWatcherService(Dispatcher);
             _fileWatcher.DateiGeändert += OnDateiGeändert;
 
@@ -152,6 +154,7 @@ namespace StatikManager.Modules.Dokumente
                 System.IO.Directory.CreateDirectory(_cacheDir);
                 AppZustand.Instanz.SetzeProjekt(_projektPfad);
                 _ordnerWatcher.Starte(_projektPfad);
+                ProjektZurListeHinzufügen(_projektPfad);
                 AktualisiereDokumentListe();
                 // Keine Vorkonvertierung beim Session-Restore (würde Startzeit verlängern)
             }
@@ -184,8 +187,138 @@ namespace StatikManager.Modules.Dokumente
 
             AppZustand.Instanz.SetzeProjekt(_projektPfad);
             _ordnerWatcher.Starte(_projektPfad);
+            ProjektZurListeHinzufügen(_projektPfad);
             AktualisiereDokumentListe();
             StartVorkonvertierung(new DirectoryInfo(_projektPfad), _cacheDir);
+        }
+
+        // ── Projektverwaltung (P4) ────────────────────────────────────────────
+
+        private bool _cbProjekteAktualisierung; // verhindert Rekursion bei SelectionChanged
+
+        private void ProjektZurListeHinzufügen(string pfad)
+        {
+            var liste = Einstellungen.Instanz.ProjektPfade;
+            // Pfad normalisiert (lowercase) auf Duplikate prüfen
+            if (!liste.Any(p => string.Equals(p, pfad, StringComparison.OrdinalIgnoreCase)))
+                liste.Add(pfad);
+            Einstellungen.Instanz.Speichern();
+            AktualisiereProjectComboBox();
+        }
+
+        private void AktualisiereProjectComboBox()
+        {
+            _cbProjekteAktualisierung = true;
+            CbProjekte.Items.Clear();
+
+            // Nur existierende Pfade anzeigen
+            foreach (var pfad in Einstellungen.Instanz.ProjektPfade.Where(Directory.Exists))
+            {
+                var item = new ComboBoxItem
+                {
+                    Content = Path.GetFileName(pfad.TrimEnd(Path.DirectorySeparatorChar)),
+                    Tag     = pfad,
+                    ToolTip = pfad
+                };
+                CbProjekte.Items.Add(item);
+            }
+
+            // Aktuelles Projekt vorauswählen
+            if (_projektPfad != null)
+            {
+                foreach (ComboBoxItem ci in CbProjekte.Items)
+                {
+                    if (string.Equals(ci.Tag as string, _projektPfad, StringComparison.OrdinalIgnoreCase))
+                    {
+                        CbProjekte.SelectedItem = ci;
+                        break;
+                    }
+                }
+            }
+            _cbProjekteAktualisierung = false;
+        }
+
+        private void CbProjekte_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (_cbProjekteAktualisierung) return;
+            if (CbProjekte.SelectedItem is not ComboBoxItem ci) return;
+            if (ci.Tag is not string pfad) return;
+            if (string.Equals(pfad, _projektPfad, StringComparison.OrdinalIgnoreCase)) return;
+
+            _projektPfad = pfad;
+            var hash = ((uint)pfad.ToLowerInvariant().GetHashCode()).ToString("X8");
+            _cacheDir = Path.Combine(PdfCache.CacheBasis, hash);
+            Directory.CreateDirectory(_cacheDir);
+
+            AppZustand.Instanz.SetzeProjekt(_projektPfad);
+            _ordnerWatcher.Starte(_projektPfad);
+            AktualisiereDokumentListe();
+        }
+
+        private void BtnProjektHinzufügen_Click(object sender, RoutedEventArgs e)
+        {
+            var pfad = OrdnerDialog.Zeigen(
+                startPfad: Einstellungen.Instanz.StandardPfad ?? "",
+                titel:     "Projektordner hinzufügen",
+                besitzer:  Window.GetWindow(this));
+
+            if (string.IsNullOrWhiteSpace(pfad)) return;
+
+            ProjektZurListeHinzufügen(pfad);
+
+            // Automatisch auf das neue Projekt wechseln
+            _projektPfad = pfad;
+            var hash = ((uint)pfad.ToLowerInvariant().GetHashCode()).ToString("X8");
+            _cacheDir = Path.Combine(PdfCache.CacheBasis, hash);
+            Directory.CreateDirectory(_cacheDir);
+
+            AppZustand.Instanz.SetzeProjekt(_projektPfad);
+            _ordnerWatcher.Starte(_projektPfad);
+            AktualisiereDokumentListe();
+            StartVorkonvertierung(new DirectoryInfo(_projektPfad), _cacheDir);
+        }
+
+        private void BtnProjektEntfernen_Click(object sender, RoutedEventArgs e)
+        {
+            if (CbProjekte.SelectedItem is not ComboBoxItem ci) return;
+            if (ci.Tag is not string pfad) return;
+
+            var name = Path.GetFileName(pfad.TrimEnd(Path.DirectorySeparatorChar));
+            if (MessageBox.Show(
+                    $"Projekt \"{name}\" aus der Liste entfernen?\n\n(Dateien werden nicht gelöscht.)",
+                    "Projekt entfernen",
+                    MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No)
+                != MessageBoxResult.Yes) return;
+
+            Einstellungen.Instanz.ProjektPfade.RemoveAll(
+                p => string.Equals(p, pfad, StringComparison.OrdinalIgnoreCase));
+            Einstellungen.Instanz.Speichern();
+
+            // Wenn aktuelles Projekt entfernt: erstes verbleibendes laden oder leeren
+            if (string.Equals(pfad, _projektPfad, StringComparison.OrdinalIgnoreCase))
+            {
+                var erster = Einstellungen.Instanz.ProjektPfade.FirstOrDefault(Directory.Exists);
+                if (erster != null)
+                {
+                    _projektPfad = erster;
+                    var hash = ((uint)erster.ToLowerInvariant().GetHashCode()).ToString("X8");
+                    _cacheDir = Path.Combine(PdfCache.CacheBasis, hash);
+                    Directory.CreateDirectory(_cacheDir);
+                    AppZustand.Instanz.SetzeProjekt(_projektPfad);
+                    _ordnerWatcher.Starte(_projektPfad);
+                    AktualisiereDokumentListe();
+                }
+                else
+                {
+                    _projektPfad = null;
+                    _ordnerWatcher.Stoppe();
+                    DokumentenBaum.Items.Clear();
+                    DateiListe.Items.Clear();
+                    AppZustand.Instanz.SetzeStatus("Kein Projekt geladen.");
+                }
+            }
+
+            AktualisiereProjectComboBox();
         }
 
         public void InWordÖffnen()
