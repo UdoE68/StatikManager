@@ -119,11 +119,15 @@ namespace StatikManager.Modules.Dokumente
             // UI-Freigabe wenn PdfSchnittEditor SetzeLaden(false) signalisiert
             AppZustand.Instanz.LadeZustandGeändert += aktiv => { if (!aktiv) GibUI(); };
 
-            // Erster Start: Basispfad noch nicht gesetzt → Dialog öffnen
+            // Kein Sitzungsprojekt: erstes sichtbares Projekt aus der Liste laden
             Loaded += (_, _) =>
             {
-                if (string.IsNullOrWhiteSpace(Einstellungen.Instanz.ProjektBasisPfad))
-                    ÖffneProjektVerwaltung();
+                if (_projektPfad == null)
+                {
+                    var erster = Einstellungen.Instanz.ProjektEintraege
+                        .Find(e => e.Sichtbar && Directory.Exists(e.Pfad));
+                    if (erster != null) LadeProjektPfad(erster.Pfad);
+                }
             };
         }
 

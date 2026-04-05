@@ -51,12 +51,6 @@ namespace StatikManager.Core
         public List<WordVorlage> WordVorlagen { get; set; } = new List<WordVorlage>();
 
         /// <summary>
-        /// Basisordner dessen direkte Unterordner als Projekte angeboten werden.
-        /// null = noch nicht konfiguriert (beim ersten Start abfragen).
-        /// </summary>
-        public string? ProjektBasisPfad { get; set; }
-
-        /// <summary>
         /// Bekannte Projekte mit Sichtbarkeits-Flag und optionalem Kurznamen.
         /// Wird durch den Dialog "Projekte verwalten" befüllt.
         /// </summary>

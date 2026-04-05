@@ -1,51 +1,49 @@
 using StatikManager.Core;
-using System;
-using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.IO;
-using System.Linq;
 using System.Windows;
+using System.Windows.Controls;
 
 namespace StatikManager.Modules.Dokumente
 {
     public partial class ProjektVerwaltungDialog : Window
     {
-        // ── Datenklasse für die DataGrid-Zeilen ───────────────────────────────
+        // ── Datenklasse für DataGrid-Zeilen ───────────────────────────────────
 
         private sealed class ProjektDialogItem : INotifyPropertyChanged
         {
             private bool   _sichtbar = true;
             private string _kurzname = "";
 
-            public string Pfad       { get; set; } = "";
-            public string OrdnerName => Path.GetFileName(Pfad.TrimEnd(Path.DirectorySeparatorChar));
+            public string Pfad { get; set; } = "";
 
             public bool Sichtbar
             {
                 get => _sichtbar;
-                set { _sichtbar = value; PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Sichtbar))); }
+                set { _sichtbar = value; Notify(nameof(Sichtbar)); }
             }
 
             public string Kurzname
             {
                 get => _kurzname;
-                set { _kurzname = value ?? ""; PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Kurzname))); }
+                set { _kurzname = value ?? ""; Notify(nameof(Kurzname)); }
             }
 
             public event PropertyChangedEventHandler? PropertyChanged;
+            private void Notify(string name) =>
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
         }
 
         // ── Felder ────────────────────────────────────────────────────────────
 
         private readonly ObservableCollection<ProjektDialogItem> _items = new();
-        private string? _basisPfad;
 
         // ── Fabrik-Methode ────────────────────────────────────────────────────
 
         /// <summary>
-        /// Zeigt den Dialog. Gibt true zurück wenn der Benutzer OK gedrückt hat
-        /// (Einstellungen wurden gespeichert).
+        /// Zeigt den Dialog modal. Gibt true zurück wenn der Benutzer OK gedrückt hat
+        /// (Einstellungen wurden bereits gespeichert).
         /// </summary>
         public static bool Zeigen(Window owner)
         {
@@ -59,104 +57,114 @@ namespace StatikManager.Modules.Dokumente
         {
             InitializeComponent();
             DgProjekte.ItemsSource = _items;
-
-            _basisPfad = Einstellungen.Instanz.ProjektBasisPfad;
-            ZeigeBasisPfad();
-            Scannen();
+            LadeEintraege();
         }
 
-        // ── Basispfad ─────────────────────────────────────────────────────────
+        // ── Datenladen ────────────────────────────────────────────────────────
 
-        private void ZeigeBasisPfad()
-        {
-            TxtBasisPfad.Text = string.IsNullOrWhiteSpace(_basisPfad)
-                ? "(noch nicht festgelegt)"
-                : _basisPfad;
-        }
-
-        private void BtnBasisPfadÄndern_Click(object sender, RoutedEventArgs e)
-        {
-            var neuerPfad = OrdnerDialog.Zeigen(
-                startPfad: _basisPfad ?? "",
-                titel:     "Projektbasis-Ordner wählen",
-                besitzer:  this);
-
-            if (string.IsNullOrWhiteSpace(neuerPfad)) return;
-
-            _basisPfad = neuerPfad;
-            ZeigeBasisPfad();
-            Scannen();
-        }
-
-        private void BtnNeuScannen_Click(object sender, RoutedEventArgs e) => Scannen();
-
-        // ── Scan-Logik ────────────────────────────────────────────────────────
-
-        /// <summary>
-        /// Liest alle ersten-Ebene-Unterordner des Basispfads ein und füllt die Liste.
-        /// Bestehende Einträge (Sichtbar / Kurzname) werden beibehalten.
-        /// </summary>
-        private void Scannen()
+        private void LadeEintraege()
         {
             _items.Clear();
-
-            if (string.IsNullOrWhiteSpace(_basisPfad) || !Directory.Exists(_basisPfad))
-                return;
-
-            var bekannte = Einstellungen.Instanz.ProjektEintraege
-                .ToDictionary(e => e.Pfad.ToLowerInvariant(), e => e);
-
-            IEnumerable<string> unterordner;
-            try
+            foreach (var e in Einstellungen.Instanz.ProjektEintraege)
             {
-                unterordner = Directory.GetDirectories(_basisPfad)
-                    .OrderBy(p => Path.GetFileName(p), StringComparer.OrdinalIgnoreCase);
-            }
-            catch { unterordner = Enumerable.Empty<string>(); }
-
-            foreach (var pfad in unterordner)
-            {
-                bekannte.TryGetValue(pfad.ToLowerInvariant(), out var bekannt);
                 _items.Add(new ProjektDialogItem
                 {
-                    Pfad     = pfad,
-                    Sichtbar = bekannt?.Sichtbar ?? true,
-                    Kurzname = bekannt?.Kurzname ?? ""
+                    Pfad     = e.Pfad,
+                    Kurzname = e.Kurzname,
+                    Sichtbar = e.Sichtbar
                 });
             }
         }
 
-        // ── Alle an / aus ─────────────────────────────────────────────────────
+        // ── Button-Status aktualisieren ───────────────────────────────────────
 
-        private void BtnAlleAn_Click(object sender, RoutedEventArgs e)
+        private void DgProjekte_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            foreach (var item in _items) item.Sichtbar = true;
+            int idx   = DgProjekte.SelectedIndex;
+            int count = _items.Count;
+            BtnEntfernen.IsEnabled  = idx >= 0;
+            BtnNachOben.IsEnabled   = idx > 0;
+            BtnNachUnten.IsEnabled  = idx >= 0 && idx < count - 1;
         }
 
-        private void BtnAlleAus_Click(object sender, RoutedEventArgs e)
+        // ── Hinzufügen ────────────────────────────────────────────────────────
+
+        private void BtnHinzufügen_Click(object sender, RoutedEventArgs e)
         {
-            foreach (var item in _items) item.Sichtbar = false;
+            var pfad = OrdnerDialog.Zeigen(
+                startPfad: Einstellungen.Instanz.StandardPfad ?? "",
+                titel:     "Projektordner auswählen",
+                besitzer:  this);
+
+            if (string.IsNullOrWhiteSpace(pfad)) return;
+
+            // Duplikat-Prüfung
+            foreach (var item in _items)
+            {
+                if (string.Equals(item.Pfad, pfad, System.StringComparison.OrdinalIgnoreCase))
+                {
+                    DgProjekte.SelectedItem = item;
+                    DgProjekte.ScrollIntoView(item);
+                    return;
+                }
+            }
+
+            var neuer = new ProjektDialogItem { Pfad = pfad, Sichtbar = true };
+            _items.Add(neuer);
+            DgProjekte.SelectedItem = neuer;
+            DgProjekte.ScrollIntoView(neuer);
+        }
+
+        // ── Entfernen ─────────────────────────────────────────────────────────
+
+        private void BtnEntfernen_Click(object sender, RoutedEventArgs e)
+        {
+            if (DgProjekte.SelectedItem is not ProjektDialogItem item) return;
+            int idx = _items.IndexOf(item);
+            _items.Remove(item);
+
+            // Selektion auf Nachbareintrag setzen
+            if (_items.Count > 0)
+                DgProjekte.SelectedIndex = System.Math.Min(idx, _items.Count - 1);
+        }
+
+        // ── Reihenfolge ändern ────────────────────────────────────────────────
+
+        private void BtnNachOben_Click(object sender, RoutedEventArgs e)
+        {
+            int idx = DgProjekte.SelectedIndex;
+            if (idx <= 0) return;
+            _items.Move(idx, idx - 1);
+            DgProjekte.SelectedIndex = idx - 1;
+        }
+
+        private void BtnNachUnten_Click(object sender, RoutedEventArgs e)
+        {
+            int idx = DgProjekte.SelectedIndex;
+            if (idx < 0 || idx >= _items.Count - 1) return;
+            _items.Move(idx, idx + 1);
+            DgProjekte.SelectedIndex = idx + 1;
         }
 
         // ── OK / Abbrechen ────────────────────────────────────────────────────
 
         private void BtnOK_Click(object sender, RoutedEventArgs e)
         {
-            // DataGrid-Änderungen übernehmen (laufende Cell-Edits committen)
-            DgProjekte.CommitEdit(System.Windows.Controls.DataGridEditingUnit.Row, exitEditingMode: true);
+            // Laufende Cell-Edits übernehmen
+            DgProjekte.CommitEdit(DataGridEditingUnit.Row, exitEditingMode: true);
 
-            Einstellungen.Instanz.ProjektBasisPfad = _basisPfad;
-
-            // Alle gescannten Ordner (auch deaktivierte) speichern
-            var neueEintraege = _items.Select(i => new ProjektEintrag
+            var neue = new System.Collections.Generic.List<ProjektEintrag>();
+            foreach (var item in _items)
             {
-                Pfad     = i.Pfad,
-                Kurzname = i.Kurzname.Trim(),
-                Sichtbar = i.Sichtbar
-            }).ToList();
+                neue.Add(new ProjektEintrag
+                {
+                    Pfad     = item.Pfad,
+                    Kurzname = item.Kurzname.Trim(),
+                    Sichtbar = item.Sichtbar
+                });
+            }
 
-            // Einträge die nicht mehr im Basispfad liegen aber woanders waren: verwerfen
-            Einstellungen.Instanz.ProjektEintraege = neueEintraege;
+            Einstellungen.Instanz.ProjektEintraege = neue;
             Einstellungen.Instanz.Speichern();
 
             DialogResult = true;
