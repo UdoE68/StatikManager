@@ -84,6 +84,10 @@ namespace StatikManager.Modules.Dokumente
         private Point _dragStartPunkt;
         private bool  _dragAktiv;
 
+        // Ausschnitt-Löschen via window.external
+        private string? _aktivesPositionsVerzeichnis;
+        private readonly AusschnittScriptingObjekt _ausschnittScripting = new AusschnittScriptingObjekt();
+
         public event Action<string?>? DateiAusgewählt;
 
         // ── Initialisierung ───────────────────────────────────────────────────
@@ -115,6 +119,8 @@ namespace StatikManager.Modules.Dokumente
             _panelBereit = true;
 
             AktualisiereProjectComboBox();
+
+            _ausschnittScripting.LoeschCallback = OnAusschnittLoeschAngefordert;
 
             _fileWatcher = new FileWatcherService(Dispatcher);
             _fileWatcher.DateiGeändert += OnDateiGeändert;
@@ -759,12 +765,20 @@ namespace StatikManager.Modules.Dokumente
                         if (DateiTypen.IstHtmlDatei(Path.GetExtension(pfad)))
                         {
                             ZeigeHtmlToolbar(pfad);
-                            // Auto-PDF nur für position.html (fire-and-forget)
                             if (Path.GetFileName(pfad).Equals("position.html",
                                     StringComparison.OrdinalIgnoreCase))
+                            {
+                                // position.html: mit X-Buttons anzeigen + Auto-PDF im Hintergrund
+                                AppZustand.Instanz.SetzeStatus("Lade: " + Path.GetFileName(pfad) + " …");
+                                ZeigePositionsHtml(pfad);
                                 _ = AutoPdfImHintergrundAsync(pfad);
+                                GibUI();
+                                break;
+                            }
                         }
                         AppZustand.Instanz.SetzeStatus("Lade: " + Path.GetFileName(pfad) + " …");
+                        WordVorschau.ObjectForScripting = null;
+                        _aktivesPositionsVerzeichnis   = null;
                         WordVorschau.Navigate(new Uri(pfad));
                         GibUI(); // synchron: Navigation ist fire-and-forget
                         break;
@@ -1274,6 +1288,44 @@ namespace StatikManager.Modules.Dokumente
         }
 
         // ── HTML → PDF (WebView2) ─────────────────────────────────────────────
+
+        // ── Positions-HTML mit X-Buttons ─────────────────────────────────────
+
+        private void ZeigePositionsHtml(string positionsHtmlPfad)
+        {
+            _aktivesPositionsVerzeichnis    = Path.GetDirectoryName(positionsHtmlPfad);
+            WordVorschau.ObjectForScripting = _ausschnittScripting;
+            string html = PositionsHtmlHelper.GeneriereHtmlMitXButtons(_aktivesPositionsVerzeichnis!);
+            WordVorschau.NavigateToString(html);
+        }
+
+        private void OnAusschnittLoeschAngefordert(string pngDateiname)
+        {
+            if (_aktivesPositionsVerzeichnis == null) return;
+
+            var result = MessageBox.Show(
+                "Ausschnitt '" + pngDateiname + "' wirklich löschen?\n\nPNG und JSON werden dauerhaft entfernt.",
+                "Ausschnitt löschen",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning);
+
+            if (result != MessageBoxResult.Yes) return;
+
+            try
+            {
+                PositionsHtmlHelper.LöscheAusschnitt(_aktivesPositionsVerzeichnis, pngDateiname);
+                ZeigePositionsHtml(Path.Combine(_aktivesPositionsVerzeichnis, "position.html"));
+                AppZustand.Instanz.SetzeStatus("Ausschnitt gelöscht: " + pngDateiname);
+                AktualisiereNurStruktur();
+            }
+            catch (Exception ex)
+            {
+                Logger.Fehler("AusschnittLöschen", ex.Message);
+                AppZustand.Instanz.SetzeStatus("Fehler beim Löschen: " + ex.Message, StatusLevel.Error);
+            }
+        }
+
+        // ── HTML-Toolbar ──────────────────────────────────────────────────────
 
         private void ZeigeHtmlToolbar(string htmlPfad)
         {
