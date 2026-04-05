@@ -168,6 +168,21 @@
                         ToolTip="Alle PDF-Seiten als Bilder in eine Word-Datei exportieren"
                         Click="BtnExport_Click"/>
 
+                <!-- Seite einfügen / PDF speichern -->
+                <Button x:Name="BtnSeiteEinfügen"
+                        Content="&#x2795; Seite einfügen"
+                        Height="26" Padding="8,0"
+                        Margin="0,0,4,0"
+                        ToolTip="Neue Seite am Ende einfügen (leer oder aus anderer PDF). Rechtsklick auf Seite für positionsgenaues Einfügen."
+                        Click="BtnSeiteEinfügen_Click"/>
+                <Button x:Name="BtnPdfSpeichern"
+                        Content="&#x1F4BE; PDF speichern"
+                        Height="26" Padding="8,0"
+                        Margin="0,0,8,0"
+                        Style="{StaticResource PrimaryButton}"
+                        ToolTip="Bearbeitete PDF speichern (Strg+S)"
+                        Click="BtnPdfSpeichern_Click"/>
+
                 <Separator Width="1" Height="18" Background="#BBB" Margin="0,0,8,0"/>
 
                 <!-- ── Scheren-Werkzeug ──────────────────────────────────── -->

@@ -134,11 +134,28 @@ namespace StatikManager.Modules.Werkzeuge
         // Unified undo stack
         private readonly Stack<ScherenZustand> _undoStack = new Stack<ScherenZustand>();
 
+        // Feature 3: Gelöschte ganze Seiten
+        private readonly HashSet<int> _gelöschteSeiten = new HashSet<int>();
+
+        // Features 4 & 5: Seitenreihenfolge (null = Identität [0,1,...,n-1])
+        private List<int> _seitenReihenfolge;
+        // Quellinformation für extern eingefügte Seiten: BitmapIdx → (Pfad, OrigSeitenIdx)
+        private readonly Dictionary<int, (string Pfad, int Idx)> _eingefügteSeitenInfo
+            = new Dictionary<int, (string, int)>();
+
+        // Drag-State für Seiten-Drag & Drop (Feature 5)
+        private int    _dragQuellIdx    = -1;
+        private Point  _dragStartPunkt;
+        private bool   _dragAktiv;
+        private Border _dragGhost;
+
         private sealed class ScherenZustand
         {
             public List<(int Seite, double YFraction)> Schnitte { get; set; } = new List<(int, double)>();
             public HashSet<(int Seite, int Teil)> Gelöscht { get; set; } = new HashSet<(int, int)>();
             public Dictionary<int, BitmapSource> KompositBilder { get; set; } = new Dictionary<int, BitmapSource>();
+            public HashSet<int> GelöschteSeiten  { get; set; } = new HashSet<int>();
+            public List<int>    SeitenReihenfolge { get; set; }
         }
 
         // Abbruch laufender Lade-Aufträge
@@ -253,6 +270,12 @@ namespace StatikManager.Modules.Werkzeuge
             _gelöschteParts.Clear();
             _kompositBilder.Clear();
             _undoStack.Clear();
+            _gelöschteSeiten.Clear();
+            _seitenReihenfolge = null;
+            _eingefügteSeitenInfo.Clear();
+            _dragAktiv = false;
+            _dragQuellIdx = -1;
+            _dragGhost = null;
             TxtInfo.Text              = "Lade PDF …";
             BtnExport.IsEnabled       = false;
             BtnAuswahlmodus.IsEnabled = false;
@@ -718,41 +741,65 @@ namespace StatikManager.Modules.Werkzeuge
             {
                 PdfCanvas.Children.Clear();
                 if (_seitenBilder.Count == 0) return;
-                if (_seitenYStart.Length != _seitenBilder.Count ||
-                    _seitenHöhe.Length   != _seitenBilder.Count) return;
 
                 // Effektive Bitmaps: Komposit wenn vorhanden, sonst Original
                 var effBilder = Enumerable.Range(0, _seitenBilder.Count)
                     .Select(i => (BitmapSource)(_kompositBilder.TryGetValue(i, out var k) ? k : _seitenBilder[i]))
                     .ToList();
 
-                // Layout mit effektiven Bitmaps neu berechnen (Komposit kann andere Höhe haben)
-                BerechneLayoutStatic(effBilder, SeitenAbstand, out _seitenYStart, out _seitenHöhe);
+                // Reihenfolge: _seitenReihenfolge falls aktiv, sonst Identität
+                var reihenfolge = _seitenReihenfolge ?? Enumerable.Range(0, _seitenBilder.Count).ToList();
+                // Sichtbare Seiten (nicht gelöscht), in Anzeigereihenfolge
+                var sichtbar = reihenfolge.Where(i => i < _seitenBilder.Count && !_gelöschteSeiten.Contains(i)).ToList();
+
+                // Layout-Arrays initialisieren
+                _seitenYStart = new double[_seitenBilder.Count];
+                _seitenHöhe   = new double[_seitenBilder.Count];
+                _seitenXStart = new double[_seitenBilder.Count];
+                for (int i = 0; i < _seitenBilder.Count; i++) { _seitenYStart[i] = -9999; _seitenHöhe[i] = 0; }
+
+                if (sichtbar.Count == 0) return;
+
+                var sichtbarBmps = sichtbar.Select(i => effBilder[i]).ToList();
 
                 if (_layoutHorizontal)
                 {
-                    BerechneLayoutHorizontalStatic(effBilder, SeitenAbstand, out _seitenXStart);
-                    int lastH = _seitenXStart.Length - 1;
-                    double gesamtW = _seitenXStart[lastH] + effBilder[lastH].PixelWidth + SeitenAbstand;
-                    double maxH    = effBilder.Max(b => (double)b.PixelHeight);
+                    BerechneLayoutHorizontalStatic(sichtbarBmps, SeitenAbstand, out var ordXStart);
+                    BerechneLayoutStatic(sichtbarBmps, SeitenAbstand, out var ordYStart, out var ordHöhe);
+                    for (int di = 0; di < sichtbar.Count; di++)
+                    {
+                        int oi = sichtbar[di];
+                        _seitenYStart[oi] = ordYStart[di];
+                        _seitenHöhe[oi]   = ordHöhe[di];
+                        _seitenXStart[oi] = ordXStart[di];
+                    }
+                    int lastOi = sichtbar[sichtbar.Count - 1];
+                    double gesamtW = _seitenXStart[lastOi] + effBilder[lastOi].PixelWidth + SeitenAbstand;
+                    double maxH    = sichtbarBmps.Max(b => (double)b.PixelHeight);
                     PdfCanvas.Width  = Math.Max(gesamtW, 1);
                     PdfCanvas.Height = Math.Max(maxH + SeiteX * 2, 1);
                 }
                 else
                 {
-                    int    last    = _seitenYStart.Length - 1;
-                    double gesamtH = _seitenYStart[last] + _seitenHöhe[last] + SeitenAbstand;
-                    double maxBmpW = effBilder.Max(b => (double)b.PixelWidth);
+                    BerechneLayoutStatic(sichtbarBmps, SeitenAbstand, out var ordYStart, out var ordHöhe);
+                    for (int di = 0; di < sichtbar.Count; di++)
+                    {
+                        int oi = sichtbar[di];
+                        _seitenYStart[oi] = ordYStart[di];
+                        _seitenHöhe[oi]   = ordHöhe[di];
+                    }
+                    int lastOi = sichtbar[sichtbar.Count - 1];
+                    double gesamtH = _seitenYStart[lastOi] + _seitenHöhe[lastOi] + SeitenAbstand;
+                    double maxBmpW = sichtbarBmps.Max(b => (double)b.PixelWidth);
                     PdfCanvas.Width  = maxBmpW + SeiteX * 2;
                     PdfCanvas.Height = Math.Max(gesamtH, 1);
                 }
 
-                for (int i = 0; i < _seitenBilder.Count; i++)
+                foreach (int i in sichtbar)
                     SafeExecute(() => ZeicheSeite(i), $"ZeicheSeite[{i}]");
 
                 ZeicheCropLinien();
-                _scherenVorschauLinie = null;  // wurde durch Children.Clear() entfernt
-                // AktualisiereSchnitteLinien ruft intern AktualisiereTeilOverlays auf
+                _scherenVorschauLinie = null;
                 AktualisiereSchnitteLinien();
                 AktualisiereAuswahlAnzeige();
                 AktualisiereGruppenComboBox();
@@ -874,6 +921,69 @@ namespace StatikManager.Modules.Werkzeuge
                 AktualisiereTempInfo();
                 AktualisiereAuswahlAnzeige();
                 ev.Handled = true;
+            };
+
+            // Context menu: Seite löschen / Reihenfolge
+            var seitenMenu = new ContextMenu();
+            var itemLöschSeite = new MenuItem { Header = "\U0001F5D1  Seite löschen" };
+            int capturedIdx = seitenIdx;
+            itemLöschSeite.Click += (_, __) => LöscheSeiteMitBestätigung(capturedIdx);
+            seitenMenu.Items.Add(itemLöschSeite);
+            if (_seitenReihenfolge != null || _seitenBilder.Count > 1)
+            {
+                seitenMenu.Items.Add(new Separator());
+                var itemNachOben = new MenuItem { Header = "\u2191  Nach oben verschieben" };
+                itemNachOben.Click += (_, __) => VerschiebeSeite(capturedIdx, -1);
+                var itemNachUnten = new MenuItem { Header = "\u2193  Nach unten verschieben" };
+                itemNachUnten.Click += (_, __) => VerschiebeSeite(capturedIdx, +1);
+                seitenMenu.Items.Add(itemNachOben);
+                seitenMenu.Items.Add(itemNachUnten);
+                seitenMenu.Items.Add(new Separator());
+                var itemEinfügen = new MenuItem { Header = "\u2795  Nach dieser Seite einfügen" };
+                itemEinfügen.Click += (_, __) => FügeSeiteEinNach(capturedIdx);
+                seitenMenu.Items.Add(itemEinfügen);
+            }
+            blatt.ContextMenu = seitenMenu;
+
+            // Drag & Drop: Seiten umsortieren (Feature 5)
+            blatt.PreviewMouseLeftButtonDown += (_, ev) =>
+            {
+                if (_scherenModus || _bearbeitungsModus) return;
+                _dragQuellIdx    = capturedIdx;
+                _dragStartPunkt  = ev.GetPosition(PdfCanvas);
+                _dragAktiv       = false;
+            };
+            blatt.MouseMove += (s, ev) =>
+            {
+                if (_dragQuellIdx != capturedIdx || ev.LeftButton != MouseButtonState.Pressed) return;
+                var pos = ev.GetPosition(PdfCanvas);
+                double dx = pos.X - _dragStartPunkt.X;
+                double dy = pos.Y - _dragStartPunkt.Y;
+                if (!_dragAktiv)
+                {
+                    if (Math.Abs(dx) + Math.Abs(dy) < 12) return;
+                    _dragAktiv = true;
+                    ((UIElement)s).CaptureMouse();
+                    StartDragGhost(capturedIdx, blatt.Width, blatt.Height, pos);
+                }
+                else { MoveDragGhost(pos); }
+                ev.Handled = true;
+            };
+            blatt.MouseLeftButtonUp += (s, ev) =>
+            {
+                if (_dragAktiv && _dragQuellIdx == capturedIdx)
+                {
+                    ((UIElement)s).ReleaseMouseCapture();
+                    EndDrag(ev.GetPosition(PdfCanvas));
+                    ev.Handled = true;
+                }
+                _dragAktiv = false;
+                _dragQuellIdx = -1;
+            };
+            blatt.LostMouseCapture += (_, __) =>
+            {
+                if (_dragGhost != null) { PdfCanvas.Children.Remove(_dragGhost); _dragGhost = null; }
+                _dragAktiv = false;
             };
 
             double setX = _layoutHorizontal && i < _seitenXStart.Length ? _seitenXStart[i] : SeiteX;
@@ -3340,6 +3450,8 @@ namespace StatikManager.Modules.Werkzeuge
 
             for (int si = 0; si < _seitenBilder.Count; si++)
             {
+                if (_gelöschteSeiten.Contains(si)) continue;
+                if (_seitenYStart.Length > si && _seitenYStart[si] < -100) continue; // off-screen (deleted or not visible)
                 if (si >= _seitenHöhe.Length) continue;
                 if (!_layoutHorizontal && si >= _seitenYStart.Length) continue;
 
@@ -3473,7 +3585,20 @@ namespace StatikManager.Modules.Werkzeuge
 
             if (zusammenschieben)
             {
-                SchiebeTeileZusammen(_ausgewählteParts.ToHashSet());
+                // ── VERBESSERUNG 2: Verschmelzen? ────────────────────────────
+                bool verschmelzen = true;
+                if (hatSchnitte)
+                {
+                    var vResult = MessageBox.Show(
+                        "Teile zu einem Element verschmelzen?\n\n" +
+                        "Ja  – Teile werden zu einem Bild verbunden (kein Schnitt mehr sichtbar)\n" +
+                        "Nein – Teile bleiben separate, einzeln bearbeitbare Elemente",
+                        "Verschmelzen?",
+                        MessageBoxButton.YesNo,
+                        MessageBoxImage.Question);
+                    verschmelzen = (vResult == MessageBoxResult.Yes);
+                }
+                SchiebeTeileZusammen(_ausgewählteParts.ToHashSet(), verschmelzen);
             }
             else
             {
@@ -3496,12 +3621,14 @@ namespace StatikManager.Modules.Werkzeuge
         private ScherenZustand SpeichereZustand()
             => new ScherenZustand
             {
-                Schnitte       = new List<(int, double)>(_scherenschnitte),
-                Gelöscht       = new HashSet<(int, int)>(_gelöschteParts),
-                KompositBilder = new Dictionary<int, BitmapSource>(_kompositBilder)
+                Schnitte          = new List<(int, double)>(_scherenschnitte),
+                Gelöscht          = new HashSet<(int, int)>(_gelöschteParts),
+                KompositBilder    = new Dictionary<int, BitmapSource>(_kompositBilder),
+                GelöschteSeiten   = new HashSet<int>(_gelöschteSeiten),
+                SeitenReihenfolge = _seitenReihenfolge != null ? new List<int>(_seitenReihenfolge) : null,
             };
 
-        private void SchiebeTeileZusammen(HashSet<(int Seite, int Teil)> gelöschteParts)
+        private void SchiebeTeileZusammen(HashSet<(int Seite, int Teil)> gelöschteParts, bool verschmelzen)
         {
             var betroffeneSeiten = gelöschteParts.Select(p => p.Seite).Distinct().ToList();
 
@@ -3531,8 +3658,23 @@ namespace StatikManager.Modules.Werkzeuge
                         _kompositBilder[si] = kompositBmp;
                 }
 
-                // Schnitte für diese Seite entfernen (Composite hat keine Original-Schnitte mehr)
+                // Schnitte für diese Seite entfernen
                 _scherenschnitte.RemoveAll(s => s.Seite == si);
+
+                // Verschmelzen=Nein: neue Schnittlinien an den Grenzen der sichtbaren Teile
+                // so dass die Teile im Komposit weiterhin einzeln auswählbar sind
+                if (!verschmelzen && sichtbarTeilIndizes.Count > 1)
+                {
+                    double akkFrac = 0;
+                    for (int k = 0; k < sichtbarTeilIndizes.Count - 1; k++)
+                    {
+                        int t = sichtbarTeilIndizes[k];
+                        var (o, u) = alleGrenzen[t];
+                        akkFrac += (u - o);
+                        _scherenschnitte.Add((si, akkFrac));
+                    }
+                }
+
                 // Gelöschte Parts für diese Seite entfernen (sind jetzt physisch weg)
                 _gelöschteParts.RemoveWhere(p => p.Seite == si);
             }
@@ -3541,7 +3683,8 @@ namespace StatikManager.Modules.Werkzeuge
             // Canvas neu aufbauen mit aktualisierten Composite-Bitmaps
             ZeicheCanvas();
             BtnTeilLöschen.IsEnabled = false;
-            TxtInfo.Text = $"Zusammengeschoben – Strg+Z zum Rückgängigmachen";
+            string modusText = verschmelzen ? "verschmolzen" : "zusammengeschoben (getrennte Teile)";
+            TxtInfo.Text = $"Teile {modusText} – Strg+Z zum Rückgängigmachen";
         }
 
         private BitmapSource? ErzeugeKompositBild(int si, List<int> sichtbareTeilIndizes)
@@ -3584,6 +3727,24 @@ namespace StatikManager.Modules.Werkzeuge
                 }
                 var rtb = new RenderTargetBitmap(pW, totalH, 96, 96, PixelFormats.Pbgra32);
                 rtb.Render(visual);
+
+                // ── VERBESSERUNG 1: Seitenformat beibehalten ──────────────────
+                // Composite auf Original-Höhe auffüllen (weißer Bereich unten)
+                int origH = sourceBmp.PixelHeight;
+                if (totalH < origH)
+                {
+                    var padVisual = new DrawingVisual();
+                    using (var padCtx = padVisual.RenderOpen())
+                    {
+                        padCtx.DrawRectangle(Brushes.White, null, new Rect(0, 0, pW, origH));
+                        padCtx.DrawImage(rtb, new Rect(0, 0, pW, totalH));
+                    }
+                    var padRtb = new RenderTargetBitmap(pW, origH, 96, 96, PixelFormats.Pbgra32);
+                    padRtb.Render(padVisual);
+                    padRtb.Freeze();
+                    return padRtb;
+                }
+
                 rtb.Freeze();
                 return rtb;
             }
@@ -3592,6 +3753,12 @@ namespace StatikManager.Modules.Werkzeuge
 
         private void BtnTeilLöschen_Click(object sender, RoutedEventArgs e)
             => SafeExecute(LöscheAusgewählteParts, "BtnTeilLöschen_Click");
+
+        private void BtnSeiteEinfügen_Click(object sender, RoutedEventArgs e)
+            => SafeExecute(() => FügeSeiteEinNach(_seitenBilder.Count > 0 ? _seitenBilder.Count - 1 : 0), "BtnSeiteEinfügen_Click");
+
+        private void BtnPdfSpeichern_Click(object sender, RoutedEventArgs e)
+            => SafeExecute(SpeicherePdfMitÄnderungen, "BtnPdfSpeichern_Click");
 
         private void ScrollView_PreviewKeyDown(object sender, KeyEventArgs e)
         {
@@ -3605,6 +3772,8 @@ namespace StatikManager.Modules.Werkzeuge
                         _scherenschnitte.Clear(); _scherenschnitte.AddRange(z.Schnitte);
                         _gelöschteParts.Clear();  foreach (var p in z.Gelöscht) _gelöschteParts.Add(p);
                         _kompositBilder.Clear();  foreach (var kv in z.KompositBilder) _kompositBilder[kv.Key] = kv.Value;
+                        _gelöschteSeiten.Clear(); foreach (var s in z.GelöschteSeiten) _gelöschteSeiten.Add(s);
+                        _seitenReihenfolge = z.SeitenReihenfolge != null ? new List<int>(z.SeitenReihenfolge) : null;
                         _ausgewählteParts.Clear();
                         ZeicheCanvas();
                         TxtInfo.Text = $"Rückgängig ({_undoStack.Count} weitere Schritte)";
@@ -3619,6 +3788,10 @@ namespace StatikManager.Modules.Werkzeuge
                             : "✂ Alle Schnitte rückgängig gemacht";
                         e.Handled = true;
                     }
+                }
+                else if (e.Key == Key.S && (Keyboard.Modifiers & ModifierKeys.Control) != 0)
+                {
+                    SpeicherePdfMitÄnderungen(); e.Handled = true;
                 }
                 else if (e.Key == Key.Delete && !_scherenModus)
                 {
@@ -3637,6 +3810,479 @@ namespace StatikManager.Modules.Werkzeuge
                 }
             }
             catch (Exception ex) { LogException(ex, "ScrollView_PreviewKeyDown"); }
+        }
+        // ── Feature 3: Ganze Seite löschen ───────────────────────────────────────
+
+        private void LöscheSeiteMitBestätigung(int seitenIdx)
+        {
+            var result = MessageBox.Show(
+                $"Seite {seitenIdx + 1} löschen?\n\nDie Seite wird visuell entfernt.\nStrg+Z macht dies rückgängig.",
+                "Seite löschen",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question);
+            if (result != MessageBoxResult.Yes) return;
+            _undoStack.Push(SpeichereZustand());
+            _gelöschteSeiten.Add(seitenIdx);
+            // Schnitte, Parts und Komposit der gelöschten Seite aufräumen
+            _scherenschnitte.RemoveAll(s => s.Seite == seitenIdx);
+            _gelöschteParts.RemoveWhere(p => p.Seite == seitenIdx);
+            _kompositBilder.Remove(seitenIdx);
+            ZeicheCanvas();
+            TxtInfo.Text = $"Seite {seitenIdx + 1} gelöscht – Strg+Z zum Rückgängigmachen";
+        }
+
+        // ── Feature 4: Seite einfügen ─────────────────────────────────────────────
+
+        private void FügeSeiteEinNach(int nachSeitenIdx)
+            => SafeExecute(() => FügeSeiteEinDialog(nachSeitenIdx), "FügeSeiteEinNach");
+
+        private void FügeSeiteEinDialog(int nachSeitenIdx)
+        {
+            if (_pdfPfad == null || _seitenBilder.Count == 0) return;
+
+            // Art der Seite wählen
+            var artResult = MessageBox.Show(
+                "Leere Seite einfügen?\n\nJa = leere weiße Seite\nNein = Seite aus anderer PDF auswählen",
+                "Seitenart", MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
+            if (artResult == MessageBoxResult.Cancel) return;
+
+            _undoStack.Push(SpeichereZustand());
+
+            if (artResult == MessageBoxResult.Yes)
+            {
+                // Leere Seite: weißes Bitmap mit Maßen der vorherigen Seite
+                int refIdx = Math.Max(0, Math.Min(nachSeitenIdx, _seitenBilder.Count - 1));
+                var refBmp = _seitenBilder[refIdx];
+                var leereBmp = ErzeugeLeereBitmap(refBmp.PixelWidth, refBmp.PixelHeight);
+                int neuIdx = _seitenBilder.Count;
+                _seitenBilder.Add(leereBmp);
+                InitCropEintrag(neuIdx);
+                FügeInReihenfolgeEin(neuIdx, nachSeitenIdx + 1);
+                TxtInfo.Text = $"Leere Seite nach Position {nachSeitenIdx + 1} eingefügt – Strg+Z zum Rückgängigmachen";
+            }
+            else
+            {
+                // Aus anderer PDF
+                var dlg = new Microsoft.Win32.OpenFileDialog
+                {
+                    Title  = "PDF auswählen",
+                    Filter = "PDF-Dateien|*.pdf"
+                };
+                if (dlg.ShowDialog() != true) { if (_undoStack.Count > 0) _undoStack.Pop(); return; }
+                string quellPfad = dlg.FileName;
+
+                // Seitenzahl der Quell-PDF ermitteln
+                int quellSeitenAnzahl;
+                try
+                {
+                    using var quellDoc = PdfReader.Open(quellPfad, PdfDocumentOpenMode.Import);
+                    quellSeitenAnzahl = quellDoc.PageCount;
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Fehler beim Öffnen der PDF:\n{App.GetExceptionKette(ex)}", "Fehler",
+                        MessageBoxButton.OK, MessageBoxImage.Error);
+                    if (_undoStack.Count > 0) _undoStack.Pop();
+                    return;
+                }
+                if (quellSeitenAnzahl == 0) { if (_undoStack.Count > 0) _undoStack.Pop(); return; }
+
+                // Bei mehreren Seiten: einfaches Input-Fenster
+                int quellSeite = 1;
+                if (quellSeitenAnzahl > 1)
+                {
+                    var inputDlg = ErzeugeEinfacheEingabe(
+                        $"Welche Seite der Quell-PDF einfügen? (1–{quellSeitenAnzahl})",
+                        "Seite aus PDF", "1");
+                    if (inputDlg == null) { if (_undoStack.Count > 0) _undoStack.Pop(); return; }
+                    if (!int.TryParse(inputDlg, out quellSeite) || quellSeite < 1 || quellSeite > quellSeitenAnzahl)
+                    {
+                        MessageBox.Show("Ungültige Seitenzahl.", "Fehler", MessageBoxButton.OK, MessageBoxImage.Warning);
+                        if (_undoStack.Count > 0) _undoStack.Pop();
+                        return;
+                    }
+                }
+
+                // Bitmap rendern
+                var bitmap = RendereExternSeite(quellPfad, quellSeite - 1);
+                if (bitmap == null)
+                {
+                    MessageBox.Show("Seite konnte nicht gerendert werden.", "Fehler", MessageBoxButton.OK, MessageBoxImage.Error);
+                    if (_undoStack.Count > 0) _undoStack.Pop();
+                    return;
+                }
+                int neuIdx = _seitenBilder.Count;
+                _seitenBilder.Add(bitmap);
+                InitCropEintrag(neuIdx);
+                _eingefügteSeitenInfo[neuIdx] = (quellPfad, quellSeite - 1);
+                FügeInReihenfolgeEin(neuIdx, nachSeitenIdx + 1);
+                TxtInfo.Text = $"Seite aus '{IO.Path.GetFileName(quellPfad)}' eingefügt – Strg+Z zum Rückgängigmachen";
+            }
+
+            ZeicheCanvas();
+        }
+
+        private string ErzeugeEinfacheEingabe(string nachricht, string titel, string standard)
+        {
+            string result = null;
+            bool ok = false;
+            var txtBox = new TextBox { Text = standard, Width = 120, Height = 24, VerticalContentAlignment = VerticalAlignment.Center };
+            var sp = new StackPanel { Margin = new Thickness(12) };
+            sp.Children.Add(new TextBlock { Text = nachricht, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 8) });
+            sp.Children.Add(txtBox);
+            var btnOk     = new Button { Content = "OK", Width = 70, IsDefault = true, Margin = new Thickness(0, 0, 8, 0) };
+            var btnCancel = new Button { Content = "Abbrechen", Width = 80, IsCancel = true };
+            var btnRow    = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 10, 0, 0) };
+            btnRow.Children.Add(btnOk);
+            btnRow.Children.Add(btnCancel);
+            sp.Children.Add(btnRow);
+            Window dlg = null;
+            btnOk.Click     += (_, __) => { ok = true; result = txtBox.Text; dlg.Close(); };
+            btnCancel.Click += (_, __) => dlg.Close();
+            dlg = new Window
+            {
+                Title = titel, Content = sp,
+                SizeToContent = SizeToContent.WidthAndHeight,
+                MinWidth = 280,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                Owner = Window.GetWindow(this),
+                ResizeMode = ResizeMode.NoResize, ShowInTaskbar = false
+            };
+            txtBox.SelectAll();
+            txtBox.Focus();
+            dlg.ShowDialog();
+            return ok ? result : null;
+        }
+
+        private BitmapSource ErzeugeLeereBitmap(int breite, int höhe)
+        {
+            var visual = new DrawingVisual();
+            using (var ctx = visual.RenderOpen())
+                ctx.DrawRectangle(Brushes.White, null, new Rect(0, 0, breite, höhe));
+            var rtb = new RenderTargetBitmap(breite, höhe, 96, 96, PixelFormats.Pbgra32);
+            rtb.Render(visual);
+            rtb.Freeze();
+            return rtb;
+        }
+
+        private BitmapSource RendereExternSeite(string pfad, int seitenIdx)
+        {
+            try
+            {
+                AppZustand.RenderSem.Wait();
+                try
+                {
+                    using var lib = DocLib.Instance;
+                    using var doc = lib.GetDocReader(pfad, new PageDimensions(RenderBreite, RenderBreite * 2));
+                    using var page = doc.GetPageReader(seitenIdx);
+                    int w = page.GetPageWidth(), h = page.GetPageHeight();
+                    if (w <= 0 || h <= 0) return null;
+                    var bytes = page.GetImage();
+                    var wb = new WriteableBitmap(w, h, 96, 96, PixelFormats.Bgra32, null);
+                    wb.WritePixels(new Int32Rect(0, 0, w, h), bytes, w * 4, 0);
+                    wb.Freeze();
+                    return wb;
+                }
+                finally { AppZustand.RenderSem.Release(); }
+            }
+            catch { return null; }
+        }
+
+        private void InitCropEintrag(int idx)
+        {
+            // Crop-Arrays um einen Eintrag erweitern
+            Array.Resize(ref _cropLinks,  idx + 1);
+            Array.Resize(ref _cropRechts, idx + 1);
+            Array.Resize(ref _cropOben,   idx + 1);
+            Array.Resize(ref _cropUnten,  idx + 1);
+            if (_defaultCrop.HasValue)
+            {
+                _cropLinks[idx]  = _defaultCrop.Value.Links;
+                _cropRechts[idx] = _defaultCrop.Value.Rechts;
+                _cropOben[idx]   = _defaultCrop.Value.Oben;
+                _cropUnten[idx]  = _defaultCrop.Value.Unten;
+            }
+        }
+
+        private void FügeInReihenfolgeEin(int bitmapIdx, int nachAnzeigePos)
+        {
+            // _seitenReihenfolge aktivieren falls nötig
+            if (_seitenReihenfolge == null)
+                _seitenReihenfolge = Enumerable.Range(0, _seitenBilder.Count - 1).ToList(); // ohne neuen Eintrag
+
+            // Einfügeposition bestimmen
+            int einfügePos = Math.Min(nachAnzeigePos, _seitenReihenfolge.Count);
+            _seitenReihenfolge.Insert(einfügePos, bitmapIdx);
+        }
+
+        // ── Feature 5: Drag & Drop (Seiten umsortieren) ───────────────────────────
+
+        private void VerschiebeSeite(int seitenIdx, int richtung)
+        {
+            EnsureReihenfolge();
+            int pos = _seitenReihenfolge.IndexOf(seitenIdx);
+            if (pos < 0) return;
+            int ziel = pos + richtung;
+            if (ziel < 0 || ziel >= _seitenReihenfolge.Count) return;
+            _undoStack.Push(SpeichereZustand());
+            _seitenReihenfolge.RemoveAt(pos);
+            _seitenReihenfolge.Insert(ziel, seitenIdx);
+            ZeicheCanvas();
+            TxtInfo.Text = "Seite verschoben – Strg+Z zum Rückgängigmachen";
+        }
+
+        private void EnsureReihenfolge()
+        {
+            if (_seitenReihenfolge == null)
+                _seitenReihenfolge = Enumerable.Range(0, _seitenBilder.Count).ToList();
+        }
+
+        private void StartDragGhost(int seitenIdx, double breite, double höhe, Point pos)
+        {
+            _dragGhost = new Border
+            {
+                Tag             = "DRAGGHOST",
+                Width           = Math.Min(breite * _zoomFaktor, 120),
+                Height          = Math.Min(höhe * _zoomFaktor, 160),
+                Background      = new SolidColorBrush(Color.FromArgb(120, 50, 100, 200)),
+                BorderBrush     = new SolidColorBrush(Color.FromRgb(50, 100, 200)),
+                BorderThickness = new Thickness(2),
+                IsHitTestVisible = false,
+                Child = new TextBlock
+                {
+                    Text = $"Seite {seitenIdx + 1}",
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment   = VerticalAlignment.Center,
+                    Foreground          = Brushes.White,
+                    FontWeight          = FontWeights.Bold
+                }
+            };
+            Canvas.SetLeft(_dragGhost, pos.X - _dragGhost.Width / 2);
+            Canvas.SetTop(_dragGhost,  pos.Y - _dragGhost.Height / 2);
+            Panel.SetZIndex(_dragGhost, 1000);
+            PdfCanvas.Children.Add(_dragGhost);
+        }
+
+        private void MoveDragGhost(Point pos)
+        {
+            if (_dragGhost == null) return;
+            Canvas.SetLeft(_dragGhost, pos.X - _dragGhost.Width / 2);
+            Canvas.SetTop(_dragGhost,  pos.Y - _dragGhost.Height / 2);
+        }
+
+        private void EndDrag(Point dropPos)
+        {
+            if (_dragGhost != null) { PdfCanvas.Children.Remove(_dragGhost); _dragGhost = null; }
+            if (_dragQuellIdx < 0) return;
+
+            // Zielposition bestimmen: welche sichtbare Seite liegt am nächsten?
+            var reihenfolge = _seitenReihenfolge ?? Enumerable.Range(0, _seitenBilder.Count).ToList();
+            var sichtbar    = reihenfolge.Where(i => !_gelöschteSeiten.Contains(i) && i < _seitenBilder.Count).ToList();
+
+            int zielPos = sichtbar.Count; // Default: ans Ende
+            for (int di = 0; di < sichtbar.Count; di++)
+            {
+                int oi = sichtbar[di];
+                if (_seitenYStart[oi] < -100) continue;
+                double mitte = _seitenYStart[oi] + _seitenHöhe[oi] / 2;
+                if (dropPos.Y < mitte) { zielPos = di; break; }
+            }
+
+            EnsureReihenfolge();
+            int quellPos = _seitenReihenfolge.IndexOf(_dragQuellIdx);
+            if (quellPos < 0 || quellPos == zielPos) return;
+
+            _undoStack.Push(SpeichereZustand());
+            _seitenReihenfolge.RemoveAt(quellPos);
+            int insertPos = quellPos < zielPos ? zielPos - 1 : zielPos;
+            insertPos = Math.Max(0, Math.Min(insertPos, _seitenReihenfolge.Count));
+            _seitenReihenfolge.Insert(insertPos, _dragQuellIdx);
+            ZeicheCanvas();
+            TxtInfo.Text = $"Seite {_dragQuellIdx + 1} verschoben – Strg+Z zum Rückgängigmachen";
+        }
+
+        // ── Ctrl+S: PDF speichern ─────────────────────────────────────────────────
+
+        private void SpeicherePdfMitÄnderungen()
+        {
+            if (_pdfPfad == null || _seitenBilder.Count == 0) return;
+
+            // Prüfen ob überhaupt Änderungen vorliegen
+            bool hatÄnderungen = _gelöschteSeiten.Count > 0
+                || _seitenReihenfolge != null
+                || _scherenschnitte.Count > 0
+                || _gelöschteParts.Count > 0
+                || _kompositBilder.Count > 0
+                || _cropLinks.Any(v => v > 0) || _cropRechts.Any(v => v > 0)
+                || _cropOben.Any(v => v > 0)  || _cropUnten.Any(v => v > 0)
+                || _eingefügteSeitenInfo.Count > 0;
+
+            if (!hatÄnderungen)
+            {
+                TxtInfo.Text = "Keine Änderungen zum Speichern";
+                return;
+            }
+
+            var saveDlg = new Microsoft.Win32.SaveFileDialog
+            {
+                Title            = "Bearbeitete PDF speichern",
+                Filter           = "PDF-Dateien|*.pdf",
+                FileName         = IO.Path.GetFileNameWithoutExtension(_pdfPfad) + "_bearbeitet.pdf",
+                InitialDirectory = IO.Path.GetDirectoryName(_pdfPfad) ?? ""
+            };
+            if (saveDlg.ShowDialog() != true) return;
+            string zielPfad = saveDlg.FileName;
+
+            try
+            {
+                TxtInfo.Text = "Speichere PDF …";
+
+                var reihenfolge = _seitenReihenfolge ?? Enumerable.Range(0, _seitenBilder.Count).ToList();
+                var sichtbar    = reihenfolge.Where(i => !_gelöschteSeiten.Contains(i) && i < _seitenBilder.Count).ToList();
+
+                var pdfOut = new PdfSharp.Pdf.PdfDocument();
+
+                // Quell-PDF öffnen (für Original-Seiten)
+                PdfSharp.Pdf.PdfDocument pdfIn = null;
+                if (IO.File.Exists(_pdfPfad))
+                {
+                    try { pdfIn = PdfReader.Open(_pdfPfad, PdfDocumentOpenMode.Import); }
+                    catch { /* kein Import möglich – alle als Bitmap */ }
+                }
+
+                (double pageWPts, double pageHPts) = HolePdfSeitenGrösse(_pdfPfad);
+
+                foreach (int si in sichtbar)
+                {
+                    bool hatKomposit       = _kompositBilder.ContainsKey(si);
+                    bool hatSchnitte       = _scherenschnitte.Any(s => s.Seite == si);
+                    bool istExternEingefügt = _eingefügteSeitenInfo.ContainsKey(si);
+                    bool hatCrop           = si < _cropLinks.Length
+                        && (_cropLinks[si] > 0 || _cropRechts[si] > 0 || _cropOben[si] > 0 || _cropUnten[si] > 0);
+
+                    if (hatKomposit && !hatSchnitte)
+                    {
+                        // Komposit-Bitmap als Bildseite exportieren
+                        var kompBmp = _kompositBilder[si];
+                        double scaleH  = (double)kompBmp.PixelHeight / Math.Max(1, _seitenBilder[si].PixelHeight);
+                        double newHPts = Math.Max(1, pageHPts * scaleH);
+                        using var ms = new IO.MemoryStream();
+                        var enc = new PngBitmapEncoder();
+                        enc.Frames.Add(BitmapFrame.Create(kompBmp));
+                        enc.Save(ms);
+                        ms.Position = 0;
+                        using var xImg = PdfSharp.Drawing.XImage.FromStream(ms);
+                        var seite = pdfOut.AddPage();
+                        seite.Width  = PdfSharp.Drawing.XUnit.FromPoint(pageWPts);
+                        seite.Height = PdfSharp.Drawing.XUnit.FromPoint(newHPts);
+                        using var gfx = PdfSharp.Drawing.XGraphics.FromPdfPage(seite);
+                        gfx.DrawImage(xImg, 0, 0, pageWPts, newHPts);
+                    }
+                    else if (hatSchnitte)
+                    {
+                        // Seite mit Schnitten: pro sichtbaren Teil eine Ausgabeseite
+                        var teilGrenzen = GetTeilGrenzen(si);
+                        for (int t = 0; t < teilGrenzen.Count; t++)
+                        {
+                            if (_gelöschteParts.Contains((si, t))) continue;
+                            var (fracOben, fracUnten) = teilGrenzen[t];
+                            if (hatKomposit)
+                            {
+                                // Teilbereich des Komposit-Bitmaps als Bildseite
+                                var kompBmp = _kompositBilder[si];
+                                int y0 = (int)Math.Round(fracOben  * kompBmp.PixelHeight);
+                                int h  = (int)Math.Round(fracUnten * kompBmp.PixelHeight) - y0;
+                                h = Math.Max(1, Math.Min(h, kompBmp.PixelHeight - y0));
+                                var teilBmp = new CroppedBitmap(kompBmp, new Int32Rect(0, y0, kompBmp.PixelWidth, h));
+                                double teilHPts = pageHPts * (fracUnten - fracOben);
+                                using var ms = new IO.MemoryStream();
+                                var enc = new PngBitmapEncoder();
+                                enc.Frames.Add(BitmapFrame.Create(teilBmp));
+                                enc.Save(ms);
+                                ms.Position = 0;
+                                using var xImg = PdfSharp.Drawing.XImage.FromStream(ms);
+                                var seite = pdfOut.AddPage();
+                                seite.Width  = PdfSharp.Drawing.XUnit.FromPoint(pageWPts);
+                                seite.Height = PdfSharp.Drawing.XUnit.FromPoint(teilHPts);
+                                using var gfx = PdfSharp.Drawing.XGraphics.FromPdfPage(seite);
+                                gfx.DrawImage(xImg, 0, 0, pageWPts, teilHPts);
+                            }
+                            else if (pdfIn != null && si < pdfIn.PageCount)
+                            {
+                                double pdfY1 = (1.0 - fracUnten) * pageHPts;
+                                double pdfY2 = (1.0 - fracOben)  * pageHPts;
+                                var seite = pdfOut.AddPage(pdfIn.Pages[si]);
+                                seite.CropBox = new PdfSharp.Pdf.PdfRectangle(
+                                    new PdfSharp.Drawing.XPoint(0,        pdfY1),
+                                    new PdfSharp.Drawing.XPoint(pageWPts, pdfY2));
+                            }
+                        }
+                    }
+                    else if (istExternEingefügt)
+                    {
+                        // Extern eingefügte Seite als Bitmap
+                        var bmp = _seitenBilder[si];
+                        using var ms = new IO.MemoryStream();
+                        var enc = new PngBitmapEncoder();
+                        enc.Frames.Add(BitmapFrame.Create(bmp));
+                        enc.Save(ms);
+                        ms.Position = 0;
+                        using var xImg = PdfSharp.Drawing.XImage.FromStream(ms);
+                        var (extW, extH) = HolePdfSeitenGrösse(_eingefügteSeitenInfo[si].Pfad);
+                        var seite = pdfOut.AddPage();
+                        seite.Width  = PdfSharp.Drawing.XUnit.FromPoint(extW);
+                        seite.Height = PdfSharp.Drawing.XUnit.FromPoint(extH);
+                        using var gfx = PdfSharp.Drawing.XGraphics.FromPdfPage(seite);
+                        gfx.DrawImage(xImg, 0, 0, extW, extH);
+                    }
+                    else if (pdfIn != null && si < pdfIn.PageCount)
+                    {
+                        // Original-Seite, ggf. mit CropBox
+                        var seite = pdfOut.AddPage(pdfIn.Pages[si]);
+                        if (hatCrop)
+                        {
+                            double cL = _cropLinks[si], cR = _cropRechts[si];
+                            double cO = _cropOben[si],  cU = _cropUnten[si];
+                            double x1 = cL * pageWPts;
+                            double x2 = (1.0 - cR) * pageWPts;
+                            double y1 = cU * pageHPts;
+                            double y2 = (1.0 - cO) * pageHPts;
+                            seite.CropBox = new PdfSharp.Pdf.PdfRectangle(
+                                new PdfSharp.Drawing.XPoint(x1, y1),
+                                new PdfSharp.Drawing.XPoint(x2, y2));
+                        }
+                    }
+                    else
+                    {
+                        // Eingefügte leere Seite: weißes Bitmap
+                        var bmp = _seitenBilder[si];
+                        using var ms = new IO.MemoryStream();
+                        var enc = new PngBitmapEncoder();
+                        enc.Frames.Add(BitmapFrame.Create(bmp));
+                        enc.Save(ms);
+                        ms.Position = 0;
+                        using var xImg = PdfSharp.Drawing.XImage.FromStream(ms);
+                        var seite = pdfOut.AddPage();
+                        seite.Width  = PdfSharp.Drawing.XUnit.FromPoint(pageWPts);
+                        seite.Height = PdfSharp.Drawing.XUnit.FromPoint(pageHPts);
+                        using var gfx = PdfSharp.Drawing.XGraphics.FromPdfPage(seite);
+                        gfx.DrawImage(xImg, 0, 0, pageWPts, pageHPts);
+                    }
+                }
+
+                pdfIn?.Dispose();
+                pdfOut.Save(zielPfad);
+
+                TxtInfo.Text = $"\u2714 PDF gespeichert: {IO.Path.GetFileName(zielPfad)}";
+                AppZustand.Instanz.SetzeStatus($"PDF gespeichert: {IO.Path.GetFileName(zielPfad)}");
+            }
+            catch (Exception ex)
+            {
+                LogException(ex, "SpeicherePdfMitÄnderungen");
+                MessageBox.Show($"Fehler beim Speichern:\n{App.GetExceptionKette(ex)}",
+                    "Speicher-Fehler", MessageBoxButton.OK, MessageBoxImage.Error);
+                TxtInfo.Text = "Fehler beim Speichern";
+            }
         }
     }
 }
