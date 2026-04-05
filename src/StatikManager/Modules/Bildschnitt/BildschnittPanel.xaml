@@ -1,6 +1,8 @@
 <UserControl x:Class="StatikManager.Modules.Bildschnitt.BildschnittPanel"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Focusable="True"
+             KeyDown="UserControl_KeyDown">
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>   <!-- Toolbar -->
@@ -40,6 +42,14 @@
                         Height="24" Padding="8,0" Margin="0,0,4,0"
                         IsEnabled="False"
                         Click="BtnAlsPngSpeichern_Click"/>
+                <Button x:Name="BtnSegmenteExportieren" Content="&#x1F4E4; Segmente exportieren"
+                        Height="24" Padding="8,0" Margin="0,0,4,0"
+                        IsEnabled="False"
+                        Click="BtnSegmenteExportieren_Click"/>
+                <Button x:Name="BtnAlsPdfSpeichern" Content="&#x1F4C4; Als PDF speichern"
+                        Height="24" Padding="8,0" Margin="0,0,4,0"
+                        IsEnabled="False"
+                        Click="BtnAlsPdfSpeichern_Click"/>
             </WrapPanel>
         </Border>
 
@@ -54,7 +64,8 @@
             <Border Grid.Column="0" Background="#3C3C3C" ClipToBounds="True">
                 <ScrollViewer x:Name="BildScroll"
                               HorizontalScrollBarVisibility="Auto"
-                              VerticalScrollBarVisibility="Auto">
+                              VerticalScrollBarVisibility="Auto"
+                              PreviewMouseWheel="BildScroll_PreviewMouseWheel">
                     <Grid>
                         <!-- Platzhalter wenn kein Bild geladen -->
                         <TextBlock x:Name="PnlPlatzhalter"
@@ -69,6 +80,9 @@
                         <Canvas x:Name="VorschauCanvas"
                                 HorizontalAlignment="Left"
                                 VerticalAlignment="Top">
+                            <Canvas.LayoutTransform>
+                                <ScaleTransform x:Name="ZoomTransform" ScaleX="1" ScaleY="1"/>
+                            </Canvas.LayoutTransform>
                             <Image x:Name="VorschauBild"
                                    Canvas.Left="0" Canvas.Top="0"
                                    Stretch="None"/>

@@ -1,3 +1,6 @@
+using PdfSharp.Drawing;
+using PdfSharp.Pdf;
+using PdfSharp.Pdf.IO;
 using StatikManager.Core;
 using StatikManager.Infrastructure;
 using System;
@@ -6,6 +9,7 @@ using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -48,6 +52,21 @@ namespace StatikManager.Modules.Bildschnitt
         private SchnittRichtung _platzierungsRichtung;
         private WpfLine? _platzierungsVorschau;
 
+        // Auswahl Schnittlinie (für Entf-Taste)
+        private SchnittLinie? _selectedSchnittLinie;
+
+        // Zoom
+        private double _zoomFaktor = 1.0;
+        private const double ZoomMin = 0.1, ZoomMax = 5.0, ZoomStep = 0.15;
+
+        // PDF-Felder (Phase 4)
+        private string?  _quellPdfPfad;
+        private double   _pdfRenderBreite;
+        private double   _pdfRenderHöhe;
+        private double   _pdfSeitenBreitePt;
+        private double   _pdfSeitenHöhePt;
+        private int      _pdfSeitenNummer;
+
         private const int GriffBreite = 14;
         private const int MinGröße = 20;
         private const int LinieGriffBreite = 14;
@@ -62,9 +81,34 @@ namespace StatikManager.Modules.Bildschnitt
         {
             InitializeComponent();
             VorschauCanvas.Visibility = Visibility.Collapsed;
+            // Fokus setzen wenn auf Canvas geklickt wird (für Entf-Taste)
+            VorschauCanvas.MouseDown += (_, _) => Focus();
         }
 
-        // Öffentliche Methode: Bild von außen setzen (für Integration mit DokumenteModul)
+        // ── Öffentliche Methoden ───────────────────────────────────────────────
+
+        /// <summary>Lädt eine Bild- oder PDF-Datei (für Integration mit DokumenteModul).</summary>
+        public void LadeDatei(string pfad)
+        {
+            var ext = System.IO.Path.GetExtension(pfad).ToLowerInvariant();
+            if (ext == ".pdf")
+                LadePdfDatei(pfad);
+            else
+                LadeBildDatei(pfad);
+        }
+
+        private void LadeBildDatei(string pfad)
+        {
+            try
+            {
+                _quellPdfPfad = null;
+                var bmp = new System.Drawing.Bitmap(pfad);
+                LadeBitmap(bmp, pfad);
+            }
+            catch (Exception ex) { SetzeStatus("Fehler: " + ex.Message); }
+        }
+
+        /// <summary>Setzt ein Bitmap direkt (für Integration mit DokumenteModul).</summary>
         public void LadeBitmap(System.Drawing.Bitmap bitmap, string? quelle = null)
         {
             _quellBitmap?.Dispose();
@@ -98,6 +142,36 @@ namespace StatikManager.Modules.Bildschnitt
             BtnVLinie.IsEnabled             = hatBild && _rand != null;
             BtnLinienZurücksetzen.IsEnabled  = hatBild && _schnittLinien.Count > 0;
             BtnAlsPngSpeichern.IsEnabled    = hatBild && _rand != null;
+            BtnSegmenteExportieren.IsEnabled = hatBild && _segmente.Count(s => s.Aktiv) > 0;
+            BtnAlsPdfSpeichern.IsEnabled    = _quellPdfPfad != null && _rand != null
+                                              && System.IO.File.Exists(_quellPdfPfad ?? "");
+        }
+
+        // ── Zoom (Strg+Mausrad) ────────────────────────────────────────────────
+
+        private void BildScroll_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
+        {
+            if (!Keyboard.IsKeyDown(Key.LeftCtrl) && !Keyboard.IsKeyDown(Key.RightCtrl)) return;
+            e.Handled = true;
+            double delta = e.Delta > 0 ? ZoomStep : -ZoomStep;
+            _zoomFaktor = Math.Max(ZoomMin, Math.Min(ZoomMax, _zoomFaktor + delta));
+            ZoomTransform.ScaleX = _zoomFaktor;
+            ZoomTransform.ScaleY = _zoomFaktor;
+        }
+
+        // ── Entf-Taste löscht ausgewählte Schnittlinie ─────────────────────────
+
+        private void UserControl_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key == Key.Delete && _selectedSchnittLinie != null)
+            {
+                _schnittLinien.Remove(_selectedSchnittLinie);
+                _selectedSchnittLinie = null;
+                AktualisiereLinienUndSegmente();
+                AktualisiereButtons();
+                SetzeStatus("Schnittlinie gelöscht");
+                e.Handled = true;
+            }
         }
 
         // ── Bild anzeigen ──────────────────────────────────────────────────────
@@ -380,6 +454,7 @@ namespace StatikManager.Modules.Bildschnitt
                 seg.Aktiv = !seg.Aktiv;
                 r.Fill = SegmentFarbe(seg.Aktiv);
                 AktualisiereSegmentInfo();
+                AktualisiereButtons();
             }
         }
 
@@ -387,6 +462,7 @@ namespace StatikManager.Modules.Bildschnitt
         {
             if (e.LeftButton != MouseButtonState.Pressed || _platzierungsModus) return;
             _dragSchnittLinie = (SchnittLinie)((WpfRect)sender).Tag;
+            _selectedSchnittLinie = _dragSchnittLinie;
             _dragLinieVis = _linienElemente.OfType<WpfLine>()
                 .FirstOrDefault(l => {
                     bool h = _dragSchnittLinie.Richtung == SchnittRichtung.Horizontal;
@@ -541,6 +617,7 @@ namespace StatikManager.Modules.Bildschnitt
             if (dlg.ShowDialog() != true) return;
             try
             {
+                _quellPdfPfad = null;
                 var bmp = new System.Drawing.Bitmap(dlg.FileName);
                 LadeBitmap(bmp, dlg.FileName);
             }
@@ -570,6 +647,7 @@ namespace StatikManager.Modules.Bildschnitt
         private void BtnLinienZurücksetzen_Click(object sender, RoutedEventArgs e)
         {
             _schnittLinien.Clear();
+            _selectedSchnittLinie = null;
             AktualisiereLinienUndSegmente();
             AktualisiereButtons();
             SetzeStatus("Alle Schnittlinien gelöscht");
@@ -598,6 +676,80 @@ namespace StatikManager.Modules.Bildschnitt
             }
         }
 
+        private void BtnSegmenteExportieren_Click(object sender, RoutedEventArgs e)
+        {
+            if (_quellBitmap == null) return;
+            var aktiveSegmente = _segmente.Where(s => s.Aktiv).ToList();
+            if (aktiveSegmente.Count == 0) { SetzeStatus("Keine aktiven Segmente zum Exportieren"); return; }
+
+            using var dlg = new System.Windows.Forms.FolderBrowserDialog
+            {
+                Description = "Ordner für Segment-Export wählen",
+                ShowNewFolderButton = true
+            };
+            if (dlg.ShowDialog() != System.Windows.Forms.DialogResult.OK) return;
+
+            int erfolgreich = 0;
+            foreach (var seg in aktiveSegmente)
+            {
+                try
+                {
+                    using var segBmp = _quellBitmap.Clone(seg.Bereich, _quellBitmap.PixelFormat);
+                    string dateiName = $"Segment_{seg.Zeile + 1}_{seg.Spalte + 1}.png";
+                    string zielPfad  = System.IO.Path.Combine(dlg.SelectedPath, dateiName);
+                    segBmp.Save(zielPfad, ImageFormat.Png);
+                    erfolgreich++;
+                }
+                catch (Exception ex) { Logger.Fehler("SegmentExport", ex.Message); }
+            }
+            SetzeStatus($"{erfolgreich} von {aktiveSegmente.Count} Segment(e) exportiert → {dlg.SelectedPath}");
+        }
+
+        private void BtnAlsPdfSpeichern_Click(object sender, RoutedEventArgs e)
+        {
+            if (_quellPdfPfad == null || _rand == null || _quellBitmap == null) return;
+
+            var dlg = new Microsoft.Win32.SaveFileDialog
+            {
+                Title = "Gecroptes PDF speichern",
+                Filter = "PDF-Dokument|*.pdf",
+                DefaultExt = ".pdf",
+                FileName = System.IO.Path.GetFileNameWithoutExtension(_quellPdfPfad) + "_crop.pdf"
+            };
+            if (dlg.ShowDialog() != true) return;
+
+            try
+            {
+                // Skalierungsfaktor: Pixel → PDF-Punkte
+                double scale = _pdfSeitenBreitePt / _pdfRenderBreite;
+
+                // PDF Y-Achse ist bottom-up (Ursprung unten-links)
+                double x1 = _rand.Links  * scale;
+                double y1 = (_pdfRenderHöhe - _rand.Unten)  * scale;   // flip Y
+                double x2 = _rand.Rechts * scale;
+                double y2 = (_pdfRenderHöhe - _rand.Oben)   * scale;   // flip Y
+
+                // Sicherstellen dass x1<x2 und y1<y2
+                if (x1 > x2) { double t = x1; x1 = x2; x2 = t; }
+                if (y1 > y2) { double t = y1; y1 = y2; y2 = t; }
+
+                using var pdfIn = PdfReader.Open(_quellPdfPfad, PdfDocumentOpenMode.Import);
+                var pdfOut = new PdfDocument();
+                var seite  = pdfOut.AddPage(pdfIn.Pages[_pdfSeitenNummer]);
+                seite.CropBox = new PdfSharp.Pdf.PdfRectangle(
+                    new XPoint(x1, y1),
+                    new XPoint(x2, y2));
+
+                pdfOut.Save(dlg.FileName);
+                SetzeStatus("PDF gespeichert: " + dlg.FileName);
+            }
+            catch (Exception ex)
+            {
+                SetzeStatus("Fehler: " + ex.Message);
+                Logger.Fehler("BtnAlsPdfSpeichern", ex.Message);
+            }
+        }
+
         private void BtnSpinUp_Click(object sender, RoutedEventArgs e)
         {
             LeseSicherheitsabstand();
@@ -614,6 +766,79 @@ namespace StatikManager.Modules.Bildschnitt
             KlemmeSicherheitsabstand();
             TxtSicherheitsabstand.Text = _sicherheitsabstandMm.ToString("0.#");
             WendeSicherheitsabstandAn();
+        }
+
+        // ── Phase 4: PDF laden ────────────────────────────────────────────────
+
+        private void LadePdfDatei(string pfad)
+        {
+            _quellPdfPfad = pfad;
+            _pdfSeitenNummer = 0;
+            SetzeStatus("Rendere PDF-Seite …");
+            AppZustand.Instanz.SetzeStatus("Rendere PDF …");
+
+            var thread = new Thread(() =>
+            {
+                System.Drawing.Bitmap? bmp = null;
+                string? fehler = null;
+                double seitenBreitePt = 0, seitenHöhePt = 0;
+
+                // Seitengröße aus PdfSharp ermitteln (kein pdfium → kein Semaphore nötig)
+                try
+                {
+                    var pdfDoc = PdfReader.Open(pfad, PdfDocumentOpenMode.InformationOnly);
+                    if (pdfDoc.PageCount > 0)
+                    {
+                        seitenBreitePt = pdfDoc.Pages[0].Width.Point;
+                        seitenHöhePt   = pdfDoc.Pages[0].Height.Point;
+                    }
+                }
+                catch (Exception ex) { fehler = ex.Message; }
+
+                // Rendern mit PdfRenderer (1200px Breite)
+                try
+                {
+                    AppZustand.RenderSem.Wait();
+                    try
+                    {
+                        const int renderBreite = 1200;
+                        var seiten = PdfRenderer.RenderiereAlleSeiten(pfad, renderBreite);
+                        if (seiten.Count > 0)
+                            bmp = BitmapSourceZuBitmap(seiten[0]);
+                    }
+                    finally { AppZustand.RenderSem.Release(); }
+                }
+                catch (Exception ex) { fehler = ex.Message; }
+
+                Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    if (bmp != null)
+                    {
+                        _pdfSeitenBreitePt = seitenBreitePt > 0 ? seitenBreitePt : bmp.Width * 72.0 / 96.0;
+                        _pdfSeitenHöhePt   = seitenHöhePt   > 0 ? seitenHöhePt   : bmp.Height * 72.0 / 96.0;
+                        _pdfRenderBreite = bmp.Width;
+                        _pdfRenderHöhe   = bmp.Height;
+                        LadeBitmap(bmp, pfad);
+                    }
+                    else
+                    {
+                        SetzeStatus("Fehler beim PDF-Rendern: " + (fehler ?? "unbekannt"));
+                    }
+                }));
+            });
+            thread.IsBackground = true;
+            thread.Name = "BildschnittPdfLaden";
+            thread.Start();
+        }
+
+        private static System.Drawing.Bitmap BitmapSourceZuBitmap(BitmapSource bmpSrc)
+        {
+            using var ms = new MemoryStream();
+            var encoder = new PngBitmapEncoder();
+            encoder.Frames.Add(BitmapFrame.Create(bmpSrc));
+            encoder.Save(ms);
+            ms.Seek(0, SeekOrigin.Begin);
+            return new System.Drawing.Bitmap(ms);
         }
 
         // ── Hilfsmethoden ──────────────────────────────────────────────────────

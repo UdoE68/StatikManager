@@ -9,6 +9,8 @@ namespace StatikManager
     public partial class MainWindow : Window
     {
         private readonly ModulManager _modulManager = new();
+        private readonly System.Collections.Generic.Dictionary<string, UIElement> _panels
+            = new System.Collections.Generic.Dictionary<string, UIElement>();
 
         private readonly System.Windows.Threading.DispatcherTimer _resetTimer = new()
         {
@@ -80,12 +82,14 @@ namespace StatikManager
         private void IntegriereModule()
         {
             int menüIndex = HauptMenü.Items.IndexOf(MenüHilfe);
+            bool ersterPanel = true;
 
             foreach (var modul in _modulManager.Module)
             {
-                // Panel (erstes Modul füllt den Inhaltsbereich)
-                if (HauptInhalt.Content == null)
-                    HauptInhalt.Content = modul.ErstellePanel();
+                // Alle Panels erstellen (nicht nur erstes), damit Modul-Wechsel möglich ist
+                var panel = modul.ErstellePanel();
+                _panels[modul.Id] = panel;
+                if (ersterPanel) { HauptInhalt.Content = panel; ersterPanel = false; }
 
                 // Menüeintrag vor "Hilfe" einfügen
                 var menüEintrag = modul.ErzeugeMenüEintrag();
@@ -99,6 +103,15 @@ namespace StatikManager
                 foreach (var element in modul.ErzeugeWerkzeugleistenEinträge())
                     WerkzeugLeiste.Children.Add(element);
             }
+
+            // Modul-Wechsel-Event (z.B. Doppelklick im DokumentePanel → BildschnittPanel)
+            AppZustand.Instanz.ModulWechselAngefordert += (modulId, pfad) =>
+            {
+                if (!_panels.TryGetValue(modulId, out var panel)) return;
+                HauptInhalt.Content = panel;
+                if (panel is Modules.Bildschnitt.BildschnittPanel bp)
+                    bp.LadeDatei(pfad);
+            };
         }
 
         // ── Status-Anzeige ────────────────────────────────────────────────────

@@ -116,6 +116,7 @@
                           PreviewMouseLeftButtonDown="DokumentenBaum_PreviewMouseDown"
                           PreviewKeyDown="DokumentenBaum_PreviewKeyDown"
                           MouseMove="DokumentenBaum_MouseMove"
+                          MouseDoubleClick="DokumentenBaum_MouseDoubleClick"
                           AllowDrop="True"
                           DragOver="DokumentenBaum_DragOver"
                           Drop="DokumentenBaum_Drop">
@@ -131,7 +132,8 @@
                           FontSize="13"
                           BorderThickness="0"
                           ContextMenuOpening="DateiListe_ContextMenuOpening"
-                          PreviewKeyDown="DateiListe_PreviewKeyDown">
+                          PreviewKeyDown="DateiListe_PreviewKeyDown"
+                          MouseDoubleClick="DateiListe_MouseDoubleClick">
                     <ListView.ContextMenu>
                         <ContextMenu/>
                     </ListView.ContextMenu>

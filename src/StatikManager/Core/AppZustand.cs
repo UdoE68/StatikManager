@@ -71,5 +71,12 @@ namespace StatikManager.Core
             _projektPfad = pfad;
             ProjektGeändert?.Invoke(pfad);
         }
+
+        // ── Modul-Wechsel ─────────────────────────────────────────────────────
+
+        public event Action<string, string>? ModulWechselAngefordert;  // (modulId, dateipfad)
+
+        public void FordeModulWechsel(string modulId, string dateipfad)
+            => ModulWechselAngefordert?.Invoke(modulId, dateipfad);
     }
 }

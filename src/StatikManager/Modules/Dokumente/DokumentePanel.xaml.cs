@@ -2316,6 +2316,27 @@ namespace StatikManager.Modules.Dokumente
             thread.Start();
         }
 
+        // ── DoubleClick → BildschnittModul ───────────────────────────────────
+
+        private void DokumentenBaum_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+        {
+            if (DokumentenBaum.SelectedItem is not TreeViewItem item) return;
+            if (item.Tag is not string pfad) return;
+            if (Directory.Exists(pfad)) return; // Ordner ignorieren
+
+            var ext = Path.GetExtension(pfad).ToLowerInvariant();
+            if (DateiTypen.IstBildDatei(ext) || ext == ".pdf")
+                AppZustand.Instanz.FordeModulWechsel("bildschnitt", pfad);
+        }
+
+        private void DateiListe_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+        {
+            if (DateiListe.SelectedItem is not DateiEintrag eintrag) return;
+            var ext = Path.GetExtension(eintrag.VollerPfad).ToLowerInvariant();
+            if (DateiTypen.IstBildDatei(ext) || ext == ".pdf")
+                AppZustand.Instanz.FordeModulWechsel("bildschnitt", eintrag.VollerPfad);
+        }
+
         // ── Datenklasse ───────────────────────────────────────────────────────
 
         private enum WordAnsicht { Prozent100, EineSeite, Seitenbreite, MehrereSeiten }
