@@ -15,29 +15,21 @@
                    Grid.Column="0"
                    Background="{DynamicResource Farbe.Fläche}">
 
-            <!-- Projektleiste: ComboBox + Hinzufügen + Entfernen -->
+            <!-- Projektleiste: ComboBox + Verwalten-Button -->
             <Border DockPanel.Dock="Top"
                     Background="{DynamicResource Farbe.Werkzeugleiste}"
                     BorderBrush="{DynamicResource Farbe.Rahmen}"
                     BorderThickness="0,0,0,1"
                     Padding="8,5">
                 <DockPanel>
-                    <Button x:Name="BtnProjektHinzufügen"
-                            Content="+"
-                            Width="24" Height="22"
-                            FontSize="14" FontWeight="Bold"
+                    <Button x:Name="BtnProjektVerwalten"
+                            Content="⚙"
+                            Width="26" Height="22"
+                            FontSize="13"
                             DockPanel.Dock="Right"
-                            ToolTip="Projekt hinzufügen"
-                            Margin="3,0,0,0"
-                            Click="BtnProjektHinzufügen_Click"/>
-                    <Button x:Name="BtnProjektEntfernen"
-                            Content="−"
-                            Width="24" Height="22"
-                            FontSize="14" FontWeight="Bold"
-                            DockPanel.Dock="Right"
-                            ToolTip="Projekt aus Liste entfernen (Dateien bleiben erhalten)"
-                            Margin="3,0,0,0"
-                            Click="BtnProjektEntfernen_Click"/>
+                            ToolTip="Projekte verwalten (Basispfad, Auswahl, Kurznamen)"
+                            Margin="4,0,0,0"
+                            Click="BtnProjektVerwalten_Click"/>
                     <ComboBox x:Name="CbProjekte"
                               FontSize="12"
                               ToolTip="Projekt wechseln"

@@ -1,0 +1,144 @@
+<Window x:Class="StatikManager.Modules.Dokumente.ProjektVerwaltungDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Projekte verwalten"
+        Width="680" Height="480"
+        MinWidth="480" MinHeight="320"
+        WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False"
+        ResizeMode="CanResizeWithGrip">
+
+    <Grid Margin="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="8"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="8"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="10"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- ── Basispfad-Leiste ───────────────────────────────────────────── -->
+        <Border Grid.Row="0"
+                Background="#F0F0F0"
+                BorderBrush="#CCC" BorderThickness="1"
+                CornerRadius="4" Padding="10,7">
+            <DockPanel>
+                <Button x:Name="BtnNeuScannen"
+                        DockPanel.Dock="Right"
+                        Content="↺ Neu scannen"
+                        Width="100" Height="24" FontSize="11"
+                        Margin="6,0,0,0"
+                        ToolTip="Unterordner im Basispfad erneut einlesen"
+                        Click="BtnNeuScannen_Click"/>
+                <Button x:Name="BtnBasisPfadÄndern"
+                        DockPanel.Dock="Right"
+                        Content="Ändern …"
+                        Width="80" Height="24" FontSize="11"
+                        Margin="6,0,0,0"
+                        Click="BtnBasisPfadÄndern_Click"/>
+                <TextBlock Text="Basispfad: "
+                           VerticalAlignment="Center"
+                           FontWeight="SemiBold" FontSize="12"/>
+                <TextBlock x:Name="TxtBasisPfad"
+                           VerticalAlignment="Center"
+                           FontSize="12"
+                           Foreground="#555"
+                           TextTrimming="CharacterEllipsis"
+                           ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"/>
+            </DockPanel>
+        </Border>
+
+        <!-- ── Hinweis ────────────────────────────────────────────────────── -->
+        <TextBlock Grid.Row="2"
+                   FontSize="11" Foreground="#666"
+                   Text="Aktiviere die Projekte die im Dropdown erscheinen sollen. Kurzname ist optional (leer = Ordnername)."/>
+
+        <!-- ── Projektliste ───────────────────────────────────────────────── -->
+        <DataGrid Grid.Row="4"
+                  x:Name="DgProjekte"
+                  AutoGenerateColumns="False"
+                  CanUserAddRows="False"
+                  CanUserDeleteRows="False"
+                  CanUserReorderColumns="False"
+                  SelectionUnit="Cell"
+                  HeadersVisibility="Column"
+                  GridLinesVisibility="Horizontal"
+                  BorderBrush="#CCC" BorderThickness="1"
+                  RowHeight="28"
+                  FontSize="12">
+
+            <DataGrid.Columns>
+
+                <!-- Checkbox: sichtbar im Dropdown -->
+                <DataGridTemplateColumn Header="✓" Width="36" CanUserResize="False">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <CheckBox IsChecked="{Binding Sichtbar, UpdateSourceTrigger=PropertyChanged, Mode=TwoWay}"
+                                      HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+
+                <!-- Kurzname (editierbar) -->
+                <DataGridTextColumn Header="Kurzname (optional)"
+                                    Binding="{Binding Kurzname, UpdateSourceTrigger=PropertyChanged}"
+                                    Width="180"/>
+
+                <!-- Ordnername (read-only) -->
+                <DataGridTextColumn Header="Ordner"
+                                    Binding="{Binding OrdnerName}"
+                                    Width="180"
+                                    IsReadOnly="True">
+                    <DataGridTextColumn.ElementStyle>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="Foreground" Value="#444"/>
+                        </Style>
+                    </DataGridTextColumn.ElementStyle>
+                </DataGridTextColumn>
+
+                <!-- Pfad (read-only, grau) -->
+                <DataGridTextColumn Header="Pfad"
+                                    Binding="{Binding Pfad}"
+                                    Width="*"
+                                    IsReadOnly="True">
+                    <DataGridTextColumn.ElementStyle>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="Foreground" Value="#888"/>
+                            <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+                            <Setter Property="ToolTip" Value="{Binding Pfad}"/>
+                        </Style>
+                    </DataGridTextColumn.ElementStyle>
+                </DataGridTextColumn>
+
+            </DataGrid.Columns>
+        </DataGrid>
+
+        <!-- ── Buttons ────────────────────────────────────────────────────── -->
+        <StackPanel Grid.Row="6"
+                    Orientation="Horizontal"
+                    HorizontalAlignment="Right">
+            <Button x:Name="BtnAlleAn"
+                    Content="Alle aktivieren"
+                    Width="110" Height="26" FontSize="11"
+                    Margin="0,0,6,0"
+                    Click="BtnAlleAn_Click"/>
+            <Button x:Name="BtnAlleAus"
+                    Content="Alle deaktivieren"
+                    Width="120" Height="26" FontSize="11"
+                    Margin="0,0,20,0"
+                    Click="BtnAlleAus_Click"/>
+            <Button Content="OK"
+                    Width="80" Height="26"
+                    IsDefault="True"
+                    Margin="0,0,8,0"
+                    Click="BtnOK_Click"/>
+            <Button Content="Abbrechen"
+                    Width="90" Height="26"
+                    IsCancel="True"
+                    Click="BtnAbbrechen_Click"/>
+        </StackPanel>
+
+    </Grid>
+</Window>

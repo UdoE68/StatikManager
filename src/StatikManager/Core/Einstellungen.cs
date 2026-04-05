@@ -8,6 +8,23 @@ namespace StatikManager.Core
     public enum AnsichtModus { Baum, Liste }
 
     /// <summary>
+    /// Ein Projekt-Eintrag: Pfad, optionaler Kurzname, Sichtbarkeit im Dropdown.
+    /// </summary>
+    public sealed class ProjektEintrag
+    {
+        public string Pfad     { get; set; } = "";
+        public string Kurzname { get; set; } = "";   // leer → Ordnername wird angezeigt
+        public bool   Sichtbar { get; set; } = true;
+
+        /// <summary>Anzeigename: Kurzname wenn gesetzt, sonst letzter Ordnername.</summary>
+        [XmlIgnore]
+        public string Anzeigename =>
+            !string.IsNullOrWhiteSpace(Kurzname)
+                ? Kurzname
+                : Path.GetFileName(Pfad.TrimEnd(Path.DirectorySeparatorChar));
+    }
+
+    /// <summary>
     /// Persistente Anwendungseinstellungen.
     /// Werden in %APPDATA%\StatikManager\einstellungen.xml gespeichert.
     /// Zugriff über Einstellungen.Instanz (Singleton, lazy geladen).
@@ -33,10 +50,19 @@ namespace StatikManager.Core
         [XmlArrayItem("Vorlage")]
         public List<WordVorlage> WordVorlagen { get; set; } = new List<WordVorlage>();
 
-        /// <summary>Zuletzt verwendete Projektpfade (keine Dateilöschung beim Entfernen).</summary>
-        [XmlArray("ProjektPfade")]
-        [XmlArrayItem("Pfad")]
-        public List<string> ProjektPfade { get; set; } = new List<string>();
+        /// <summary>
+        /// Basisordner dessen direkte Unterordner als Projekte angeboten werden.
+        /// null = noch nicht konfiguriert (beim ersten Start abfragen).
+        /// </summary>
+        public string? ProjektBasisPfad { get; set; }
+
+        /// <summary>
+        /// Bekannte Projekte mit Sichtbarkeits-Flag und optionalem Kurznamen.
+        /// Wird durch den Dialog "Projekte verwalten" befüllt.
+        /// </summary>
+        [XmlArray("ProjektEintraege")]
+        [XmlArrayItem("Projekt")]
+        public List<ProjektEintrag> ProjektEintraege { get; set; } = new List<ProjektEintrag>();
 
         // ── Persistenz ────────────────────────────────────────────────────────
 
