@@ -3596,7 +3596,10 @@ namespace StatikManager.Modules.Werkzeuge
                             ? $"_s{si + 1}_t{t + 1}" : $"_teil{t + 1}";
                         string zielDatei = IO.Path.Combine(ordner, basis + suffix + ".pdf");
 
-                        using var pdfIn = PdfReader.Open(_pdfPfad!, PdfDocumentOpenMode.Import);
+                        // MemoryStream statt Dateipfad – verhindert Datei-Sperr-Konflikt mit AutoSpeichern
+                        using var pdfIn = _pdfBytes != null
+                            ? PdfReader.Open(new IO.MemoryStream(_pdfBytes, writable: false), PdfDocumentOpenMode.Import)
+                            : PdfReader.Open(_pdfPfad!, PdfDocumentOpenMode.Import);
                         var pdfOut      = new PdfSharp.Pdf.PdfDocument();
                         var seite       = pdfOut.AddPage(pdfIn.Pages[si]);
                         seite.CropBox   = new PdfSharp.Pdf.PdfRectangle(
