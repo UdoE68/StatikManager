@@ -103,7 +103,7 @@ namespace StatikManager.Modules.Dokumente
             _fileWatcher.DateiGeändert += OnDateiGeändert;
 
             _ordnerWatcher = new OrdnerWatcherService(Dispatcher);
-            _ordnerWatcher.OrdnerGeändert += AktualisiereDokumentListe;
+            _ordnerWatcher.OrdnerGeändert += AktualisiereNurStruktur;
 
             // UI-Freigabe wenn PdfSchnittEditor SetzeLaden(false) signalisiert
             AppZustand.Instanz.LadeZustandGeändert += aktiv => { if (!aktiv) GibUI(); };
@@ -429,6 +429,19 @@ namespace StatikManager.Modules.Dokumente
             if (RbBaum.IsChecked == true) ZeigeBaum(root);
             else                          ZeigeListe(root);
 
+            AppZustand.Instanz.SetzeStatus($"{ZähleDateien(root)} Datei(en) gefunden.");
+        }
+
+        /// <summary>
+        /// Baut nur den Baum/die Liste neu – ohne aktive Vorschau oder Auswahl zu löschen.
+        /// Wird vom OrdnerWatcher aufgerufen, damit externe Dateiänderungen die Vorschau nicht unterbrechen.
+        /// </summary>
+        private void AktualisiereNurStruktur()
+        {
+            if (_projektPfad is null) return;
+            var root = new DirectoryInfo(_projektPfad);
+            if (RbBaum.IsChecked == true) ZeigeBaum(root);
+            else                          ZeigeListe(root);
             AppZustand.Instanz.SetzeStatus($"{ZähleDateien(root)} Datei(en) gefunden.");
         }
 

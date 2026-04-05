@@ -36,11 +36,14 @@ namespace StatikManager.Infrastructure
 
             _watcher = new FileSystemWatcher(ordnerPfad)
             {
+                // Nur Datei-/Ordnernamen-Änderungen – kein LastWrite/Size.
+                // LastWrite würde bei jedem Speichervorgang hunderte Events erzeugen
+                // und den 500-ms-Debounce dauerhaft zurücksetzen.
                 NotifyFilter          = NotifyFilters.FileName
-                                      | NotifyFilters.DirectoryName
-                                      | NotifyFilters.LastWrite,
+                                      | NotifyFilters.DirectoryName,
                 IncludeSubdirectories = true,
-                EnableRaisingEvents   = true
+                EnableRaisingEvents   = true,
+                InternalBufferSize    = 65536   // Standard 8 KB reicht bei großen Ordnern nicht
             };
 
             FileSystemEventHandler handler = (s, e) => OnFsEvent();
@@ -48,8 +51,9 @@ namespace StatikManager.Infrastructure
 
             _watcher.Created += handler;
             _watcher.Deleted += handler;
-            _watcher.Changed += handler;
             _watcher.Renamed += renamed;
+            // Changed bewusst NICHT abonniert – Changed feuert bei Dateiinhalt-Änderungen,
+            // nicht bei strukturellen Änderungen (neue Dateien/Ordner).
 
             Logger.Debug("OrdnerWatcher", $"Überwachung gestartet: {ordnerPfad}");
         }
