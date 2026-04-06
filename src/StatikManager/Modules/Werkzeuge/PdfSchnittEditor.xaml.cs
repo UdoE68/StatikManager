@@ -798,6 +798,7 @@ namespace StatikManager.Modules.Werkzeuge
 
         private void ZeicheCanvas()
         {
+            if (_reflowDebugModus) { ZeicheCanvasReflow(); return; }
             try
             {
                 PdfCanvas.Children.Clear();
@@ -4547,6 +4548,12 @@ namespace StatikManager.Modules.Werkzeuge
                         e.Handled = true;
                     }
                 }
+                else if (e.Key == Key.R && Keyboard.Modifiers == (ModifierKeys.Control | ModifierKeys.Shift))
+                {
+                    _reflowDebugModus = !_reflowDebugModus;
+                    ZeicheCanvas();
+                    e.Handled = true;
+                }
                 else if (e.Key == Key.S && (Keyboard.Modifiers & ModifierKeys.Control) != 0)
                 {
                     SpeichereÄnderungen(); e.Handled = true;
@@ -5276,6 +5283,175 @@ namespace StatikManager.Modules.Werkzeuge
             }
 
             return true;
+        }
+
+        // ── Reflow-Debug-Renderer (Schritt 4): Probe-Renderpfad ──────────────────────
+
+        /// <summary>
+        /// true = Ctrl+Shift+R wurde gedrückt, Canvas zeigt ReflowResult statt altem Modell.
+        /// false = normaler ZeicheCanvas()-Pfad (Default).
+        /// </summary>
+        private bool _reflowDebugModus = false;
+
+        /// <summary>
+        /// Rendert den Canvas auf Basis des aktuellen ReflowResult (Debug/Test-Pfad).
+        /// Ersetzt ZeicheCanvas() NICHT — wird nur via _reflowDebugModus aktiviert.
+        ///
+        /// Visuelle Konventionen:
+        ///   - Jede OutputPage = grauer Hintergrund mit roter Seitennummer
+        ///   - Bitmap-Blöcke = CroppedBitmap aus _seitenBilder, mit BlkId-Label
+        ///   - Leerzeilen = grünes Rechteck
+        ///   - Rote Linie = Seitenumbruch-Grenze
+        ///   - Blaue Linie = Block-Anfang (bei Splits sichtbar)
+        /// </summary>
+        private void ZeicheCanvasReflow()
+        {
+            var result = DebugReflowAusAltmodell();
+
+            PdfCanvas.Children.Clear();
+            if (result.Pages.Count == 0)
+            {
+                TxtInfo.Text = "[REFLOW-DEBUG] Keine Blöcke — Strg+Shift+R zum Beenden";
+                return;
+            }
+
+            const double seitenAbstand = 20.0;
+            const double offsetX       = 20.0;
+            double currentY = seitenAbstand;
+
+            for (int pi = 0; pi < result.Pages.Count; pi++)
+            {
+                var    page  = result.Pages[pi];
+                double pageW = page.WidthPx;
+                double pageH = page.MaxHeightPx;
+
+                // Seiten-Hintergrund
+                var bg = new Rectangle
+                {
+                    Width           = pageW,
+                    Height          = pageH,
+                    Fill            = new SolidColorBrush(Color.FromRgb(242, 242, 242)),
+                    Stroke          = new SolidColorBrush(Color.FromRgb(180, 180, 180)),
+                    StrokeThickness = 1
+                };
+                Canvas.SetLeft(bg, offsetX);
+                Canvas.SetTop(bg, currentY);
+                PdfCanvas.Children.Add(bg);
+
+                // Seiten-Nummer (oben links)
+                var pageLabel = new TextBlock
+                {
+                    Text       = $"Seite {pi + 1}  [{page.Blocks.Count} Block(e), " +
+                                 $"gefüllt {page.FilledHeightPx:F0}/{pageH:F0} px]",
+                    FontSize   = 11,
+                    FontWeight = FontWeights.Bold,
+                    Foreground = new SolidColorBrush(Color.FromRgb(190, 0, 0))
+                };
+                Canvas.SetLeft(pageLabel, offsetX + 4);
+                Canvas.SetTop(pageLabel, currentY + 2);
+                PdfCanvas.Children.Add(pageLabel);
+
+                // PlacedBlocks rendern
+                foreach (var pb in page.Blocks)
+                {
+                    double blockY = currentY + pb.YOffset;
+
+                    // Block-Anfangs-Linie (blau, dünn) — bei geteilten Blöcken sichtbar
+                    var startLinie = new Line
+                    {
+                        X1              = offsetX,
+                        Y1              = blockY,
+                        X2              = offsetX + pageW,
+                        Y2              = blockY,
+                        Stroke          = new SolidColorBrush(Color.FromArgb(100, 0, 80, 200)),
+                        StrokeThickness = 1
+                    };
+                    PdfCanvas.Children.Add(startLinie);
+
+                    if (pb.Block.IsLeerzeile)
+                    {
+                        // Leerzeile = grün
+                        var rect = new Rectangle
+                        {
+                            Width           = pageW - 4,
+                            Height          = pb.HeightPx,
+                            Fill            = new SolidColorBrush(Color.FromArgb(80, 0, 180, 0)),
+                            Stroke          = new SolidColorBrush(Color.FromArgb(160, 0, 140, 0)),
+                            StrokeThickness = 1
+                        };
+                        Canvas.SetLeft(rect, offsetX + 2);
+                        Canvas.SetTop(rect, blockY);
+                        PdfCanvas.Children.Add(rect);
+
+                        var lbl = new TextBlock
+                        {
+                            Text       = $"Leerzeile {pb.HeightPx:F0}px  (B{pb.Block.BlockId})",
+                            FontSize   = 9,
+                            Foreground = new SolidColorBrush(Color.FromRgb(0, 110, 0))
+                        };
+                        Canvas.SetLeft(lbl, offsetX + 6);
+                        Canvas.SetTop(lbl, blockY + 2);
+                        PdfCanvas.Children.Add(lbl);
+                    }
+                    else if (pb.Block.SourcePageIdx >= 0 && pb.Block.SourcePageIdx < _seitenBilder.Count)
+                    {
+                        var srcBmp = _seitenBilder[pb.Block.SourcePageIdx];
+                        int srcH   = srcBmp.PixelHeight;
+                        int srcW   = srcBmp.PixelWidth;
+
+                        int cropY = (int)Math.Round(pb.SrcFracOben  * srcH);
+                        int cropH = (int)Math.Round((pb.SrcFracUnten - pb.SrcFracOben) * srcH);
+                        cropY = Math.Max(0, Math.Min(cropY, srcH - 1));
+                        cropH = Math.Max(1, Math.Min(cropH, srcH - cropY));
+
+                        var cropped = new CroppedBitmap(srcBmp, new Int32Rect(0, cropY, srcW, cropH));
+                        var img = new Image
+                        {
+                            Source  = cropped,
+                            Width   = pageW,
+                            Height  = pb.HeightPx,
+                            Stretch = Stretch.Fill
+                        };
+                        Canvas.SetLeft(img, offsetX);
+                        Canvas.SetTop(img, blockY);
+                        PdfCanvas.Children.Add(img);
+
+                        // Block-ID Label (rechts oben, halb-transparent)
+                        var blockLbl = new TextBlock
+                        {
+                            Text       = $"B{pb.Block.BlockId}",
+                            FontSize   = 9,
+                            Foreground = new SolidColorBrush(Color.FromArgb(220, 0, 60, 200)),
+                            Background = new SolidColorBrush(Color.FromArgb(140, 255, 255, 255))
+                        };
+                        Canvas.SetLeft(blockLbl, offsetX + pageW - 30);
+                        Canvas.SetTop(blockLbl, blockY + 2);
+                        PdfCanvas.Children.Add(blockLbl);
+                    }
+                }
+
+                // Rote Trennlinie am Seitenende
+                var trenn = new Line
+                {
+                    X1              = offsetX - 6,
+                    Y1              = currentY + pageH,
+                    X2              = offsetX + pageW + 6,
+                    Y2              = currentY + pageH,
+                    Stroke          = new SolidColorBrush(Color.FromRgb(200, 0, 0)),
+                    StrokeThickness = 2
+                };
+                PdfCanvas.Children.Add(trenn);
+
+                currentY += pageH + seitenAbstand;
+            }
+
+            double totalW = result.Pages.Count > 0
+                ? result.Pages.Max(p => p.WidthPx) + offsetX * 2
+                : 400;
+            PdfCanvas.Width  = Math.Max(totalW, 400);
+            PdfCanvas.Height = Math.Max(currentY, 200);
+
+            TxtInfo.Text = $"[REFLOW-DEBUG] {result.Pages.Count} Ausgabe-Seite(n) — Strg+Shift+R beendet Debug-Modus";
         }
 
         // ── Reflow-Brücke (Schritt 1–3): Konvertierung Altmodell → ContentBlocks ────

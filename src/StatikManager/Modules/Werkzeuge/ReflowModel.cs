@@ -29,8 +29,11 @@ namespace StatikManager.Modules.Werkzeuge
         /// <summary>Eindeutige ID innerhalb der Session (für Debugging / Undo).</summary>
         public int BlockId { get; set; }
 
-        /// <summary>Index in _seitenBilder (Quell-Bitmap).</summary>
-        public int SourcePageIdx { get; set; }
+        /// <summary>
+        /// Index in _seitenBilder (Quell-Bitmap).
+        /// Sonderwert -1 = reine Leerzeile (kein Bitmap-Inhalt, wird beim Rendern ignoriert).
+        /// </summary>
+        public int SourcePageIdx { get; set; } = -1;
 
         /// <summary>Obere Grenze im Quell-Bitmap (0.0 = Seitenanfang).</summary>
         public double FracOben { get; set; }
@@ -60,7 +63,7 @@ namespace StatikManager.Modules.Werkzeuge
 
         public override string ToString()
             => IsLeerzeile
-                ? $"[Block {BlockId}] Leerzeile {ExtraHeightPx:F0}px"
+                ? $"[Block {BlockId}] Leerzeile {ExtraHeightPx:F0}px (SourcePageIdx=-1)"
                 : $"[Block {BlockId}] Seite {SourcePageIdx} Frac {FracOben:F3}–{FracUnten:F3}" +
                   (IsDeleted ? " GELÖSCHT" : "");
     }
@@ -174,9 +177,9 @@ namespace StatikManager.Modules.Werkzeuge
 
             foreach (var block in sichtbar)
             {
-                double sourcePH = block.SourcePageIdx < sourcePageHeightsPx.Count
+                double sourcePH = (block.SourcePageIdx >= 0 && block.SourcePageIdx < sourcePageHeightsPx.Count)
                     ? sourcePageHeightsPx[block.SourcePageIdx]
-                    : pageMaxHeightPx;
+                    : pageMaxHeightPx;  // -1 = Leerzeile, kein Quell-Bitmap
 
                 double blockH = block.ContentHeightPx(sourcePH);
                 if (blockH <= 0.0) continue;
