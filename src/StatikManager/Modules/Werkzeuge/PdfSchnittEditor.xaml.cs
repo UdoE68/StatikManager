@@ -47,6 +47,9 @@ namespace StatikManager.Modules.Werkzeuge
         private string?            _pdfPfad;
         private byte[]?            _pdfBytes;      // PDF als byte[] – verhindert Datei-Sperr-Probleme beim AutoSpeichern
         private bool               _hatUngespeicherteÄnderungen = false;
+        // Gesetzt bei jeder Änderung; NICHT vom AutoSave gelöscht – nur bei neuem LadePdf oder
+        // explizitem Speichern/Verwerfen. Steuert den "Änderungen speichern?"-Dialog beim Dateiwechsel.
+        private bool               _hatSitzungsÄnderungen = false;
         private System.Windows.Threading.DispatcherTimer? _autoSaveTimer;
         private volatile bool      _autoSaveLäuft;
         private List<BitmapSource> _seitenBilder  = new();
@@ -300,6 +303,7 @@ namespace StatikManager.Modules.Werkzeuge
             _pdfPfad  = pfad;
             _pdfBytes = null;
             _hatUngespeicherteÄnderungen = false;
+            _hatSitzungsÄnderungen = false;
             PdfCanvas.Children.Clear();
             _seitenBilder.Clear();
             _seitenYStart = Array.Empty<double>();
@@ -939,6 +943,7 @@ namespace StatikManager.Modules.Werkzeuge
 
         private void ZeicheSeite(int i)
         {
+            System.Diagnostics.Debug.WriteLine($"[RENDER] Seite {i}, Blocks: {_contentBlocks?.Count}");
             // Wenn diese Seite physisch geschnitten wurde → Blöcke einzeln zeichnen
             if (_contentBlocks != null)
             {
@@ -1116,8 +1121,16 @@ namespace StatikManager.Modules.Werkzeuge
         /// </summary>
         private void ZeicheSeiteAlsBlöcke(int seitenIdx, List<ContentBlock> blöcke)
         {
-            var sourceBmp = _kompositBilder.TryGetValue(seitenIdx, out var kb)
-                ? kb : _seitenBilder[seitenIdx];
+            System.Diagnostics.Debug.WriteLine($"[RENDER] BLOCK-PFAD für Seite {seitenIdx}, Anzahl Blöcke: {blöcke.Count}");
+            // Grundregel (MIGRATION-01): immer _seitenBilder — Fraktionen beziehen sich auf Original.
+            // Ausnahme: _kompositBilder wenn vorhanden UND gleiche Pixelhöhe wie Original
+            // (= von SchiebeTeileZusammen padded, Fraktionen im Komposit-Raum).
+            var origBmp = _seitenBilder[seitenIdx];
+            var sourceBmp = (_kompositBilder.TryGetValue(seitenIdx, out var kb)
+                             && kb != null
+                             && origBmp != null
+                             && kb.PixelHeight == origBmp.PixelHeight)
+                ? kb : origBmp;
             if (sourceBmp == null) return;
 
             int    bmpPixelW = sourceBmp.PixelWidth;
@@ -1129,12 +1142,45 @@ namespace StatikManager.Modules.Werkzeuge
 
             bool   ersterBlock = true;
             double currentY    = yBase;   // gestapeltes Layout: kein frac-basierter Offset
+            int    teilIdx     = 0;       // 0-basierter Index pro Seite — kompatibel mit _ausgewählteParts/(si,t)
             foreach (var block in blöcke)
             {
-                if (block.IsDeleted) continue;   // gelöschte Blöcke werden nicht gerendert (analog Prototyp)
+                int capturedTeilIdx = teilIdx;
+                teilIdx++;  // VOR continue — damit gelöschte Blöcke den Index trotzdem verbrauchen
+
                 double fracO = Math.Max(0.0, Math.Min(1.0, block.FracOben));
                 double fracU = Math.Max(fracO, Math.Min(1.0, block.FracUnten));
                 if (fracU <= fracO) continue;
+
+                double blockDisplayH = Math.Max(1, (fracU - fracO) * pageH);
+                double blockY        = currentY;
+                currentY += blockDisplayH;
+
+                // Gelöschter Block → Leerbereich (Blattgrösse bleibt erhalten)
+                if (block.IsDeleted)
+                {
+                    var placeholder = new Border
+                    {
+                        Width           = bmpPixelW,
+                        Height          = blockDisplayH,
+                        Background      = new SolidColorBrush(Color.FromRgb(0xE8, 0xE8, 0xE8)),
+                        BorderBrush     = new SolidColorBrush(Color.FromRgb(0xD0, 0xD0, 0xD0)),
+                        BorderThickness = new Thickness(1),
+                        Child           = new TextBlock
+                        {
+                            Text                = "entfernt",
+                            Foreground          = new SolidColorBrush(Color.FromRgb(0xA0, 0xA0, 0xA0)),
+                            FontStyle           = FontStyles.Italic,
+                            FontSize            = 11,
+                            HorizontalAlignment = HorizontalAlignment.Center,
+                            VerticalAlignment   = VerticalAlignment.Center
+                        }
+                    };
+                    Canvas.SetLeft(placeholder, setX);
+                    Canvas.SetTop(placeholder,  blockY);
+                    PdfCanvas.Children.Add(placeholder);
+                    continue;
+                }
 
                 int pixelY = (int)Math.Round(fracO * bmpPixelH);
                 int pixelH = (int)Math.Round((fracU - fracO) * bmpPixelH);
@@ -1155,10 +1201,6 @@ namespace StatikManager.Modules.Werkzeuge
                     continue;
                 }
 
-                double blockDisplayH = Math.Max(1, (fracU - fracO) * pageH);
-                double blockY        = currentY;
-                currentY += blockDisplayH;
-
                 DropShadowEffect? shadow = null;
                 try
                 {
@@ -1176,14 +1218,18 @@ namespace StatikManager.Modules.Werkzeuge
                     : $"SEITE_{seitenIdx}_BLK_{block.BlockId}";
                 ersterBlock = false;
 
+                bool isSelected = _ausgewählteParts.Contains((seitenIdx, capturedTeilIdx));
+
                 var blatt = new Border
                 {
                     Tag                 = tag,
                     Width               = bmpPixelW,
                     Height              = blockDisplayH,
                     Background          = Brushes.White,
-                    BorderBrush         = new SolidColorBrush(Color.FromRgb(160, 160, 160)),
-                    BorderThickness     = new Thickness(2),
+                    BorderBrush         = isSelected
+                                            ? new SolidColorBrush(Color.FromRgb(0, 100, 220))
+                                            : new SolidColorBrush(Color.FromRgb(160, 160, 160)),
+                    BorderThickness     = new Thickness(isSelected ? 3 : 2),
                     Child               = new Image
                     {
                         Source              = croppedBmp,
@@ -1195,6 +1241,39 @@ namespace StatikManager.Modules.Werkzeuge
                     Effect              = shadow,
                     SnapsToDevicePixels = true
                 };
+
+                // Klick → Block markieren (kompatibel mit LöscheAusgewählteParts)
+                blatt.MouseLeftButtonDown += (_, ev) =>
+                {
+                    if (_scherenModus) return;   // Schnitt-Modus: Event an Canvas durchlassen (Schere_MouseDown)
+                    bool ctrl = (Keyboard.Modifiers & ModifierKeys.Control) != 0;
+                    if (!ctrl) _ausgewählteParts.Clear();
+                    if (_ausgewählteParts.Contains((seitenIdx, capturedTeilIdx)))
+                        _ausgewählteParts.Remove((seitenIdx, capturedTeilIdx));
+                    else
+                        _ausgewählteParts.Add((seitenIdx, capturedTeilIdx));
+                    BtnTeilLöschen.IsEnabled = _ausgewählteParts.Count > 0;
+                    TxtInfo.Text = _ausgewählteParts.Count > 0
+                        ? $"{_ausgewählteParts.Count} Teil(e) markiert – Entf oder Rechtsklick zum Löschen"
+                        : "";
+                    ZeicheCanvas();
+                    ev.Handled = true;
+                };
+
+                // Rechtsklick-Menü → Teil löschen
+                var blockMenu = new ContextMenu();
+                var itemLösch = new MenuItem { Header = "\u2715  Teil löschen" };
+                itemLösch.Click += (_, __) =>
+                {
+                    if (!_ausgewählteParts.Contains((seitenIdx, capturedTeilIdx)))
+                    {
+                        _ausgewählteParts.Clear();
+                        _ausgewählteParts.Add((seitenIdx, capturedTeilIdx));
+                    }
+                    LöscheAusgewählteParts();
+                };
+                blockMenu.Items.Add(itemLösch);
+                blatt.ContextMenu = blockMenu;
 
                 Canvas.SetLeft(blatt, setX);
                 Canvas.SetTop(blatt,  blockY);
@@ -3606,7 +3685,10 @@ namespace StatikManager.Modules.Werkzeuge
 
                 // Neues Modell: ContentBlock an yFrac physisch aufteilen
                 if (_contentBlocks != null)
+                {
                     SplitContentBlockBeiSchnitt(si, yFrac);
+                    System.Diagnostics.Debug.WriteLine($"[SPLIT] Blocks jetzt: {_contentBlocks.Count}");
+                }
 
                 MarkiereAlsGeändert();
                 if (_contentBlocks != null) ZeicheCanvas();
@@ -4377,6 +4459,14 @@ namespace StatikManager.Modules.Werkzeuge
             }
 
             _ausgewählteParts.Clear();
+
+            // _contentBlocks nach Altmodell-Änderung synchronisieren (wie im Undo-Pfad)
+            if (_contentBlocks != null)
+            {
+                _contentBlocks = KonvertiereAltesModellZuBlöcken();
+                _nextBlockId   = _contentBlocks.Count > 0 ? _contentBlocks.Max(b => b.BlockId) + 1 : 0;
+            }
+
             // Canvas neu aufbauen mit aktualisierten Composite-Bitmaps
             ZeicheCanvas();
             BtnTeilLöschen.IsEnabled = false;
@@ -5071,6 +5161,7 @@ namespace StatikManager.Modules.Werkzeuge
         private void MarkiereAlsGeändert()
         {
             _hatUngespeicherteÄnderungen = true;
+            _hatSitzungsÄnderungen = true;
             _autoSaveTimer?.Stop();
             _autoSaveTimer?.Start();
         }
@@ -5166,16 +5257,43 @@ namespace StatikManager.Modules.Werkzeuge
         /// </summary>
         public bool FrageObSpeichern()
         {
-            if (!_hatUngespeicherteÄnderungen) return true;
+            // _hatSitzungsÄnderungen bleibt auch nach AutoSave true – erfasst alle Änderungen
+            // dieser Sitzung gegenüber dem Original, unabhängig davon ob AutoSave bereits lief.
+            if (!_hatSitzungsÄnderungen) return true;
 
             var antwort = MessageBox.Show(
-                "Die aktuelle PDF enthält ungespeicherte Änderungen.\n\nÄnderungen in '_bearbeitet.pdf' speichern?",
+                "Die aktuelle PDF wurde in dieser Sitzung bearbeitet.\n\nÄnderungen in '_bearbeitet.pdf' speichern?",
                 "Änderungen speichern?",
                 MessageBoxButton.YesNoCancel,
                 MessageBoxImage.Question);
 
             if (antwort == MessageBoxResult.Cancel) return false;
-            if (antwort == MessageBoxResult.Yes) SpeichereÄnderungen();
+
+            if (antwort == MessageBoxResult.Yes)
+            {
+                SpeichereÄnderungen(); // setzt _hatSitzungsÄnderungen = false via SpeichereGesamtzustand
+            }
+            else // Nein = Verwerfen
+            {
+                // AutoSave hat evtl. bereits eine _bearbeitet.pdf erstellt → löschen
+                if (_pdfPfad != null)
+                {
+                    string bearbeitetPfad = BearbeitetPfadFür(_pdfPfad);
+                    if (System.IO.File.Exists(bearbeitetPfad))
+                    {
+                        try { System.IO.File.Delete(bearbeitetPfad); }
+                        catch { /* Löschen nicht kritisch */ }
+                    }
+                    // SchnittState-JSON ebenfalls entfernen
+                    string jsonPfad = _pdfPfad + ".edit.json";
+                    if (System.IO.File.Exists(jsonPfad))
+                    {
+                        try { System.IO.File.Delete(jsonPfad); }
+                        catch { }
+                    }
+                }
+                _hatSitzungsÄnderungen = false;
+            }
             return true;
         }
 
@@ -5310,8 +5428,9 @@ namespace StatikManager.Modules.Werkzeuge
                 return false;  // PDF wurde geschrieben, JSON nicht → kein Dirty-Reset
             }
 
-            // Nur bei vollständigem Erfolg dirty-Flag zurücksetzen
+            // Nur bei vollständigem Erfolg dirty-Flags zurücksetzen
             _hatUngespeicherteÄnderungen = false;
+            _hatSitzungsÄnderungen = false;
             System.Diagnostics.Debug.WriteLine($"[GESAMTZUSTAND] OK → {bearbeitetPfad}");
             return true;
         }
