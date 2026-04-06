@@ -270,14 +270,16 @@ namespace StatikManager.Modules.Werkzeuge
         }
 
         /// <summary>
-        /// Markiert den Block als gelöscht.
+        /// Markiert den Block als gelöscht und speichert den gewünschten Lückenabstand.
         /// RenderBlocks() rendert für diesen Block einen Lücken-Platzhalter (Darstellung abhängig von GapArt/GapMm).
         /// </summary>
-        private void DeleteBlock(int blockId)
+        private void DeleteBlock(int blockId, GapModus modus, double gapMm)
         {
             var block = _blocks.FirstOrDefault(b => b.Id == blockId);
             if (block == null) return;
             block.IsDeleted = true;
+            block.GapArt    = modus;
+            block.GapMm     = gapMm;
             _selectedId     = -1;
             RenderBlocks();
         }
@@ -351,8 +353,12 @@ namespace StatikManager.Modules.Werkzeuge
 
         private void BtnDelete_Click(object sender, RoutedEventArgs e)
         {
-            if (_selectedId >= 0)
-                DeleteBlock(_selectedId);
+            if (_selectedId < 0) return;
+
+            var dlg = new GapDialog { Owner = this };
+            if (dlg.ShowDialog() != true) return;
+
+            DeleteBlock(_selectedId, dlg.GewählterModus, dlg.EingabeGapMm);
         }
 
         private void EditorCanvas_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
