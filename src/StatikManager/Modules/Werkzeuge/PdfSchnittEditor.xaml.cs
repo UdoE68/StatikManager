@@ -188,6 +188,17 @@ namespace StatikManager.Modules.Werkzeuge
         // Sitzungszustand der nach dem nächsten PDF-Laden angewendet wird (null = kein Restore)
         private Core.SitzungsZustand? _pendingSitzung;
 
+        // ── Reflow-Primärdaten ────────────────────────────────────────────────
+        /// <summary>
+        /// Führendes Inhaltsmodell für den Reflow-Renderer.
+        /// Wird nach dem Laden einer PDF (nach LadeSchnittState) aus dem Altmodell konvertiert.
+        /// null solange noch keine PDF geladen wurde.
+        /// </summary>
+        private List<ContentBlock> _contentBlocks;
+
+        /// <summary>Monoton steigender Zähler für BlockIds — wird nach jeder Konvertierung und nach Undo-Sync neu gesetzt.</summary>
+        private int _nextBlockId = 0;
+
         // ── Fehler-Hilfsmethoden ──────────────────────────────────────────────
 
         private static void LogException(Exception ex, string kontext)
@@ -434,6 +445,11 @@ namespace StatikManager.Modules.Werkzeuge
                         // SchnittState aus JSON wiederherstellen — NACH Seitenaufbau, VOR ZeicheCanvas
                         // Damit werden Schnittlinien und gelöschte Bereiche sofort korrekt gerendert.
                         LadeSchnittState();
+
+                        // Reflow-Primärdaten initialisieren — NACH LadeSchnittState, damit Schnitte + gelöschte
+                        // Teile bereits bekannt sind und korrekt in ContentBlocks übertragen werden.
+                        _contentBlocks = KonvertiereAltesModellZuBlöcken();
+                        _nextBlockId   = _contentBlocks.Count > 0 ? _contentBlocks.Max(b => b.BlockId) + 1 : 0;
 
                         ZeicheCanvas();
                         // Pixel-pro-mm fuer Sicherheitsabstand-Konvertierung — via _pdfBytes (kein Datei-Handle)
@@ -923,6 +939,19 @@ namespace StatikManager.Modules.Werkzeuge
 
         private void ZeicheSeite(int i)
         {
+            // Wenn diese Seite physisch geschnitten wurde → Blöcke einzeln zeichnen
+            if (_contentBlocks != null)
+            {
+                var blöckeDeserSeite = _contentBlocks
+                    .Where(b => b.SourcePageIdx == i)
+                    .ToList();
+                if (blöckeDeserSeite.Count > 1)
+                {
+                    ZeicheSeiteAlsBlöcke(i, blöckeDeserSeite);
+                    return;
+                }
+            }
+
             var displayBmp = _kompositBilder.TryGetValue(i, out var kb) ? kb : _seitenBilder[i];
             if (displayBmp == null) return;
             // Tatsächliche Bitmap-Abmessungen verwenden – kein Strecken auf RenderBreite
@@ -1080,6 +1109,98 @@ namespace StatikManager.Modules.Werkzeuge
             Canvas.SetTop(blatt,  setY);
             PdfCanvas.Children.Add(blatt);
         }
+        /// <summary>
+        /// Zeichnet eine physisch geschnittene Seite als unabhängige ContentBlock-Elemente.
+        /// Jeder Block wird als eigenes CroppedBitmap auf dem Canvas platziert.
+        /// Wird nur aufgerufen wenn _contentBlocks > 1 Block für diese Seite enthält.
+        /// </summary>
+        private void ZeicheSeiteAlsBlöcke(int seitenIdx, List<ContentBlock> blöcke)
+        {
+            var sourceBmp = _kompositBilder.TryGetValue(seitenIdx, out var kb)
+                ? kb : _seitenBilder[seitenIdx];
+            if (sourceBmp == null) return;
+
+            int    bmpPixelW = sourceBmp.PixelWidth;
+            int    bmpPixelH = sourceBmp.PixelHeight;
+            double pageH     = _seitenHöhe[seitenIdx];
+            double setX      = _layoutHorizontal && seitenIdx < _seitenXStart.Length
+                                   ? _seitenXStart[seitenIdx] : SeiteX;
+            double yBase     = _layoutHorizontal ? SeiteX : _seitenYStart[seitenIdx];
+
+            bool   ersterBlock = true;
+            double currentY    = yBase;   // gestapeltes Layout: kein frac-basierter Offset
+            foreach (var block in blöcke)
+            {
+                double fracO = Math.Max(0.0, Math.Min(1.0, block.FracOben));
+                double fracU = Math.Max(fracO, Math.Min(1.0, block.FracUnten));
+                if (fracU <= fracO) continue;
+
+                int pixelY = (int)Math.Round(fracO * bmpPixelH);
+                int pixelH = (int)Math.Round((fracU - fracO) * bmpPixelH);
+                pixelY = Math.Max(0, Math.Min(pixelY, bmpPixelH - 1));
+                pixelH = Math.Max(1, Math.Min(pixelH, bmpPixelH - pixelY));
+                if (pixelH <= 0) continue;
+
+                BitmapSource croppedBmp;
+                try
+                {
+                    croppedBmp = new CroppedBitmap(
+                        sourceBmp,
+                        new Int32Rect(0, pixelY, bmpPixelW, pixelH));
+                }
+                catch (Exception ex)
+                {
+                    LogException(ex, $"ZeicheSeiteAlsBlöcke CroppedBitmap si={seitenIdx} B{block.BlockId}");
+                    continue;
+                }
+
+                double blockDisplayH = Math.Max(1, (fracU - fracO) * pageH);
+                double blockY        = currentY;
+                currentY += blockDisplayH;
+
+                DropShadowEffect? shadow = null;
+                try
+                {
+                    shadow = new DropShadowEffect
+                    {
+                        BlurRadius = 20, ShadowDepth = 7,
+                        Direction  = 280, Color = Colors.Black, Opacity = 0.85
+                    };
+                }
+                catch { /* ohne Schatten weiterzeichnen */ }
+
+                // Erster Block bekommt Tag SEITE_{i} für Kompatibilität mit Highlight-Code
+                string tag = ersterBlock
+                    ? $"SEITE_{seitenIdx}"
+                    : $"SEITE_{seitenIdx}_BLK_{block.BlockId}";
+                ersterBlock = false;
+
+                var blatt = new Border
+                {
+                    Tag                 = tag,
+                    Width               = bmpPixelW,
+                    Height              = blockDisplayH,
+                    Background          = Brushes.White,
+                    BorderBrush         = new SolidColorBrush(Color.FromRgb(160, 160, 160)),
+                    BorderThickness     = new Thickness(2),
+                    Child               = new Image
+                    {
+                        Source              = croppedBmp,
+                        Width               = bmpPixelW,
+                        Height              = blockDisplayH,
+                        Stretch             = Stretch.Uniform,
+                        SnapsToDevicePixels = true
+                    },
+                    Effect              = shadow,
+                    SnapsToDevicePixels = true
+                };
+
+                Canvas.SetLeft(blatt, setX);
+                Canvas.SetTop(blatt,  blockY);
+                PdfCanvas.Children.Add(blatt);
+            }
+        }
+
         // Crop-Linien-Tags: visuelle Linie = "CROP_XXX", Hit-Zone = "CROP_XXX_HIT"
         private static bool IstCropLinie(Line l)
             => l.Tag is string s && s.StartsWith("CROP_");
@@ -3481,6 +3602,11 @@ namespace StatikManager.Modules.Werkzeuge
                 double yFrac = Math.Max(0.01, Math.Min(0.99, (pos.Y - yBase) / pageH));
 
                 _scherenschnitte.Add((si, yFrac));
+
+                // Neues Modell: ContentBlock an yFrac physisch aufteilen
+                if (_contentBlocks != null)
+                    SplitContentBlockBeiSchnitt(si, yFrac);
+
                 MarkiereAlsGeändert();
                 AktualisiereSchnitteLinien();
                 TxtInfo.Text = $"✂ {_scherenschnitte.Count} Schnitt(e) – Strg+Z rückgängig";
@@ -3522,6 +3648,8 @@ namespace StatikManager.Modules.Werkzeuge
 
         private void AktualisiereSchnitteLinien()
         {
+            if (_reflowDebugModus) { ZeicheCanvas(); return; }   // Reflow-Canvas neu zeichnen, keine Alt-Schnittlinien
+
             // Alte feste Schnittlinien entfernen (nicht Vorschau)
             var alte = PdfCanvas.Children.OfType<Line>()
                 .Where(l => { var t = l.Tag?.ToString() ?? ""; return t.StartsWith("SCHERE_") && t != "SCHERE_PREVIEW"; })
@@ -3735,6 +3863,8 @@ namespace StatikManager.Modules.Werkzeuge
         /// <summary>Zeichnet klickbare Teil-Overlays auf den Canvas (Auswahl + Lösch-Markierung).</summary>
         private void AktualisiereTeilOverlays()
         {
+            if (_reflowDebugModus) return;   // Reflow-Canvas bleibt frei von Altmodell-Overlays
+
             // Alte Overlays entfernen
             var alte = PdfCanvas.Children.OfType<Border>()
                 .Where(b => (b.Tag?.ToString() ?? "").StartsWith("TEIL_"))
@@ -4080,6 +4210,10 @@ namespace StatikManager.Modules.Werkzeuge
                 {
                     if (_gelöschteParts.Contains(p)) _gelöschteParts.Remove(p);
                     else _gelöschteParts.Add(p);
+
+                    // Neues Modell synchronisieren: ContentBlock IsDeleted spiegelt _gelöschteParts
+                    if (_contentBlocks != null)
+                        SetzeContentBlockGelöscht(p.Seite, p.Teil, _gelöschteParts.Contains(p));
                 }
                 _ausgewählteParts.Clear();
                 AktualisiereSchnitteLinien();
@@ -4478,6 +4612,29 @@ namespace StatikManager.Modules.Werkzeuge
                 System.Diagnostics.Debug.WriteLine($"[LEERZEILE] Überlauf: inhaltH={inhaltH}+{stripH}={newH} > origH={origH}, {overH}px auf neue Seite {neuIdx}");
             }
 
+            // ── Reflow-Zweig: Leerzeilen-ContentBlock in _contentBlocks einfügen ──
+            // Der Altpfad (Bitmap-Manipulation oben) bleibt vollständig erhalten.
+            // Dieser Block hält _contentBlocks synchron, damit ZeicheCanvasReflow()
+            // korrekte Ergebnisse liefert.
+            if (_contentBlocks != null)
+            {
+                int insertIdx = FindReflowEinfügeIndex(si, t, oberhalb);
+                int newId = _contentBlocks.Count > 0
+                    ? _contentBlocks.Max(b => b.BlockId) + 1
+                    : 0;
+                _contentBlocks.Insert(insertIdx, new ContentBlock
+                {
+                    BlockId       = newId,
+                    SourcePageIdx = -1,
+                    FracOben      = 0.0,
+                    FracUnten     = 0.0,
+                    ExtraHeightPx = stripH
+                });
+                System.Diagnostics.Debug.WriteLine(
+                    $"[REFLOW] Leerzeile B{newId} ({stripH}px) in _contentBlocks[{insertIdx}] eingefügt " +
+                    $"(si={si}, t={t}, oberhalb={oberhalb})");
+            }
+
             ZeicheCanvas();
             AktualisiereSchnitteLinien();
             TxtInfo.Text = $"Leerzeile {(oberhalb ? "ober" : "unter")}halb eingefügt – Strg+Z zum Rückgängigmachen";
@@ -4534,6 +4691,12 @@ namespace StatikManager.Modules.Werkzeuge
                         _gelöschteSeiten.Clear(); foreach (var s in z.GelöschteSeiten) _gelöschteSeiten.Add(s);
                         _seitenReihenfolge = z.SeitenReihenfolge != null ? new List<int>(z.SeitenReihenfolge) : null;
                         _ausgewählteParts.Clear();
+                        // Neumodell nach Altpfad-Undo resynchronisieren (Leerzeilen gehen verloren — Stufe 1)
+                        if (_contentBlocks != null)
+                        {
+                            _contentBlocks = KonvertiereAltesModellZuBlöcken();
+                            _nextBlockId   = _contentBlocks.Count > 0 ? _contentBlocks.Max(b => b.BlockId) + 1 : 0;
+                        }
                         ZeicheCanvas();
                         TxtInfo.Text = $"Rückgängig ({_undoStack.Count} weitere Schritte)";
                         MarkiereAlsGeändert();
@@ -4542,6 +4705,12 @@ namespace StatikManager.Modules.Werkzeuge
                     else if (_scherenModus && _scherenschnitte.Count > 0)
                     {
                         _scherenschnitte.RemoveAt(_scherenschnitte.Count - 1);
+                        // Neumodell nach einfachem Schnitt-Undo resynchronisieren (Leerzeilen gehen verloren — Stufe 1)
+                        if (_contentBlocks != null)
+                        {
+                            _contentBlocks = KonvertiereAltesModellZuBlöcken();
+                            _nextBlockId   = _contentBlocks.Count > 0 ? _contentBlocks.Max(b => b.BlockId) + 1 : 0;
+                        }
                         AktualisiereSchnitteLinien();
                         TxtInfo.Text = _scherenschnitte.Count > 0
                             ? $"✂ {_scherenschnitte.Count} Schnitt(e) – Strg+Z rückgängig"
@@ -5340,7 +5509,7 @@ namespace StatikManager.Modules.Werkzeuge
 
         private void ZeicheCanvasReflowIntern()
         {
-            var result = DebugReflowAusAltmodell();
+            var result = DebugReflowAusContentBlocks();
 
             PdfCanvas.Children.Clear();
             if (result.Pages.Count == 0)
@@ -5568,9 +5737,167 @@ namespace StatikManager.Modules.Werkzeuge
         }
 
         /// <summary>
-        /// Hilfsmethode: Führt einen Reflow-Lauf auf Basis des aktuellen Altmodells aus
-        /// und gibt das Ergebnis als Debug-String zurück.
-        /// Ändert NICHTS am Editor-Zustand — rein diagnostisch.
+        /// Bestimmt den Einfügeindex in _contentBlocks für eine neue Leerzeile,
+        /// ober- oder unterhalb des t-ten Bitmap-Blocks von Seite si.
+        ///
+        /// Strategie: Bitmap-Blöcke von si werden der Reihe nach gezählt
+        /// (Leerzeilen-Blöcke mit SourcePageIdx=-1 werden dabei übersprungen,
+        /// bleiben aber an ihrer Position). Der t-te Bitmap-Block ist der Anker:
+        ///   oberhalb = true  → direkt vor ihm einfügen
+        ///   oberhalb = false → direkt nach ihm einfügen
+        ///
+        /// Fallback: ans Ende der si-Section (oder Listenende).
+        /// </summary>
+        private int FindReflowEinfügeIndex(int si, int t, bool oberhalb)
+        {
+            if (_contentBlocks == null) return 0;
+
+            int bitmapCount = 0;
+            for (int i = 0; i < _contentBlocks.Count; i++)
+            {
+                var b = _contentBlocks[i];
+                // Nur echte Bitmap-Blöcke von Seite si als Anker verwenden.
+                // Leerzeilen-Blöcke (SourcePageIdx == -1) und Blöcke anderer Seiten überspringen.
+                if (b.SourcePageIdx != si || b.IsLeerzeile)
+                    continue;
+
+                if (bitmapCount == t)
+                    return oberhalb ? i : i + 1;
+
+                bitmapCount++;
+            }
+
+            // Fallback: nach dem letzten Block von si einfügen
+            for (int i = _contentBlocks.Count - 1; i >= 0; i--)
+            {
+                if (_contentBlocks[i].SourcePageIdx == si)
+                    return i + 1;
+            }
+            return _contentBlocks.Count;
+        }
+
+        /// <summary>
+        /// Sucht in _contentBlocks den ersten echten Bitmap-Block von Seite <paramref name="si"/>,
+        /// dessen Fraktionsbereich den Schnitt bei <paramref name="yFrac"/> enthält.
+        ///
+        /// Bedingungen (alle müssen gelten):
+        ///   - SourcePageIdx == si  und  SourcePageIdx >= 0
+        ///   - !IsLeerzeile
+        ///   - !IsDeleted
+        ///   - FracOben &lt; yFrac &lt; FracUnten  (echtes Inneres, nicht exakt auf Grenze)
+        ///
+        /// Gibt den Index in _contentBlocks zurück, oder -1 wenn kein passender Block gefunden.
+        /// </summary>
+        private int FindBlockFürSchnitt(int si, double yFrac)
+        {
+            if (_contentBlocks == null) return -1;
+            for (int i = 0; i < _contentBlocks.Count; i++)
+            {
+                var b = _contentBlocks[i];
+                if (b.SourcePageIdx != si || b.SourcePageIdx < 0) continue;
+                if (b.IsLeerzeile)  continue;
+                if (b.IsDeleted)    continue;
+                if (yFrac > b.FracOben && yFrac < b.FracUnten)
+                    return i;
+            }
+            return -1;
+        }
+
+        /// <summary>
+        /// Setzt IsDeleted am t-ten Bitmap-ContentBlock von Seite si.
+        /// Leerzeilen-Blöcke (SourcePageIdx == -1) werden beim Zählen übersprungen.
+        /// Keine Wirkung wenn _contentBlocks null ist oder kein passender Block gefunden wird.
+        /// </summary>
+        private void SetzeContentBlockGelöscht(int si, int t, bool gelöscht)
+        {
+            if (_contentBlocks == null) return;
+            int bitmapCount = 0;
+            foreach (var b in _contentBlocks)
+            {
+                if (b.SourcePageIdx != si || b.IsLeerzeile) continue;
+                if (bitmapCount == t)
+                {
+                    b.IsDeleted = gelöscht;
+                    System.Diagnostics.Debug.WriteLine(
+                        $"[REFLOW-SYNC] B{b.BlockId} Seite={si} Teil={t} → IsDeleted={gelöscht}");
+                    return;
+                }
+                bitmapCount++;
+            }
+            System.Diagnostics.Debug.WriteLine(
+                $"[REFLOW-SYNC] WARNUNG: Kein ContentBlock für Seite={si} Teil={t} gefunden");
+        }
+
+        /// <summary>
+        /// Teilt den ContentBlock, der den Schnitt bei <paramref name="yFrac"/> auf Seite <paramref name="si"/>
+        /// enthält, in zwei eigenständige Blöcke auf.
+        ///
+        /// Block A: FracOben..yFrac   (oben)
+        /// Block B: yFrac..FracUnten  (unten, erbt IsDeleted vom Original)
+        ///
+        /// Leerzeilen-Blöcke werden niemals gesplittet.
+        /// Gibt true zurück wenn ein Split stattgefunden hat.
+        /// </summary>
+        private bool SplitContentBlockBeiSchnitt(int si, double yFrac)
+        {
+            int idx = FindBlockFürSchnitt(si, yFrac);
+            if (idx < 0) return false;
+
+            var orig = _contentBlocks[idx];
+
+            var blockA = new ContentBlock
+            {
+                BlockId       = _nextBlockId++,
+                SourcePageIdx = si,
+                FracOben      = orig.FracOben,
+                FracUnten     = yFrac,
+                IsDeleted     = false,
+                ExtraHeightPx = 0.0
+            };
+            var blockB = new ContentBlock
+            {
+                BlockId       = _nextBlockId++,
+                SourcePageIdx = si,
+                FracOben      = yFrac,
+                FracUnten     = orig.FracUnten,
+                IsDeleted     = orig.IsDeleted,
+                ExtraHeightPx = 0.0
+            };
+
+            _contentBlocks.RemoveAt(idx);
+            _contentBlocks.Insert(idx, blockB);
+            _contentBlocks.Insert(idx, blockA);
+
+            System.Diagnostics.Debug.WriteLine(
+                $"[SPLIT] Seite={si} yFrac={yFrac:F3} → B{blockA.BlockId}({blockA.FracOben:F3}–{blockA.FracUnten:F3}) + B{blockB.BlockId}({blockB.FracOben:F3}–{blockB.FracUnten:F3})");
+
+            return true;
+        }
+
+        /// <summary>
+        /// Führt einen Reflow-Lauf auf Basis von _contentBlocks aus.
+        /// Gibt das ReflowResult zurück. Ändert NICHTS am Editor-Zustand.
+        /// </summary>
+        private ReflowResult DebugReflowAusContentBlocks()
+        {
+            if (_seitenBilder.Count == 0 || _pdfPfad == null || _contentBlocks == null)
+                return new ReflowResult();
+
+            var heights = _seitenBilder.Select(b => (double)b.PixelHeight).ToArray();
+            double pageH = _seitenBilder.Max(b => (double)b.PixelHeight);
+            double pageW = _seitenBilder.Max(b => (double)b.PixelWidth);
+
+            var result = ReflowEngine.RunReflow(_contentBlocks, heights, pageH, pageW);
+
+            System.Diagnostics.Debug.WriteLine(
+                ReflowEngine.DebugBeschreibung(result, _contentBlocks));
+
+            return result;
+        }
+
+        /// <summary>
+        /// Kompatibilitäts-Wrapper: konvertiert das Altmodell frisch in Blöcke und führt Reflow aus.
+        /// Nur noch für Vergleichs-/Diagnosezwecke verwenden. Intern bevorzugt: DebugReflowAusContentBlocks().
         /// </summary>
         private ReflowResult DebugReflowAusAltmodell()
         {
