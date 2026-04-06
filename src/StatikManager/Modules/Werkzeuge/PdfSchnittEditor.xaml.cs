@@ -1131,6 +1131,7 @@ namespace StatikManager.Modules.Werkzeuge
             double currentY    = yBase;   // gestapeltes Layout: kein frac-basierter Offset
             foreach (var block in blöcke)
             {
+                if (block.IsDeleted) continue;   // gelöschte Blöcke werden nicht gerendert (analog Prototyp)
                 double fracO = Math.Max(0.0, Math.Min(1.0, block.FracOben));
                 double fracU = Math.Max(fracO, Math.Min(1.0, block.FracUnten));
                 if (fracU <= fracO) continue;
@@ -3608,7 +3609,8 @@ namespace StatikManager.Modules.Werkzeuge
                     SplitContentBlockBeiSchnitt(si, yFrac);
 
                 MarkiereAlsGeändert();
-                AktualisiereSchnitteLinien();
+                if (_contentBlocks != null) ZeicheCanvas();
+                else AktualisiereSchnitteLinien();
                 TxtInfo.Text = $"✂ {_scherenschnitte.Count} Schnitt(e) – Strg+Z rückgängig";
                 e.Handled = true;
             }
@@ -3864,6 +3866,7 @@ namespace StatikManager.Modules.Werkzeuge
         private void AktualisiereTeilOverlays()
         {
             if (_reflowDebugModus) return;   // Reflow-Canvas bleibt frei von Altmodell-Overlays
+            if (_contentBlocks != null) return;   // Block-Renderpfad: keine Altmodell-Overlays
 
             // Alte Overlays entfernen
             var alte = PdfCanvas.Children.OfType<Border>()
@@ -4216,7 +4219,8 @@ namespace StatikManager.Modules.Werkzeuge
                         SetzeContentBlockGelöscht(p.Seite, p.Teil, _gelöschteParts.Contains(p));
                 }
                 _ausgewählteParts.Clear();
-                AktualisiereSchnitteLinien();
+                if (_contentBlocks != null) ZeicheCanvas();
+                else AktualisiereSchnitteLinien();
                 BtnTeilLöschen.IsEnabled = false;
                 int n = _gelöschteParts.Count;
                 TxtInfo.Text = n > 0
