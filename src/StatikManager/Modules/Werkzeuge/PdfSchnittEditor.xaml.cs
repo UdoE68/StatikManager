@@ -337,16 +337,19 @@ namespace StatikManager.Modules.Werkzeuge
             System.Diagnostics.Debug.WriteLine($"[LadePdf] Starte PDF-Laden: {IO.Path.GetFileName(pfad)}");
 
             // Lade-Entscheidung: Original vs. _bearbeitet.pdf
-            // Wenn SchnittState-JSON existiert → immer ORIGINAL laden, damit LadeSchnittState()
-            //   korrekt angewendet werden kann (kein Re-Compositing auf bereits gerenderter PDF).
-            // Wenn kein JSON aber _bearbeitet.pdf existiert → bearbeitete laden (Rückwärtskompatibilität).
-            string bearbeitetPfad = BearbeitetPfadFür(pfad);
-            bool   jsonVorhanden  = IO.File.Exists(pfad + ".edit.json");
-            string pfadKopie      = (!jsonVorhanden && IO.File.Exists(bearbeitetPfad)) ? bearbeitetPfad : pfad;
+            // Wenn _bearbeitet.pdf existiert → immer diese laden. Sie enthält den physisch
+            //   korrekten Zustand (Komposit-Bitmaps, zusammengeschobene Teile etc.).
+            //   LadeSchnittState() lädt danach nur _scherenschnitte für Interaktivität,
+            //   aber NICHT _gelöschteParts/_gelöschteSeiten (schon eingearbeitet in _bearbeitet.pdf).
+            // Wenn kein _bearbeitet.pdf aber JSON vorhanden → Original laden + vollen State anwenden.
+            string bearbeitetPfad    = BearbeitetPfadFür(pfad);
+            bool   bearbeitetVorhanden = IO.File.Exists(bearbeitetPfad);
+            bool   jsonVorhanden     = IO.File.Exists(pfad + ".edit.json");
+            string pfadKopie         = bearbeitetVorhanden ? bearbeitetPfad : pfad;
             if (pfadKopie != pfad)
-                System.Diagnostics.Debug.WriteLine($"[LADEN] Bearbeitete Version geladen (kein JSON): {IO.Path.GetFileName(bearbeitetPfad)}");
+                System.Diagnostics.Debug.WriteLine($"[LADEN] Bearbeitete Version geladen: {IO.Path.GetFileName(bearbeitetPfad)}");
             else if (jsonVorhanden)
-                System.Diagnostics.Debug.WriteLine($"[LADEN] JSON-State vorhanden → Original laden: {IO.Path.GetFileName(pfad)}");
+                System.Diagnostics.Debug.WriteLine($"[LADEN] Kein _bearbeitet.pdf → Original + JSON-State: {IO.Path.GetFileName(pfad)}");
 
             var ladeThread = new Thread(() =>
             {
@@ -447,8 +450,10 @@ namespace StatikManager.Modules.Werkzeuge
                         double pendingScrollV = ps?.ScrollV ?? 0;
 
                         // SchnittState aus JSON wiederherstellen — NACH Seitenaufbau, VOR ZeicheCanvas
-                        // Damit werden Schnittlinien und gelöschte Bereiche sofort korrekt gerendert.
-                        LadeSchnittState();
+                        // Wenn _bearbeitet.pdf geladen wurde: nur Schnittlinien laden (für Interaktivität),
+                        // aber NICHT _gelöschteParts/_gelöschteSeiten — diese sind bereits physisch
+                        // in der _bearbeitet.pdf eingearbeitet (Komposit-Bitmaps, Lücken geschlossen etc.).
+                        LadeSchnittState(nurSchnittlinien: bearbeitetVorhanden);
 
                         // Reflow-Primärdaten initialisieren — NACH LadeSchnittState, damit Schnitte + gelöschte
                         // Teile bereits bekannt sind und korrekt in ContentBlocks übertragen werden.
@@ -5441,7 +5446,12 @@ namespace StatikManager.Modules.Werkzeuge
         /// Setzt _scherenschnitte, _gelöschteParts, _gelöschteSeiten — ohne ZeicheCanvas aufzurufen.
         /// _ausgewählteParts wird NICHT persistiert: temporärer UI-Zustand pro Sitzung.
         /// </summary>
-        private void LadeSchnittState()
+        /// <param name="nurSchnittlinien">
+        /// Wenn true: nur _scherenschnitte laden, _gelöschteParts und _gelöschteSeiten weglassen.
+        /// Wird gesetzt wenn _bearbeitet.pdf geladen wurde — gelöschte Teile sind dort bereits
+        /// physisch eingearbeitet, ein erneutes Setzen von _gelöschteParts würde Doppelt-Komposit erzeugen.
+        /// </param>
+        private void LadeSchnittState(bool nurSchnittlinien = false)
         {
             if (_pdfPfad == null) return;
             string jsonPfad = _pdfPfad + ".edit.json";
@@ -5512,11 +5522,17 @@ namespace StatikManager.Modules.Werkzeuge
 
                 // Atomar übernehmen
                 foreach (var s in schnittePuffer) _scherenschnitte.Add(s);
-                foreach (var p in partsPuffer)    _gelöschteParts.Add(p);
-                foreach (var s in seitenPuffer)   _gelöschteSeiten.Add(s);
+                if (!nurSchnittlinien)
+                {
+                    // Nur anwenden wenn Original-PDF geladen wurde.
+                    // Bei _bearbeitet.pdf sind gelöschte Parts bereits physisch eingearbeitet —
+                    // ein erneutes Setzen würde beim Rendering Doppelt-Komposit erzeugen.
+                    foreach (var p in partsPuffer)  _gelöschteParts.Add(p);
+                    foreach (var s in seitenPuffer) _gelöschteSeiten.Add(s);
+                }
 
                 System.Diagnostics.Debug.WriteLine(
-                    $"[LOAD-STATE] OK: {_scherenschnitte.Count} Schnitte, " +
+                    $"[LOAD-STATE] OK (nurSchnittlinien={nurSchnittlinien}): {_scherenschnitte.Count} Schnitte, " +
                     $"{_gelöschteParts.Count} gelöschte Parts, " +
                     $"{_gelöschteSeiten.Count} gelöschte Seiten aus: {IO.Path.GetFileName(jsonPfad)}");
             }
