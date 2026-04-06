@@ -5988,6 +5988,8 @@ namespace StatikManager.Modules.Werkzeuge
                 }
                 bitmapCount++;
             }
+            System.Diagnostics.Debug.WriteLine(
+                $"[GAP-SYNC] WARNUNG: Kein ContentBlock für Seite={si} Teil={t} gefunden");
         }
 
         /// <summary>
