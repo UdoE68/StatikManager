@@ -5306,6 +5306,19 @@ namespace StatikManager.Modules.Werkzeuge
         /// </summary>
         private void ZeicheCanvasReflow()
         {
+            try
+            {
+            ZeicheCanvasReflowIntern();
+            }
+            catch (Exception ex)
+            {
+                LogException(ex, "ZeicheCanvasReflow");
+                TxtInfo.Text = $"[REFLOW-DEBUG] Fehler: {ex.Message}";
+            }
+        }
+
+        private void ZeicheCanvasReflowIntern()
+        {
             var result = DebugReflowAusAltmodell();
 
             PdfCanvas.Children.Clear();
@@ -5399,10 +5412,34 @@ namespace StatikManager.Modules.Werkzeuge
                         int srcH   = srcBmp.PixelHeight;
                         int srcW   = srcBmp.PixelWidth;
 
-                        int cropY = (int)Math.Round(pb.SrcFracOben  * srcH);
-                        int cropH = (int)Math.Round((pb.SrcFracUnten - pb.SrcFracOben) * srcH);
+                        // Fraktionen zuerst auf [0,1] klemmen
+                        double fracO = Math.Max(0.0, Math.Min(1.0, pb.SrcFracOben));
+                        double fracU = Math.Max(0.0, Math.Min(1.0, pb.SrcFracUnten));
+
+                        if (fracU <= fracO)
+                        {
+                            System.Diagnostics.Debug.WriteLine(
+                                $"[REFLOW-CROP] Block B{pb.Block.BlockId} ungültig: " +
+                                $"SrcFrac {pb.SrcFracOben:F4}–{pb.SrcFracUnten:F4} nach Clamp {fracO:F4}–{fracU:F4} — übersprungen");
+                            continue;
+                        }
+
+                        // cropY und cropEndY als Pixelpositionen — cropH als Differenz,
+                        // damit kein unabhängiges Runden auf Oben+Höhe cropY+cropH > srcH erzeugt
+                        int cropY    = (int)(fracO * srcH);
+                        int cropEndY = (int)(fracU * srcH);
+                        int cropH    = cropEndY - cropY;
+
+                        // Finale Sicherheitsklammer
                         cropY = Math.Max(0, Math.Min(cropY, srcH - 1));
                         cropH = Math.Max(1, Math.Min(cropH, srcH - cropY));
+
+                        if (cropH <= 0)
+                        {
+                            System.Diagnostics.Debug.WriteLine(
+                                $"[REFLOW-CROP] Block B{pb.Block.BlockId} cropH={cropH} nach Clamp — übersprungen");
+                            continue;
+                        }
 
                         var cropped = new CroppedBitmap(srcBmp, new Int32Rect(0, cropY, srcW, cropH));
                         var img = new Image
