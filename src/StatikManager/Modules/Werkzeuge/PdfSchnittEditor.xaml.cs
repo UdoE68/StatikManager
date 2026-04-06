@@ -4417,14 +4417,18 @@ namespace StatikManager.Modules.Werkzeuge
 
             System.Diagnostics.Debug.WriteLine($"[LOESCHEN] _ausgewählteParts: {string.Join(",", _ausgewählteParts.Select(p => $"si={p.Seite},t={p.Teil}"))}");
 
-            // GapDialog nur zeigen wenn Schnitte vorhanden (sonst kein sinnvoller Lücken-Kontext)
-            bool hatSchnitte = _ausgewählteParts.Any(p => GetTeilGrenzen(p.Seite).Count > 1);
+            // GapDialog nur zeigen wenn:
+            // (a) Schnitte vorhanden UND
+            // (b) nicht alle ausgewählten Teile der letzte aktive Block ihrer Seite sind (Regel 2)
+            bool hatSchnitte      = _ausgewählteParts.Any(p => GetTeilGrenzen(p.Seite).Count > 1);
+            bool sindLetzteBlöcke = _ausgewählteParts.All(p => IstLetzterAktiverBlock(p.Seite, p.Teil));
 
-            GapModus gewählterModus = GapModus.OriginalAbstand;
-            double   eingabeMm     = 0.0;
+            GapModus gewählterModus = GapModus.KeinAbstand;  // Default für letzten Block: kein Abstand
+            double   eingabeMm      = 0.0;
 
-            if (hatSchnitte)
+            if (hatSchnitte && !sindLetzteBlöcke)
             {
+                gewählterModus = GapModus.OriginalAbstand;    // Reset auf sinnvollen Default für Dialog
                 var dlg = new GapDialog { Owner = Window.GetWindow(this) };
                 if (dlg.ShowDialog() != true) return;
                 gewählterModus = dlg.GewählterModus;
@@ -4451,6 +4455,32 @@ namespace StatikManager.Modules.Werkzeuge
             BtnTeilLöschen.IsEnabled = false;
             TxtInfo.Text = $"{_gelöschteParts.Count} Teil(e) entfernt – Strg+Z zum Rückgängigmachen";
             MarkiereAlsGeändert();
+        }
+
+        /// <summary>
+        /// Gibt true zurück wenn der t-te Bitmap-Block von Seite si der einzige
+        /// nicht-gelöschte Bitmap-Block auf dieser Seite ist.
+        /// Wird für Regel 2 verwendet: kein Gap-Dialog für letzten aktiven Block.
+        /// </summary>
+        private bool IstLetzterAktiverBlock(int si, int t)
+        {
+            if (_contentBlocks == null) return false;
+
+            // Alle nicht-gelöschten Bitmap-Blöcke der Seite zählen
+            int aktiveGesamt = _contentBlocks.Count(
+                b => b.SourcePageIdx == si && !b.IsLeerzeile && !b.IsDeleted);
+
+            if (aktiveGesamt != 1) return false;
+
+            // Prüfen ob der t-te Bitmap-Block genau dieser eine aktive Block ist
+            int bitmapCount = 0;
+            foreach (var b in _contentBlocks)
+            {
+                if (b.SourcePageIdx != si || b.IsLeerzeile) continue;
+                if (bitmapCount == t) return !b.IsDeleted;
+                bitmapCount++;
+            }
+            return false;
         }
 
         private ScherenZustand SpeichereZustand()
