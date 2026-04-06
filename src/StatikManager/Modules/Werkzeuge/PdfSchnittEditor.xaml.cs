@@ -42,6 +42,7 @@ namespace StatikManager.Modules.Werkzeuge
         // ── Zustand ───────────────────────────────────────────────────────────
         private string?            _pdfPfad;
         private byte[]?            _pdfBytes;      // PDF als byte[] – verhindert Datei-Sperr-Probleme beim AutoSpeichern
+        private bool               _hatUngespeicherteÄnderungen = false;
         private List<BitmapSource> _seitenBilder  = new();
         private double[]           _seitenYStart   = Array.Empty<double>();
         private double[]           _seitenHöhe     = Array.Empty<double>();
@@ -259,6 +260,9 @@ namespace StatikManager.Modules.Werkzeuge
                 return;
             }
 
+            // Speicher-Dialog: ungespeicherte Änderungen prüfen
+            if (!FrageObSpeichern()) return;
+
             var oldCts = _ladeCts;
             _ladeCts = null;
             oldCts?.Cancel();
@@ -277,6 +281,7 @@ namespace StatikManager.Modules.Werkzeuge
 
             _pdfPfad  = pfad;
             _pdfBytes = null;
+            _hatUngespeicherteÄnderungen = false;
             PdfCanvas.Children.Clear();
             _seitenBilder.Clear();
             _seitenYStart = Array.Empty<double>();
@@ -3385,7 +3390,7 @@ namespace StatikManager.Modules.Werkzeuge
             ZeicheCanvas();
             AktualisiereSchnitteLinien();
             TxtInfo.Text = $"Seitenwechsel gesetzt – Seite {si + 1} geteilt in 2 – Strg+Z zum R\u00fckg\u00e4ngigmachen";
-            AutoSpeichern();
+            _hatUngespeicherteÄnderungen = true;
         }
 
         private void Schere_MouseMove(object sender, MouseEventArgs e)
@@ -4052,8 +4057,8 @@ namespace StatikManager.Modules.Werkzeuge
                     : "Alle Markierungen aufgehoben";
             }
 
-            // Bug 3: Nach jeder Lösch-/Schneid-Aktion automatisch speichern
-            AutoSpeichern();
+            // Bug 3: Nach jeder Lösch-/Schneid-Aktion Dirty-Flag setzen
+            _hatUngespeicherteÄnderungen = true;
         }
 
         private ScherenZustand SpeichereZustand()
@@ -4135,7 +4140,7 @@ namespace StatikManager.Modules.Werkzeuge
             _ausgewählteParts.Clear();
             AktualisiereSchnitteLinien();
             TxtInfo.Text = "Teile verschmolzen – Strg+Z zum Rückgängigmachen";
-            AutoSpeichern();
+            _hatUngespeicherteÄnderungen = true;
         }
 
         /// <summary>Verbesserung 6: Schließt die Lücke eines als gelöscht markierten Parts.</summary>
@@ -4206,7 +4211,7 @@ namespace StatikManager.Modules.Werkzeuge
             BtnTeilLöschen.IsEnabled = false;
             string modusText = verschmelzen ? "verschmolzen" : "zusammengeschoben (getrennte Teile)";
             TxtInfo.Text = $"Teile {modusText} – Strg+Z zum Rückgängigmachen";
-            AutoSpeichern();
+            _hatUngespeicherteÄnderungen = true;
         }
 
         private BitmapSource? ErzeugeKompositBild(int si, List<int> sichtbareTeilIndizes)
@@ -4443,7 +4448,7 @@ namespace StatikManager.Modules.Werkzeuge
             ZeicheCanvas();
             AktualisiereSchnitteLinien();
             TxtInfo.Text = $"Leerzeile {(oberhalb ? "ober" : "unter")}halb eingefügt – Strg+Z zum Rückgängigmachen";
-            AutoSpeichern();
+            _hatUngespeicherteÄnderungen = true;
         }
 
         private void BtnTeilLöschen_Click(object sender, RoutedEventArgs e)
@@ -4498,7 +4503,7 @@ namespace StatikManager.Modules.Werkzeuge
                         _ausgewählteParts.Clear();
                         ZeicheCanvas();
                         TxtInfo.Text = $"Rückgängig ({_undoStack.Count} weitere Schritte)";
-                        AutoSpeichern();
+                        _hatUngespeicherteÄnderungen = true;
                         e.Handled = true;
                     }
                     else if (_scherenModus && _scherenschnitte.Count > 0)
@@ -4552,7 +4557,7 @@ namespace StatikManager.Modules.Werkzeuge
             _kompositBilder.Remove(seitenIdx);
             ZeicheCanvas();
             TxtInfo.Text = $"Seite {seitenIdx + 1} gelöscht – Strg+Z zum Rückgängigmachen";
-            AutoSpeichern();
+            _hatUngespeicherteÄnderungen = true;
         }
 
         // ── Feature 4: Seite einfügen ─────────────────────────────────────────────
@@ -4644,7 +4649,7 @@ namespace StatikManager.Modules.Werkzeuge
             }
 
             ZeicheCanvas();
-            AutoSpeichern();
+            _hatUngespeicherteÄnderungen = true;
         }
 
         private string ErzeugeEinfacheEingabe(string nachricht, string titel, string standard)
@@ -4754,7 +4759,7 @@ namespace StatikManager.Modules.Werkzeuge
             _seitenReihenfolge.Insert(ziel, seitenIdx);
             ZeicheCanvas();
             TxtInfo.Text = "Seite verschoben – Strg+Z zum Rückgängigmachen";
-            AutoSpeichern();
+            _hatUngespeicherteÄnderungen = true;
         }
 
         private void EnsureReihenfolge()
@@ -4825,7 +4830,7 @@ namespace StatikManager.Modules.Werkzeuge
             _seitenReihenfolge.Insert(insertPos, _dragQuellIdx);
             ZeicheCanvas();
             TxtInfo.Text = $"Seite {_dragQuellIdx + 1} verschoben – Strg+Z zum Rückgängigmachen";
-            AutoSpeichern();
+            _hatUngespeicherteÄnderungen = true;
         }
 
         // ── Ctrl+S: PDF speichern ─────────────────────────────────────────────────
@@ -4889,6 +4894,74 @@ namespace StatikManager.Modules.Werkzeuge
                 System.Diagnostics.Debug.WriteLine($"[AUTOSAVE] FEHLER: {ex.Message}\n{ex.StackTrace}");
                 LogException(ex, "AutoSpeichern");
                 // KEINE MessageBox — blockiert UI nicht
+            }
+        }
+
+        /// <summary>
+        /// Fragt ob ungespeicherte Änderungen gespeichert werden sollen.
+        /// Gibt true zurück wenn weitergegangen werden soll (Ja oder Nein),
+        /// false wenn beim aktuellen Dokument geblieben werden soll (Abbrechen).
+        /// </summary>
+        public bool FrageObSpeichern()
+        {
+            if (!_hatUngespeicherteÄnderungen) return true;
+
+            var antwort = MessageBox.Show(
+                "Die aktuelle PDF enthält ungespeicherte Änderungen.\n\nÄnderungen speichern?",
+                "Änderungen speichern?",
+                MessageBoxButton.YesNoCancel,
+                MessageBoxImage.Question);
+
+            if (antwort == MessageBoxResult.Cancel) return false;
+            if (antwort == MessageBoxResult.Yes) SpeichereÄnderungen();
+            return true;
+        }
+
+        /// <summary>Speichert die Änderungen auf _pdfPfad. Zeigt Fehler als MessageBox.</summary>
+        private void SpeichereÄnderungen()
+        {
+            if (_pdfPfad == null || _seitenBilder.Count == 0) return;
+
+            try
+            {
+                byte[] neueBytes;
+                using (var ms = new IO.MemoryStream())
+                {
+                    SpeicherInStream(ms);
+                    neueBytes = ms.ToArray();
+                }
+                if (neueBytes.Length == 0)
+                {
+                    MessageBox.Show("Fehler: PDF konnte nicht erstellt werden.", "Speichern fehlgeschlagen",
+                        MessageBoxButton.OK, MessageBoxImage.Error);
+                    return;
+                }
+
+                Exception letzterFehler = null;
+                for (int versuch = 1; versuch <= 3; versuch++)
+                {
+                    try
+                    {
+                        IO.File.WriteAllBytes(_pdfPfad, neueBytes);
+                        _pdfBytes = neueBytes;
+                        _hatUngespeicherteÄnderungen = false;
+                        AppZustand.Instanz.SetzeStatus("Gespeichert: " + IO.Path.GetFileName(_pdfPfad));
+                        return;
+                    }
+                    catch (IO.IOException ex)
+                    {
+                        letzterFehler = ex;
+                        Thread.Sleep(200);
+                    }
+                }
+                MessageBox.Show($"Speichern fehlgeschlagen:\n{letzterFehler?.Message}",
+                    "Speichern fehlgeschlagen", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            catch (Exception ex)
+            {
+                LogException(ex, "SpeichereÄnderungen");
+                MessageBox.Show($"Fehler beim Speichern:\n{ex.Message}", "Speichern fehlgeschlagen",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 

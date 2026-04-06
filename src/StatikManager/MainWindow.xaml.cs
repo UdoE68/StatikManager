@@ -204,6 +204,19 @@ namespace StatikManager
 
         // ── Aufräumen ─────────────────────────────────────────────────────────
 
+        protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
+        {
+            if (HauptInhalt.Content is Modules.Dokumente.DokumentePanel panel)
+            {
+                if (!panel.PdfEditor.FrageObSpeichern())
+                {
+                    e.Cancel = true;
+                    return;
+                }
+            }
+            base.OnClosing(e);
+        }
+
         protected override void OnClosed(System.EventArgs e)
         {
             // Sitzung speichern bevor Ressourcen freigegeben werden
