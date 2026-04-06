@@ -4844,8 +4844,7 @@ namespace StatikManager.Modules.Werkzeuge
 
         // ── Ctrl+S: PDF speichern ─────────────────────────────────────────────────
 
-        /// <summary>Speichert die bearbeitete PDF ohne Dialog direkt auf _pdfPfad (Auto-Save).</summary>
-        /// <summary>Speichert die bearbeitete PDF ohne Dialog direkt auf _pdfPfad (Auto-Save).</summary>
+        /// <summary>Speichert die bearbeitete PDF ohne Dialog als _bearbeitet.pdf (Auto-Save).</summary>
         private void AutoSpeichern()
         {
             if (_pdfPfad == null || _seitenBilder.Count == 0)
@@ -4873,13 +4872,14 @@ namespace StatikManager.Modules.Werkzeuge
 
                 // Schritt 2: Auf Festplatte schreiben mit Retry bei Sperre
                 Exception letzterFehler = null;
+                string bearbeitetPfad = BearbeitetPfadFür(_pdfPfad);
                 for (int versuch = 1; versuch <= 3; versuch++)
                 {
                     try
                     {
-                        IO.File.WriteAllBytes(_pdfPfad, neueBytes);
+                        IO.File.WriteAllBytes(bearbeitetPfad, neueBytes);
                         _pdfBytes = neueBytes;
-                        System.Diagnostics.Debug.WriteLine($"[AUTOSAVE] OK: {_pdfPfad} ({neueBytes.Length} Bytes, Versuch {versuch})");
+                        System.Diagnostics.Debug.WriteLine($"[AUTOSAVE] OK: {bearbeitetPfad} ({neueBytes.Length} Bytes, Versuch {versuch})");
                         return;
                     }
                     catch (IO.IOException ex)
