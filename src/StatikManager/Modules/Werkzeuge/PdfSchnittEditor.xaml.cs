@@ -1401,6 +1401,7 @@ namespace StatikManager.Modules.Werkzeuge
                 int dragIdx = HoleSeitenIndexAusTag(_gezogeneCropSeite);
                 if (dragIdx >= 0) WendeCropModusAnNachDrag(dragIdx);
 
+                _hatUngespeicherteÄnderungen = true;
                 _gezogeneCropSeite = null;
                 e.Handled = true;
             }
@@ -1902,6 +1903,7 @@ namespace StatikManager.Modules.Werkzeuge
                     dialogGruppe.CropUnten  = Math.Min(newUntenPx  / refH, 0.49);
                 }
 
+                _hatUngespeicherteÄnderungen = true;
                 _autoRandAktiv = false;
 
                 AktualisiereCropLinien();
@@ -3451,6 +3453,7 @@ namespace StatikManager.Modules.Werkzeuge
                 double yFrac = Math.Max(0.01, Math.Min(0.99, (pos.Y - yBase) / pageH));
 
                 _scherenschnitte.Add((si, yFrac));
+                _hatUngespeicherteÄnderungen = true;
                 AktualisiereSchnitteLinien();
                 TxtInfo.Text = $"✂ {_scherenschnitte.Count} Schnitt(e) – Strg+Z rückgängig";
                 e.Handled = true;
@@ -3535,6 +3538,7 @@ namespace StatikManager.Modules.Werkzeuge
             SafeExecute(() =>
             {
                 _scherenschnitte.Clear();
+                _hatUngespeicherteÄnderungen = true;
                 AktualisiereSchnitteLinien();
                 TxtInfo.Text = "Alle Schnitte zurückgesetzt.";
             }, "BtnSchnittZurücksetzen_Click");
@@ -3875,6 +3879,7 @@ namespace StatikManager.Modules.Werkzeuge
                                     {
                                         AktualisiereSchnitteLinien();
                                         TxtInfo.Text = "Schnittlinie verschoben – Strg+Z zum Rückgängigmachen";
+                                        _hatUngespeicherteÄnderungen = true;
                                     }
                                     else
                                     {
