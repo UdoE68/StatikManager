@@ -32,18 +32,18 @@ namespace StatikManager.Modules.Werkzeuge
             public double FracBottom      { get; set; }   // 1.0 = Seitenende
             public bool   IsDeleted       { get; set; }
 
-            /// <summary>Wie groß die Lücke nach dem Löschen sein soll. Nur relevant wenn IsDeleted == true.</summary>
-            public GapModus GapModus { get; set; } = GapModus.OriginalAbstand;
+            /// <summary>Wie groß die Lücke nach dem Löschen sein soll (GapModus). Nur relevant wenn IsDeleted == true.</summary>
+            public GapModus GapArt { get; set; } = GapModus.OriginalAbstand;
 
-            /// <summary>Lückengröße in mm. Nur relevant für GapModus.KundenAbstand.</summary>
+            /// <summary>Lückengröße in mm. Nur relevant für GapModus.KundenAbstand. Muss >= 0 sein.</summary>
             public double GapMm { get; set; } = 0.0;
 
             public override string ToString()
             {
                 if (IsDeleted)
                 {
-                    string gap = GapModus == GapModus.OriginalAbstand ? "[orig]"
-                               : GapModus == GapModus.KundenAbstand   ? $"[{GapMm:F1}mm]"
+                    string gap = GapArt == GapModus.OriginalAbstand ? "[orig]"
+                               : GapArt == GapModus.KundenAbstand   ? $"[{GapMm:F1}mm]"
                                : "[0mm]";
                     return $"[DEL {gap}]  B{Id}  {FracTop:F4} – {FracBottom:F4}";
                 }
@@ -271,8 +271,7 @@ namespace StatikManager.Modules.Werkzeuge
 
         /// <summary>
         /// Markiert den Block als gelöscht.
-        /// RenderBlocks() überspringt ihn vollständig — kein Bitmap, kein Border,
-        /// kein Overlay, keine Spur auf dem Canvas.
+        /// RenderBlocks() rendert für diesen Block einen Lücken-Platzhalter (Darstellung abhängig von GapArt/GapMm).
         /// </summary>
         private void DeleteBlock(int blockId)
         {
