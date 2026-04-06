@@ -277,9 +277,6 @@ namespace StatikManager.Modules.Werkzeuge
         private static OutputPage NeueSeite(double maxH, double w)
             => new OutputPage { MaxHeightPx = maxH, WidthPx = w };
 
-        private static OutputPage NeueSeite(double maxH, double w, int srcIdx, bool isOverflow)
-            => new OutputPage { MaxHeightPx = maxH, WidthPx = w, SourcePageIdx = srcIdx, IsOverflowPage = isOverflow };
-
         // ── Debug-Ausgabe ────────────────────────────────────────────────────
 
         /// <summary>

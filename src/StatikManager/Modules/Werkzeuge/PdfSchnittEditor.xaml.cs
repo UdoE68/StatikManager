@@ -315,6 +315,7 @@ namespace StatikManager.Modules.Werkzeuge
             _seitenwechselVorschauLinie = null;
             _ausgewählteParts.Clear();
             _gelöschteParts.Clear();
+            _seitenOutput.Clear();
             _kompositBilder.Clear();
             _undoStack.Clear();
             _gelöschteSeiten.Clear();
@@ -866,6 +867,10 @@ namespace StatikManager.Modules.Werkzeuge
                     double maxH    = sichtbarBmps.Max(b => (double)b.PixelHeight);
                     PdfCanvas.Width  = Math.Max(gesamtW, 1);
                     PdfCanvas.Height = Math.Max(maxH + SeiteX * 2, 1);
+
+                    BerechneSeitenOutput(); // nach BerechneLayoutStatic – _seitenHöhe ist jetzt befüllt
+                    // Hinweis: Visuelles Überlauf-Rendering nur im vertikalen Modus implementiert.
+                    // Im horizontalen Modus ist _seitenOutput befüllt aber wird nicht gerendert.
                 }
                 else
                 {
