@@ -5278,6 +5278,74 @@ namespace StatikManager.Modules.Werkzeuge
             return true;
         }
 
+        // ── Reflow-Brücke (Schritt 1–3): Konvertierung Altmodell → ContentBlocks ────
+
+        /// <summary>
+        /// Konvertiert das aktuelle fraktionsbasierte Modell (_scherenschnitte, _gelöschteParts)
+        /// in eine flache ContentBlock-Liste.
+        ///
+        /// Reihenfolge: entspricht _seitenReihenfolge (falls aktiv), sonst aufsteigend.
+        /// Gelöschte Seiten (_gelöschteSeiten) werden übersprungen.
+        /// Gelöschte Teile (_gelöschteParts) werden als IsDeleted=true markiert — nicht entfernt.
+        ///
+        /// Die Methode hat keine Seiteneffekte auf das Altmodell.
+        /// </summary>
+        private List<ContentBlock> KonvertiereAltesModellZuBlöcken()
+        {
+            var blöcke     = new List<ContentBlock>();
+            int nextId     = 0;
+            var reihenfolge = _seitenReihenfolge
+                              ?? Enumerable.Range(0, _seitenBilder.Count).ToList();
+
+            foreach (int si in reihenfolge)
+            {
+                if (_gelöschteSeiten.Contains(si)) continue;
+                if (si < 0 || si >= _seitenBilder.Count) continue;
+
+                var teilGrenzen = GetTeilGrenzen(si);
+
+                for (int t = 0; t < teilGrenzen.Count; t++)
+                {
+                    var (fracOben, fracUnten) = teilGrenzen[t];
+                    bool gelöscht = _gelöschteParts.Contains((si, t));
+
+                    blöcke.Add(new ContentBlock
+                    {
+                        BlockId       = nextId++,
+                        SourcePageIdx = si,
+                        FracOben      = fracOben,
+                        FracUnten     = fracUnten,
+                        IsDeleted     = gelöscht,
+                        ExtraHeightPx = 0.0
+                    });
+                }
+            }
+
+            return blöcke;
+        }
+
+        /// <summary>
+        /// Hilfsmethode: Führt einen Reflow-Lauf auf Basis des aktuellen Altmodells aus
+        /// und gibt das Ergebnis als Debug-String zurück.
+        /// Ändert NICHTS am Editor-Zustand — rein diagnostisch.
+        /// </summary>
+        private ReflowResult DebugReflowAusAltmodell()
+        {
+            if (_seitenBilder.Count == 0 || _pdfPfad == null) return new ReflowResult();
+
+            var blöcke  = KonvertiereAltesModellZuBlöcken();
+            var heights = _seitenBilder.Select(b => (double)b.PixelHeight).ToArray();
+            double pageH = _seitenBilder.Max(b => (double)b.PixelHeight);
+            double pageW = _seitenBilder.Max(b => (double)b.PixelWidth);
+
+            var result = ReflowEngine.RunReflow(blöcke, heights, pageH, pageW);
+
+            System.Diagnostics.Debug.WriteLine(
+                ReflowEngine.DebugBeschreibung(result, blöcke));
+
+            return result;
+        }
+
         /// <summary>
         /// Extrahiert den Inhalt zwischen [ und ] für einen JSON-Schlüssel.
         /// Beispiel: {"schnitte":[...]} → gibt den Inhalt zwischen den eckigen Klammern zurück.
