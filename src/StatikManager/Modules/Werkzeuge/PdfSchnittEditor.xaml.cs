@@ -55,6 +55,7 @@ namespace StatikManager.Modules.Werkzeuge
         private List<BitmapSource> _seitenBilder  = new();
         private double[]           _seitenYStart   = Array.Empty<double>();
         private double[]           _seitenHöhe     = Array.Empty<double>();
+        private Dictionary<int, List<OutputPage>> _seitenOutput = new Dictionary<int, List<OutputPage>>();
 
         // Horizontaler Layout-Modus
         private bool     _layoutHorizontal;
@@ -1329,6 +1330,103 @@ namespace StatikManager.Modules.Werkzeuge
                 case GapModus.KeinAbstand:
                 default:
                     return 0.0;
+            }
+        }
+
+        /// <summary>
+        /// Berechnet das Layout einer einzelnen Quellseite. Berücksichtigt Gap-Höhen bei der
+        /// Überlauf-Erkennung. Gibt 1 oder 2 OutputPages zurück (Original + optional Überlauf).
+        /// </summary>
+        private List<OutputPage> RunReflowFürSeite(int sourcePageIdx)
+        {
+            if (_contentBlocks == null || _seitenBilder == null) return new List<OutputPage>();
+
+            double pageMaxH = sourcePageIdx < _seitenHöhe.Length
+                ? Math.Max(1.0, _seitenHöhe[sourcePageIdx])
+                : 1.0;
+            double pageW = sourcePageIdx < _seitenBilder.Count
+                ? Math.Max(1.0, (double)_seitenBilder[sourcePageIdx].PixelWidth)
+                : 1.0;
+            double dpiY = (sourcePageIdx < _seitenBilder.Count && _seitenBilder[sourcePageIdx] != null)
+                ? _seitenBilder[sourcePageIdx].DpiY
+                : 96.0;
+
+            var page1 = new OutputPage { MaxHeightPx = pageMaxH, WidthPx = pageW, SourcePageIdx = sourcePageIdx, IsOverflowPage = false };
+            var result = new List<OutputPage> { page1 };
+
+            var blöckeDeserSeite = _contentBlocks
+                .Where(b => b.SourcePageIdx == sourcePageIdx)
+                .ToList();
+
+            if (blöckeDeserSeite.Count == 0) return result;
+
+            var aktuelleSeite = page1;
+            double currentY    = 0.0;
+            bool   hatÜberlauf = false;
+
+            foreach (var block in blöckeDeserSeite)
+            {
+                if (block.IsDeleted)
+                {
+                    if (!hatÜberlauf)
+                    {
+                        // Gap-Höhe trägt zu currentY auf Seite 1 bei
+                        double gapH = BerechneGapHöhe(block, dpiY, (block.FracUnten - block.FracOben) * pageMaxH);
+                        currentY += gapH;
+                    }
+                    // Nach Überlauf: Gaps bleiben auf Seite 1, beeinflussen Überlauf-Y nicht
+                    continue;
+                }
+
+                double blockH = block.ContentHeightPx(pageMaxH);
+                if (blockH <= 0.0) continue;
+
+                // Würde dieser Block die Seite überschreiten?
+                if (!hatÜberlauf && currentY + blockH > pageMaxH)
+                {
+                    // Überlauf-Seite erstellen (maximal eine pro Quellseite, Regel 4)
+                    var overflow = new OutputPage
+                    {
+                        MaxHeightPx    = pageMaxH,
+                        WidthPx        = pageW,
+                        SourcePageIdx  = sourcePageIdx,
+                        IsOverflowPage = true
+                    };
+                    result.Add(overflow);
+                    aktuelleSeite = overflow;
+                    currentY      = 0.0;
+                    hatÜberlauf   = true;
+                }
+
+                aktuelleSeite.Blocks.Add(new PlacedBlock
+                {
+                    Block        = block,
+                    YOffset      = currentY,
+                    HeightPx     = blockH,
+                    SrcFracOben  = block.FracOben,
+                    SrcFracUnten = block.FracUnten
+                });
+                currentY += blockH;
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Berechnet _seitenOutput für alle sichtbaren Quellseiten neu.
+        /// Wird in ZeicheCanvas nach BerechneLayoutStatic aufgerufen.
+        /// </summary>
+        private void BerechneSeitenOutput()
+        {
+            _seitenOutput.Clear();
+            if (_contentBlocks == null || _seitenBilder == null) return;
+
+            var reihenfolge = _seitenReihenfolge ?? Enumerable.Range(0, _seitenBilder.Count).ToList();
+            var sichtbar    = reihenfolge.Where(i => i < _seitenBilder.Count && !_gelöschteSeiten.Contains(i)).ToList();
+
+            foreach (int si in sichtbar)
+            {
+                _seitenOutput[si] = RunReflowFürSeite(si);
             }
         }
 
