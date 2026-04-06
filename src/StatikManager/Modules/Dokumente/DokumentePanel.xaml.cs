@@ -2190,7 +2190,21 @@ namespace StatikManager.Modules.Dokumente
             }
             catch (Exception ex)
             {
-                MessageBox.Show("Fehler beim Verschieben:\n" + ex.Message,
+                // Diagnose-Log: Ursache für "Falscher Parameter" eingrenzen
+                string quellRoot  = Path.GetPathRoot(sourcePfad) ?? "?";
+                string zielRoot   = Path.GetPathRoot(zielPfad)   ?? "?";
+                bool   crossDrive = !string.Equals(quellRoot, zielRoot, StringComparison.OrdinalIgnoreCase);
+                System.Diagnostics.Debug.WriteLine(
+                    $"[VERSCHIEBEN-FEHLER] Typ={ex.GetType().Name} | Msg={ex.Message}" +
+                    $"\n  Quelle : {sourcePfad}" +
+                    $"\n  Ziel   : {zielPfad}" +
+                    $"\n  CrossDrive={crossDrive} (Quelle={quellRoot} Ziel={zielRoot})" +
+                    $"\n  QuelleExistiert={File.Exists(sourcePfad) || Directory.Exists(sourcePfad)}" +
+                    $"\n  ZielExistiert  ={File.Exists(zielPfad)   || Directory.Exists(zielPfad)}");
+
+                MessageBox.Show(
+                    $"Fehler beim Verschieben:\n{ex.Message}" +
+                    (crossDrive ? "\n\n(Quelle und Ziel liegen auf unterschiedlichen Laufwerken)" : ""),
                     "Fehler", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }

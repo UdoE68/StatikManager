@@ -5338,14 +5338,16 @@ namespace StatikManager.Modules.Werkzeuge
                 double pageW = page.WidthPx;
                 double pageH = page.MaxHeightPx;
 
-                // Seiten-Hintergrund
+                // Seiten-Hintergrund — IsHitTestVisible=false: rein visuell,
+                // kein Mausrad-/Klick-Blocking (folgt Konvention aus ZeicheCanvas)
                 var bg = new Rectangle
                 {
-                    Width           = pageW,
-                    Height          = pageH,
-                    Fill            = new SolidColorBrush(Color.FromRgb(242, 242, 242)),
-                    Stroke          = new SolidColorBrush(Color.FromRgb(180, 180, 180)),
-                    StrokeThickness = 1
+                    Width            = pageW,
+                    Height           = pageH,
+                    Fill             = new SolidColorBrush(Color.FromRgb(242, 242, 242)),
+                    Stroke           = new SolidColorBrush(Color.FromRgb(180, 180, 180)),
+                    StrokeThickness  = 1,
+                    IsHitTestVisible = false
                 };
                 Canvas.SetLeft(bg, offsetX);
                 Canvas.SetTop(bg, currentY);
@@ -5354,11 +5356,12 @@ namespace StatikManager.Modules.Werkzeuge
                 // Seiten-Nummer (oben links)
                 var pageLabel = new TextBlock
                 {
-                    Text       = $"Seite {pi + 1}  [{page.Blocks.Count} Block(e), " +
-                                 $"gefüllt {page.FilledHeightPx:F0}/{pageH:F0} px]",
-                    FontSize   = 11,
-                    FontWeight = FontWeights.Bold,
-                    Foreground = new SolidColorBrush(Color.FromRgb(190, 0, 0))
+                    Text             = $"Seite {pi + 1}  [{page.Blocks.Count} Block(e), " +
+                                       $"gefüllt {page.FilledHeightPx:F0}/{pageH:F0} px]",
+                    FontSize         = 11,
+                    FontWeight       = FontWeights.Bold,
+                    Foreground       = new SolidColorBrush(Color.FromRgb(190, 0, 0)),
+                    IsHitTestVisible = false
                 };
                 Canvas.SetLeft(pageLabel, offsetX + 4);
                 Canvas.SetTop(pageLabel, currentY + 2);
@@ -5372,25 +5375,27 @@ namespace StatikManager.Modules.Werkzeuge
                     // Block-Anfangs-Linie (blau, dünn) — bei geteilten Blöcken sichtbar
                     var startLinie = new Line
                     {
-                        X1              = offsetX,
-                        Y1              = blockY,
-                        X2              = offsetX + pageW,
-                        Y2              = blockY,
-                        Stroke          = new SolidColorBrush(Color.FromArgb(100, 0, 80, 200)),
-                        StrokeThickness = 1
+                        X1               = offsetX,
+                        Y1               = blockY,
+                        X2               = offsetX + pageW,
+                        Y2               = blockY,
+                        Stroke           = new SolidColorBrush(Color.FromArgb(100, 0, 80, 200)),
+                        StrokeThickness  = 1,
+                        IsHitTestVisible = false
                     };
                     PdfCanvas.Children.Add(startLinie);
 
                     if (pb.Block.IsLeerzeile)
                     {
-                        // Leerzeile = grün
+                        // Leerzeile = grünes Rechteck
                         var rect = new Rectangle
                         {
-                            Width           = pageW - 4,
-                            Height          = pb.HeightPx,
-                            Fill            = new SolidColorBrush(Color.FromArgb(80, 0, 180, 0)),
-                            Stroke          = new SolidColorBrush(Color.FromArgb(160, 0, 140, 0)),
-                            StrokeThickness = 1
+                            Width            = pageW - 4,
+                            Height           = pb.HeightPx,
+                            Fill             = new SolidColorBrush(Color.FromArgb(80, 0, 180, 0)),
+                            Stroke           = new SolidColorBrush(Color.FromArgb(160, 0, 140, 0)),
+                            StrokeThickness  = 1,
+                            IsHitTestVisible = false
                         };
                         Canvas.SetLeft(rect, offsetX + 2);
                         Canvas.SetTop(rect, blockY);
@@ -5398,9 +5403,10 @@ namespace StatikManager.Modules.Werkzeuge
 
                         var lbl = new TextBlock
                         {
-                            Text       = $"Leerzeile {pb.HeightPx:F0}px  (B{pb.Block.BlockId})",
-                            FontSize   = 9,
-                            Foreground = new SolidColorBrush(Color.FromRgb(0, 110, 0))
+                            Text             = $"Leerzeile {pb.HeightPx:F0}px  (B{pb.Block.BlockId})",
+                            FontSize         = 9,
+                            Foreground       = new SolidColorBrush(Color.FromRgb(0, 110, 0)),
+                            IsHitTestVisible = false
                         };
                         Canvas.SetLeft(lbl, offsetX + 6);
                         Canvas.SetTop(lbl, blockY + 2);
@@ -5444,10 +5450,11 @@ namespace StatikManager.Modules.Werkzeuge
                         var cropped = new CroppedBitmap(srcBmp, new Int32Rect(0, cropY, srcW, cropH));
                         var img = new Image
                         {
-                            Source  = cropped,
-                            Width   = pageW,
-                            Height  = pb.HeightPx,
-                            Stretch = Stretch.Fill
+                            Source           = cropped,
+                            Width            = pageW,
+                            Height           = pb.HeightPx,
+                            Stretch          = Stretch.Fill,
+                            IsHitTestVisible = false   // rein visuell — Mausrad bleibt beim ScrollViewer
                         };
                         Canvas.SetLeft(img, offsetX);
                         Canvas.SetTop(img, blockY);
@@ -5456,10 +5463,11 @@ namespace StatikManager.Modules.Werkzeuge
                         // Block-ID Label (rechts oben, halb-transparent)
                         var blockLbl = new TextBlock
                         {
-                            Text       = $"B{pb.Block.BlockId}",
-                            FontSize   = 9,
-                            Foreground = new SolidColorBrush(Color.FromArgb(220, 0, 60, 200)),
-                            Background = new SolidColorBrush(Color.FromArgb(140, 255, 255, 255))
+                            Text             = $"B{pb.Block.BlockId}",
+                            FontSize         = 9,
+                            Foreground       = new SolidColorBrush(Color.FromArgb(220, 0, 60, 200)),
+                            Background       = new SolidColorBrush(Color.FromArgb(140, 255, 255, 255)),
+                            IsHitTestVisible = false
                         };
                         Canvas.SetLeft(blockLbl, offsetX + pageW - 30);
                         Canvas.SetTop(blockLbl, blockY + 2);
@@ -5470,12 +5478,13 @@ namespace StatikManager.Modules.Werkzeuge
                 // Rote Trennlinie am Seitenende
                 var trenn = new Line
                 {
-                    X1              = offsetX - 6,
-                    Y1              = currentY + pageH,
-                    X2              = offsetX + pageW + 6,
-                    Y2              = currentY + pageH,
-                    Stroke          = new SolidColorBrush(Color.FromRgb(200, 0, 0)),
-                    StrokeThickness = 2
+                    X1               = offsetX - 6,
+                    Y1               = currentY + pageH,
+                    X2               = offsetX + pageW + 6,
+                    Y2               = currentY + pageH,
+                    Stroke           = new SolidColorBrush(Color.FromRgb(200, 0, 0)),
+                    StrokeThickness  = 2,
+                    IsHitTestVisible = false
                 };
                 PdfCanvas.Children.Add(trenn);
 
