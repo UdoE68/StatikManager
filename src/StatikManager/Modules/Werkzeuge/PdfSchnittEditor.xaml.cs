@@ -1340,9 +1340,12 @@ namespace StatikManager.Modules.Werkzeuge
             var dlg = new GapDialog(block.GapArt, block.GapMm) { Owner = Window.GetWindow(this) };
             if (dlg.ShowDialog() != true) return;
 
+            _undoStack.Push(SpeichereZustand());
             block.GapArt = dlg.GewählterModus;
             block.GapMm  = dlg.EingabeGapMm;
             ZeicheCanvas();
+            MarkiereAlsGeändert();
+            TxtInfo.Text = "Lückenabstand aktualisiert.";
         }
 
         // Crop-Linien-Tags: visuelle Linie = "CROP_XXX", Hit-Zone = "CROP_XXX_HIT"
