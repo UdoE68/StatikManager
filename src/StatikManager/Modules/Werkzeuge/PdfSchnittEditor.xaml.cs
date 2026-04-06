@@ -1172,6 +1172,19 @@ namespace StatikManager.Modules.Werkzeuge
             bool   ersterBlock = true;
             double currentY    = yBase;   // gestapeltes Layout: kein frac-basierter Offset
             int    teilIdx     = 0;       // 0-basierter Index pro Seite — kompatibel mit _ausgewählteParts/(si,t)
+
+            // Überlauf-Blöcke ermitteln
+            bool hatÜberlauf = _seitenOutput.TryGetValue(seitenIdx, out var outputSeiten) && outputSeiten.Count > 1;
+            var überflussIds = hatÜberlauf
+                ? new HashSet<int>(outputSeiten[1].Blocks.Select(pb => pb.Block.BlockId))
+                : new HashSet<int>();
+
+            double overflowBaseY    = yBase + pageH + SeitenAbstand;
+            double overflowCurrentY = 0.0;
+
+            if (hatÜberlauf)
+                ZeicheÜberlaufSeitenHintergrund(seitenIdx, overflowBaseY, bmpPixelW, pageH);
+
             foreach (var block in blöcke)
             {
                 int capturedTeilIdx = teilIdx;
@@ -1233,8 +1246,20 @@ namespace StatikManager.Modules.Werkzeuge
                 }
 
                 double blockDisplayH = Math.Max(1, originalDisplayH);
-                double blockY2       = currentY;
-                currentY            += blockDisplayH;
+                bool   istÜberlauf   = überflussIds.Contains(block.BlockId);
+                double blockY2;
+
+                if (istÜberlauf)
+                {
+                    blockY2          = overflowBaseY + overflowCurrentY;
+                    overflowCurrentY += blockDisplayH;
+                    // currentY auf Seite 1 wächst nicht — Überlauf-Block erscheint nicht dort
+                }
+                else
+                {
+                    blockY2   = currentY;
+                    currentY += blockDisplayH;
+                }
 
                 int pixelY = (int)Math.Round(fracO * bmpPixelH);
                 int pixelH = (int)Math.Round((fracU - fracO) * bmpPixelH);
@@ -1333,6 +1358,37 @@ namespace StatikManager.Modules.Werkzeuge
                 Canvas.SetTop(blatt,  blockY2);
                 PdfCanvas.Children.Add(blatt);
             }
+        }
+
+        /// <summary>
+        /// Zeichnet den weißen Seiten-Hintergrund für die Überlauf-Seite einer Quellseite.
+        /// </summary>
+        private void ZeicheÜberlaufSeitenHintergrund(int seitenIdx, double yBase, double w, double h)
+        {
+            DropShadowEffect? shadow = null;
+            try
+            {
+                shadow = new DropShadowEffect
+                {
+                    BlurRadius = 20, ShadowDepth = 7,
+                    Direction  = 280, Color = Colors.Black, Opacity = 0.85
+                };
+            }
+            catch { /* ohne Schatten */ }
+
+            var blatt = new Border
+            {
+                Tag             = $"SEITE_OVERFLOW_{seitenIdx}",
+                Width           = w,
+                Height          = h,
+                Background      = Brushes.White,
+                BorderBrush     = new SolidColorBrush(Color.FromRgb(180, 160, 160)),
+                BorderThickness = new Thickness(2),
+                Effect          = shadow
+            };
+            Canvas.SetLeft(blatt, _layoutHorizontal ? _seitenXStart[seitenIdx] : SeiteX);
+            Canvas.SetTop(blatt,  yBase);
+            PdfCanvas.Children.Add(blatt);
         }
 
         /// <summary>
