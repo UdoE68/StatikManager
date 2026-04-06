@@ -43,3 +43,6 @@ appsettings.Local.json
 Thumbs.db
 desktop.ini
 .DS_Store
+
+# Git Worktrees
+.worktrees/
