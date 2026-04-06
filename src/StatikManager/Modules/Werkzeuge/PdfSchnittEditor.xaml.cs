@@ -314,7 +314,11 @@ namespace StatikManager.Modules.Werkzeuge
 
             LogException(new Exception($"[DEBUG] Starte PDF-Laden: {IO.Path.GetFileName(pfad)}"), "LadePdf");
 
-            string pfadKopie = pfad;
+            // Bearbeitete Version laden falls vorhanden (Original wird nie überschrieben)
+            string bearbeitetPfad = BearbeitetPfadFür(pfad);
+            string pfadKopie = IO.File.Exists(bearbeitetPfad) ? bearbeitetPfad : pfad;
+            if (pfadKopie != pfad)
+                System.Diagnostics.Debug.WriteLine($"[LADEN] Bearbeitete Version gefunden: {IO.Path.GetFileName(bearbeitetPfad)}");
 
             var ladeThread = new Thread(() =>
             {
@@ -4902,6 +4906,14 @@ namespace StatikManager.Modules.Werkzeuge
             }
         }
 
+        /// <summary>Gibt den Pfad zur bearbeiteten PDF-Version zurück.</summary>
+        private static string BearbeitetPfadFür(string originalPfad)
+        {
+            string ordner = IO.Path.GetDirectoryName(originalPfad)!;
+            string name   = IO.Path.GetFileNameWithoutExtension(originalPfad);
+            return IO.Path.Combine(ordner, name + "_bearbeitet.pdf");
+        }
+
         /// <summary>
         /// Fragt ob ungespeicherte Änderungen gespeichert werden sollen.
         /// Gibt true zurück wenn weitergegangen werden soll (Ja oder Nein),
@@ -4912,7 +4924,7 @@ namespace StatikManager.Modules.Werkzeuge
             if (!_hatUngespeicherteÄnderungen) return true;
 
             var antwort = MessageBox.Show(
-                "Die aktuelle PDF enthält ungespeicherte Änderungen.\n\nÄnderungen speichern?",
+                "Die aktuelle PDF enthält ungespeicherte Änderungen.\n\nÄnderungen in '_bearbeitet.pdf' speichern?",
                 "Änderungen speichern?",
                 MessageBoxButton.YesNoCancel,
                 MessageBoxImage.Question);
@@ -4922,19 +4934,23 @@ namespace StatikManager.Modules.Werkzeuge
             return true;
         }
 
-        /// <summary>Speichert die Änderungen auf _pdfPfad. Zeigt Fehler als MessageBox.</summary>
+        /// <summary>Speichert die Änderungen als _bearbeitet.pdf neben dem Original. Original wird NIE angefasst.</summary>
         private void SpeichereÄnderungen()
         {
             if (_pdfPfad == null || _seitenBilder.Count == 0) return;
 
+            string bearbeitetPfad = BearbeitetPfadFür(_pdfPfad);
+
             try
             {
+                // PDF im Speicher zusammenbauen — SpeicherInStream verwendet _pdfBytes via MemoryStream
                 byte[] neueBytes;
                 using (var ms = new IO.MemoryStream())
                 {
                     SpeicherInStream(ms);
                     neueBytes = ms.ToArray();
                 }
+
                 if (neueBytes.Length == 0)
                 {
                     MessageBox.Show("Fehler: PDF konnte nicht erstellt werden.", "Speichern fehlgeschlagen",
@@ -4942,31 +4958,62 @@ namespace StatikManager.Modules.Werkzeuge
                     return;
                 }
 
-                Exception letzterFehler = null;
-                for (int versuch = 1; versuch <= 3; versuch++)
-                {
-                    try
-                    {
-                        IO.File.WriteAllBytes(_pdfPfad, neueBytes);
-                        _pdfBytes = neueBytes;
-                        _hatUngespeicherteÄnderungen = false;
-                        AppZustand.Instanz.SetzeStatus("Gespeichert: " + IO.Path.GetFileName(_pdfPfad));
-                        return;
-                    }
-                    catch (IO.IOException ex)
-                    {
-                        letzterFehler = ex;
-                        Thread.Sleep(200);
-                    }
-                }
-                MessageBox.Show($"Speichern fehlgeschlagen:\n{letzterFehler?.Message}",
-                    "Speichern fehlgeschlagen", MessageBoxButton.OK, MessageBoxImage.Error);
+                // Schreiben nach _bearbeitet.pdf — Original bleibt unangetastet
+                IO.File.WriteAllBytes(bearbeitetPfad, neueBytes);
+                _pdfBytes = neueBytes;
+                _hatUngespeicherteÄnderungen = false;
+
+                // Metadaten (Schnittlinien etc.) als JSON neben dem Original speichern
+                SpeichereMetadaten();
+
+                AppZustand.Instanz.SetzeStatus("Gespeichert: " + IO.Path.GetFileName(bearbeitetPfad));
+                System.Diagnostics.Debug.WriteLine($"[SAVE] OK → {bearbeitetPfad}");
             }
             catch (Exception ex)
             {
                 LogException(ex, "SpeichereÄnderungen");
-                MessageBox.Show($"Fehler beim Speichern:\n{ex.Message}", "Speichern fehlgeschlagen",
+                MessageBox.Show($"Speichern fehlgeschlagen:\n{ex.Message}", "Speichern fehlgeschlagen",
                     MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        /// <summary>Speichert Schnittlinien und Lösch-Zustand als JSON neben dem Original.</summary>
+        private void SpeichereMetadaten()
+        {
+            if (_pdfPfad == null) return;
+            try
+            {
+                string jsonPfad = _pdfPfad + ".edit.json";
+                var sb = new System.Text.StringBuilder();
+                sb.AppendLine("{");
+
+                // Schnittlinien
+                sb.Append("  \"schnitte\": [");
+                var schnittTeile = _scherenschnitte.Select(s =>
+                    $"{{\"seite\":{s.Seite},\"fraktion\":{s.YFraction.ToString(System.Globalization.CultureInfo.InvariantCulture)}}}");
+                sb.Append(string.Join(",", schnittTeile));
+                sb.AppendLine("],");
+
+                // Gelöschte Teile (Seite+TeilIdx)
+                sb.Append("  \"geloeschteParts\": [");
+                var partTeile = _gelöschteParts.Select(p => $"{{\"seite\":{p.Seite},\"teil\":{p.Teil}}}");
+                sb.Append(string.Join(",", partTeile));
+                sb.AppendLine("],");
+
+                // Gelöschte Seiten
+                sb.Append("  \"geloeschteSeiten\": [");
+                sb.Append(string.Join(",", _gelöschteSeiten));
+                sb.AppendLine("]");
+
+                sb.AppendLine("}");
+
+                IO.File.WriteAllText(jsonPfad, sb.ToString(), System.Text.Encoding.UTF8);
+                System.Diagnostics.Debug.WriteLine($"[SAVE] Metadaten → {jsonPfad}");
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[SAVE] Metadaten-Fehler (nicht kritisch): {ex.Message}");
+                // Nicht kritisch — kein MessageBox
             }
         }
 
