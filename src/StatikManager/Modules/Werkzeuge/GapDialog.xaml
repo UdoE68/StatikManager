@@ -1,7 +1,7 @@
 <Window x:Class="StatikManager.Modules.Werkzeuge.GapDialog"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Lückenabstand festlegen"
+        Title="Teil entfernen – Lücke festlegen"
         Width="360" Height="220"
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize"
@@ -20,7 +20,7 @@
 
         <!-- Variante A -->
         <RadioButton x:Name="RbOriginal" Grid.Row="0"
-                     Content="Originalabstand behalten"
+                     Content="Originalgröße beibehalten"
                      IsChecked="True"
                      Checked="Rb_Checked"/>
 
