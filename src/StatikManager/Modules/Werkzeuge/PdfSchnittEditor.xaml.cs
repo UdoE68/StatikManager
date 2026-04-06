@@ -1163,44 +1163,48 @@ namespace StatikManager.Modules.Werkzeuge
                 if (block.IsDeleted)
                 {
                     double gapH = BerechneGapHöhe(block, sourceBmp.DpiY, originalDisplayH);
+                    double blockY = currentY;
+                    currentY += gapH; // bei KeinAbstand = 0, currentY wächst nicht
+                    int capturedBlockId = block.BlockId;
+
+                    // Immer einen Placeholder erstellen — bei gapH==0 als unsichtbare Klickfläche (4px)
+                    double renderH = gapH > 0 ? gapH : 4.0;
+                    var placeholder = new Border
+                    {
+                        Width           = bmpPixelW,
+                        Height          = renderH,
+                        Background      = gapH > 0
+                                            ? new SolidColorBrush(Color.FromRgb(0xE8, 0xE8, 0xE8))
+                                            : Brushes.Transparent,
+                        BorderBrush     = gapH > 0
+                                            ? new SolidColorBrush(Color.FromRgb(0xD0, 0xD0, 0xD0))
+                                            : Brushes.Transparent,
+                        BorderThickness = new Thickness(gapH > 0 ? 1 : 0),
+                    };
                     if (gapH > 0)
                     {
-                        double blockY      = currentY;
-                        currentY          += gapH;
-                        int capturedBlockId = block.BlockId;
-
-                        var placeholder = new Border
+                        placeholder.Child = new TextBlock
                         {
-                            Width           = bmpPixelW,
-                            Height          = gapH,
-                            Background      = new SolidColorBrush(Color.FromRgb(0xE8, 0xE8, 0xE8)),
-                            BorderBrush     = new SolidColorBrush(Color.FromRgb(0xD0, 0xD0, 0xD0)),
-                            BorderThickness = new Thickness(1),
-                            Child           = new TextBlock
-                            {
-                                Text                = block.GapArt == GapModus.KundenAbstand
-                                                        ? $"↕  {block.GapMm:F1} mm"
-                                                        : "↕  Originalgröße",
-                                Foreground          = new SolidColorBrush(Color.FromRgb(0xA0, 0xA0, 0xA0)),
-                                FontStyle           = FontStyles.Italic,
-                                FontSize            = 11,
-                                HorizontalAlignment = HorizontalAlignment.Center,
-                                VerticalAlignment   = VerticalAlignment.Center
-                            }
+                            Text                = block.GapArt == GapModus.KundenAbstand
+                                                    ? $"↕  {block.GapMm:F1} mm"
+                                                    : "↕  Originalgröße",
+                            Foreground          = new SolidColorBrush(Color.FromRgb(0xA0, 0xA0, 0xA0)),
+                            FontStyle           = FontStyles.Italic,
+                            FontSize            = 11,
+                            HorizontalAlignment = HorizontalAlignment.Center,
+                            VerticalAlignment   = VerticalAlignment.Center
                         };
-
-                        // Rechtsklick → Abstand nachbearbeiten
-                        var cm = new ContextMenu();
-                        var mi = new MenuItem { Header = "↕  Abstand bearbeiten …" };
-                        mi.Click += (_, __) => BearbeiteBlockGap(capturedBlockId);
-                        cm.Items.Add(mi);
-                        placeholder.ContextMenu = cm;
-
-                        Canvas.SetLeft(placeholder, setX);
-                        Canvas.SetTop(placeholder,  blockY);
-                        PdfCanvas.Children.Add(placeholder);
                     }
-                    // gapH == 0 (KeinAbstand): kein Platzhalter, currentY nicht erhöhen
+
+                    var cm = new ContextMenu();
+                    var mi = new MenuItem { Header = "↕  Abstand bearbeiten …" };
+                    mi.Click += (_, __) => BearbeiteBlockGap(capturedBlockId);
+                    cm.Items.Add(mi);
+                    placeholder.ContextMenu = cm;
+
+                    Canvas.SetLeft(placeholder, setX);
+                    Canvas.SetTop(placeholder,  blockY);
+                    PdfCanvas.Children.Add(placeholder);
                     continue;
                 }
 
