@@ -125,7 +125,12 @@ namespace StatikManager.Modules.Werkzeuge
 
             foreach (var block in _blocks)
             {
-                if (block.IsDeleted) continue;
+                if (block.IsDeleted)
+                {
+                    double gapH = BerechneLückenHöhePx(block);
+                    if (gapH > 0) RenderLücke(block, gapH);
+                    continue;
+                }
 
                 // Fraktionen auf gültige Pixel-Grenzen abbilden
                 double fracTop    = Math.Max(0.0, Math.Min(1.0, block.FracTop));
@@ -294,6 +299,93 @@ namespace StatikManager.Modules.Werkzeuge
             if (_originalBitmap == null) return 0.0;
             double relY = canvasY - CanvasPad;
             return Math.Max(0.0, Math.Min(1.0, relY / _originalBitmap.PixelHeight));
+        }
+
+        /// <summary>
+        /// Berechnet die anzuzeigende Lückenhöhe in Pixeln anhand des GapArt.
+        /// DPI wird direkt aus _originalBitmap.DpiY ausgelesen.
+        /// </summary>
+        private double BerechneLückenHöhePx(ProtoBlock block)
+        {
+            if (_originalBitmap == null) return 0.0;
+
+            switch (block.GapArt)
+            {
+                case GapModus.OriginalAbstand:
+                    return (block.FracBottom - block.FracTop) * _originalBitmap.PixelHeight;
+                case GapModus.KundenAbstand:
+                    double dpi = _originalBitmap.DpiY > 0 ? _originalBitmap.DpiY : 96.0;
+                    return block.GapMm * dpi / 25.4;
+                case GapModus.KeinAbstand:
+                default:
+                    return 0.0;
+            }
+        }
+
+        /// <summary>
+        /// Zeichnet einen visuellen Lücken-Platzhalter auf dem Canvas.
+        /// Enthält ein Kontextmenü zum Nachbearbeiten des Abstands.
+        /// </summary>
+        private void RenderLücke(ProtoBlock block, double gapH)
+        {
+            if (_originalBitmap == null) return;
+
+            int    srcW       = _originalBitmap.PixelWidth;
+            double displayTop = CanvasPad + block.FracTop * _originalBitmap.PixelHeight;
+            int    capturedId = block.Id;
+
+            string label = block.GapArt == GapModus.OriginalAbstand
+                ? "↕  Originalabstand"
+                : block.GapArt == GapModus.KundenAbstand
+                    ? $"↕  {block.GapMm:F1} mm"
+                    : "";
+
+            var gapBorder = new Border
+            {
+                Tag             = capturedId,
+                Width           = srcW,
+                Height          = gapH,
+                Background      = new SolidColorBrush(Color.FromRgb(240, 240, 240)),
+                BorderBrush     = new SolidColorBrush(Color.FromRgb(200, 200, 200)),
+                BorderThickness = new Thickness(1),
+                Child           = new TextBlock
+                {
+                    Text                = label,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment   = VerticalAlignment.Center,
+                    Foreground          = new SolidColorBrush(Color.FromRgb(150, 150, 150)),
+                    FontSize            = 11,
+                    FontStyle           = FontStyles.Italic
+                }
+            };
+
+            // Kontextmenü: Abstand nachbearbeiten
+            var cm = new ContextMenu();
+            var mi = new MenuItem { Header = "Abstand bearbeiten …" };
+            mi.Click += (_, __) => BearbeiteGap(capturedId);
+            cm.Items.Add(mi);
+            gapBorder.ContextMenu = cm;
+
+            Canvas.SetLeft(gapBorder, CanvasPad);
+            Canvas.SetTop(gapBorder,  displayTop);
+            EditorCanvas.Children.Add(gapBorder);
+        }
+
+        /// <summary>
+        /// Öffnet den GapDialog vorausgefüllt für den angegebenen gelöschten Block.
+        /// Wird vom Kontextmenü des Lücken-Platzhalters aufgerufen.
+        /// </summary>
+        private void BearbeiteGap(int blockId)
+        {
+            var block = _blocks.FirstOrDefault(b => b.Id == blockId && b.IsDeleted);
+            if (block == null) return;
+
+            var dlg = new GapDialog(block.GapArt, block.GapMm) { Owner = this };
+            if (dlg.ShowDialog() != true) return;
+
+            block.GapArt = dlg.GewählterModus;
+            block.GapMm  = dlg.EingabeGapMm;
+            RenderBlocks();
         }
 
         private void RefreshBlockList()
