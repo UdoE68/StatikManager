@@ -4,6 +4,94 @@ Chronologische Erkenntnisse aus der Entwicklung. Was funktioniert hat und warum.
 
 ---
 
+## 2026-04-06 – _bearbeitet.pdf hat Vorrang beim Laden (Komposit-Persistenz)
+
+**Problem:** Nach "Lücke schließen" + "Teile getrennt lassen" wurde beim nächsten Laden die Änderung scheinbar verworfen — der gelöschte Bereich erschien wieder.
+
+**Root Cause:** `SchiebeTeileZusammen(verschmelzen=false)` erzeugt `_kompositBilder[si]` (zusammengeschobene Bitmap ohne Lücke). `SpeichereGesamtzustand()` schreibt diese korrekt in `_bearbeitet.pdf`. Aber `SpeichereSchnittState()` persistiert `_kompositBilder` NICHT im JSON (JSON kennt nur `_scherenschnitte` + `_gelöschteParts`). Beim nächsten Laden: JSON vorhanden → Original wurde geladen → LadeSchnittState → Schnittlinien wieder da, aber `_kompositBilder` leer → Rendering zeigt Original-Seite mit Schnittlinien → Lücke erscheint wieder.
+
+**Lösung:**
+1. `LadePdf`: Lade-Entscheidung geändert — `_bearbeitet.pdf` wird IMMER geladen wenn vorhanden, unabhängig davon ob JSON existiert.
+2. `LadeSchnittState(bool nurSchnittlinien)`: Neuer Parameter. Wenn `_bearbeitet.pdf` geladen wurde (`bearbeitetVorhanden=true`), werden nur `_scherenschnitte` wiederhergestellt (für Interaktivität), aber NICHT `_gelöschteParts` und `_gelöschteSeiten` — diese sind bereits physisch in der `_bearbeitet.pdf` eingearbeitet.
+
+**Goldene Regel:** `_bearbeitet.pdf` ist die physische Wahrheit. Sie enthält den vollständig eingearbeiteten Zustand (Komposit-Bitmaps, zusammengeschobene Teile, gelöschte Seiten). JSON ist nur Metadaten für Interaktivität (Schnittlinien zum erneuten Schneiden). Immer `_bearbeitet.pdf` bevorzugen.
+
+**Beweis:** Build 0 Fehler, Commit f587f9f, 2026-04-06. Tester-Verifikation ausstehend.
+
+**Dateien:** `Modules/Werkzeuge/PdfSchnittEditor.xaml.cs`
+
+---
+
+## 2026-04-06 – Physische Blocktrennung: CroppedBitmap als alleinige Render-Wahrheit
+
+**Problem:** Im PdfSchnittEditor wurde die vollständige Originalseite als Bitmap gezeichnet, darüber Overlay-Rechtecke für "Teile". Damit war kein echter Split möglich — die Blöcke waren visuelle Masken, nicht physisch getrennte Elemente.
+
+**Lösung (bewiesen im Prototyp BlockEditorPrototype):**
+- `_originalBitmap` wird NIEMALS als Ganzes auf den Canvas gezeichnet
+- Jeder `ProtoBlock` (FracTop / FracBottom) wird als eigener `CroppedBitmap`-Ausschnitt gerendert:
+  ```csharp
+  new CroppedBitmap(originalBitmap, new Int32Rect(0, pixelTop, srcW, pixelHeight))
+  ```
+- `SplitBlock()` entfernt den Originalblock aus `_blocks` und ersetzt ihn durch zwei neue — kein Schnitt-Koordinaten-Eintrag, kein Overlay
+- `DeleteBlock()` setzt `IsDeleted = true`; `RenderBlocks()` überspringt diese Blöcke komplett
+- Ergebnis: kein Durchscheinen, kein Overlay-Rest, volle physische Trennung
+
+**Warum das alte Modell scheiterte:**
+`_scherenschnitte` speicherte nur Koordinatenpunkte. `GetTeilGrenzen()` berechnete daraus Grenzen on-the-fly. `ZeicheSeite()` zeichnete stets die volle Seite — die "Teile" lagen nur als transparente Rechtecke darüber. Echter Split war strukturell nicht möglich.
+
+**Goldene Regel:** `_originalBitmap` (oder `_seitenBilder[i]`) darf im Split-Renderpfad **niemals vollständig** auf den Canvas gezeichnet werden. Nur `CroppedBitmap`-Ausschnitte sind erlaubt.
+
+**Beweis:** BlockEditorPrototype, Tests A/B/C, 2026-04-06. User-Bestätigung: kein Durchscheinen, kein Overlay, Delete funktioniert sauber.
+
+**Dateien:** `Modules/Werkzeuge/BlockEditorPrototype.xaml.cs`
+
+---
+
+## 2026-04-06 – Paradigmenwechsel: Nie die Original-PDF ueberschreiben (BearbeitetPfad-Muster)
+
+**Problem:** pdfium haelt die geoeffnete PDF-Datei gesperrt solange sie angezeigt wird. `File.WriteAllBytes(_pdfPfad, ...)` schlaegt daher immer mit "Datei wird von einem anderen Prozess verwendet" fehl — unabhaengig von Retry-Schleifen oder MemoryStream-Tricks.
+
+**Loesung:** Die Original-PDF wird NIEMALS als Schreibziel verwendet. Stattdessen wird eine Geschwister-Datei angelegt:
+- `BearbeitetPfadFuer(string originalPfad)` → gibt `<name>_bearbeitet.pdf` im selben Ordner zurueck
+- `SpeichereAenderungen()` → schreibt ausschliesslich auf `bearbeitetPfad`, nie auf `_pdfPfad`
+- `AutoSpeichern()` → ebenfalls auf `bearbeitetPfad` umgestellt (auch wenn nicht aktiv aufgerufen)
+- `LadePdf()` → prueft ob `_bearbeitet.pdf` neben dem Original existiert; wenn ja, wird diese geladen
+- `_pdfPfad` bleibt IMMER der Original-Pfad und dient nur der Namensgebung von `_bearbeitet.pdf`
+- `SpeichereMetadaten()` → schreibt Schnittlinien und geloeschte Teile als `<original>.edit.json`
+
+**Goldene Regel:** `_pdfPfad` darf NIEMALS als Schreibziel verwendet werden. Immer `BearbeitetPfadFuer(_pdfPfad)`.
+
+**Grund:** pdfium-Handles sind nicht schliessbar ohne das gesamte Dokument zu entladen. Das Nebeneinander von Original (read-only, immer gesperrt) und Bearbeitet-Datei (write-target, nie gesperrt) umgeht das Problem grundsaetzlich statt es zu kaempfen.
+
+**Beweis:** Tester PASS, 2026-04-06. `grep "WriteAllBytes(_pdfPfad"` → 0 Treffer. Build: 0 Errors.
+
+**Dateien:** `Modules/Werkzeuge/PdfSchnittEditor.xaml.cs`
+
+---
+
+## 2026-04-06 – Speicher-Dialog beim Positionswechsel (statt AutoSpeichern)
+
+**Problem:** AutoSpeichern-Ansatz hatte mehrere Versagensmodi (Datei-Locking, fehlgeschlagene Retries, kein Feedback an Benutzer). Der Benutzer wusste nie ob seine Aenderungen gespeichert wurden oder verloren gingen.
+
+**Loesung:** Dirty-Flag + expliziter Speicher-Dialog:
+- `_hatUngespeicherteAenderungen = true` bei jeder Aenderung (ersetzt alle 10 AutoSpeichern()-Aufrufe)
+- `FrageObSpeichern()`: zeigt Ja/Nein/Abbrechen-Dialog wenn Dirty-Flag gesetzt
+- `SpeichereAenderungen()`: speichert via `SpeicherInStream` + `WriteAllBytes` + 3 Retries, mit sichtbarer Fehler-MessageBox, setzt Dirty-Flag auf false
+- `LadePdf()`: ruft `FrageObSpeichern()` am Anfang auf, bricht bei Abbrechen ab (return), setzt `_hatUngespeicherteAenderungen = false` nach erfolgreichem Laden
+- `MainWindow.OnClosing()` (nicht OnClosed!): prueft `panel.PdfEditor.FrageObSpeichern()`, setzt `e.Cancel = true` bei Abbrechen
+
+**Architektur-Entscheidungen:**
+- Dialog in `LadePdf()` selbst, nicht im aufrufenden Code — LadePdf ist der einzige Eintrittspunkt fuer neue PDFs
+- `OnClosing` (nicht `OnClosed`) weil nur `Closing` das `e.Cancel`-Flag hat um das Schliessen abzubrechen
+- `AutoSpeichern()` bleibt als Methode erhalten (kein Code-Break), wird aber nicht mehr aufgerufen
+- `SpeichereAenderungen()` ist von `AutoSpeichern()` unabhaengig — zeigt MessageBox bei Fehler statt lautlos zu scheitern
+
+**Beweis:** Tester PASS, feature/word-export-next branch
+
+**Dateien:** `Modules/Werkzeuge/PdfSchnittEditor.xaml.cs`, `MainWindow.xaml.cs`
+
+---
+
 ## 2026-04-06 – AutoSpeichern via WriteAllBytes statt File.Replace
 
 **Problem:** File.Replace scheitert wenn Datei von irgend etwas gesperrt ist (z.B. Explorer-Vorschau, Antivirus)
