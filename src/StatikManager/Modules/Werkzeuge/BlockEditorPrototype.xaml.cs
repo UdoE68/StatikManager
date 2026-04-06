@@ -207,6 +207,19 @@ namespace StatikManager.Modules.Werkzeuge
                     ev.Handled = true;
                 };
 
+                // Rechtsklick: "Teil löschen …"
+                var blockCm = new ContextMenu();
+                var blockMi = new MenuItem { Header = "Teil löschen \u2026" };
+                int capturedDeleteId = capturedId;
+                blockMi.Click += (_, __) =>
+                {
+                    var dlg = new GapDialog { Owner = this };
+                    if (dlg.ShowDialog() != true) return;
+                    DeleteBlock(capturedDeleteId, dlg.GewählterModus, dlg.EingabeGapMm);
+                };
+                blockCm.Items.Add(blockMi);
+                blockBorder.ContextMenu = blockCm;
+
                 Canvas.SetLeft(blockBorder, CanvasPad);
                 Canvas.SetTop(blockBorder,  displayTop);
                 EditorCanvas.Children.Add(blockBorder);
@@ -412,8 +425,6 @@ namespace StatikManager.Modules.Werkzeuge
             string sel  = _selectedId >= 0 ? $"B{_selectedId} gewählt" : "kein Block gewählt";
             string mode = BtnCutMode.IsChecked == true ? "  |  ✂ SCHNITT-MODUS" : "";
             TxtStatus.Text      = $"{active} aktiv / {deleted} gelöscht  |  {sel}{mode}";
-            BtnDelete.IsEnabled = _selectedId >= 0
-                               && _blocks.Any(b => b.Id == _selectedId && !b.IsDeleted);
         }
 
         // ══════════════════════════════════════════════════════════════════════
@@ -441,16 +452,6 @@ namespace StatikManager.Modules.Werkzeuge
         {
             EditorCanvas.Cursor = Cursors.Arrow;
             RefreshBlockList();
-        }
-
-        private void BtnDelete_Click(object sender, RoutedEventArgs e)
-        {
-            if (_selectedId < 0) return;
-
-            var dlg = new GapDialog { Owner = this };
-            if (dlg.ShowDialog() != true) return;
-
-            DeleteBlock(_selectedId, dlg.GewählterModus, dlg.EingabeGapMm);
         }
 
         private void EditorCanvas_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)

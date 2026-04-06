@@ -331,6 +331,19 @@ namespace StatikManager.Modules.Werkzeuge
                     ev.Handled = true;
                 };
 
+                // Rechtsklick: "Teil löschen …"
+                var blockCm = new ContextMenu();
+                var blockMi = new MenuItem { Header = "Teil löschen \u2026" };
+                int capturedDeleteId = capturedId;
+                blockMi.Click += (_, __) =>
+                {
+                    var dlg = new GapDialog { Owner = this };
+                    if (dlg.ShowDialog() != true) return;
+                    DeleteBlock(capturedDeleteId, dlg.GewählterModus, dlg.EingabeGapMm);
+                };
+                blockCm.Items.Add(blockMi);
+                blatt.ContextMenu = blockCm;
+
                 Canvas.SetLeft(blatt, Rand);
                 Canvas.SetTop(blatt,  displayY);
                 ProtoCanvas.Children.Add(blatt);
@@ -386,7 +399,6 @@ namespace StatikManager.Modules.Werkzeuge
             string selInfo   = _selId >= 0 ? $"Auswahl: B{_selId}" : "keine Auswahl";
             string modus     = BtnSchnittModus.IsChecked == true ? "  |  ✂ SCHNITT-MODUS" : "";
             TxtInfo.Text     = $"Blöcke: {aktiv} aktiv, {gelöscht} gelöscht  |  {selInfo}{modus}";
-            BtnDelete.IsEnabled = _selId >= 0 && _blöcke.Any(b => b.Id == _selId && !b.IsDeleted);
         }
 
         // ═════════════════════════════════════════════════════════════════════
@@ -414,16 +426,6 @@ namespace StatikManager.Modules.Werkzeuge
         {
             ProtoCanvas.Cursor = Cursors.Arrow;
             AktualisiereListeUndInfo();
-        }
-
-        private void BtnDelete_Click(object sender, RoutedEventArgs e)
-        {
-            if (_selId < 0) return;
-
-            var dlg = new GapDialog { Owner = this };
-            if (dlg.ShowDialog() != true) return;
-
-            DeleteBlock(_selId, dlg.GewählterModus, dlg.EingabeGapMm);
         }
 
         private void ProtoCanvas_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)

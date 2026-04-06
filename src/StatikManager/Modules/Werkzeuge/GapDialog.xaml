@@ -38,7 +38,7 @@
 
         <!-- Variante C -->
         <RadioButton x:Name="RbKein" Grid.Row="4"
-                     Content="Kein Abstand (0 mm — nahtlos)"
+                     Content="Abstand 0 mm (physikalische Lücke)"
                      Checked="Rb_Checked"/>
 
         <!-- Buttons -->
