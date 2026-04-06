@@ -121,6 +121,12 @@ namespace StatikManager.Modules.Werkzeuge
         /// <summary>Seitenbreite (Pixel).</summary>
         public double WidthPx { get; set; }
 
+        /// <summary>Index der Quell-PDF-Seite, aus der diese OutputPage entstammt. -1 = unbekannt.</summary>
+        public int SourcePageIdx { get; set; } = -1;
+
+        /// <summary>True wenn diese Seite durch Überlauf der vorigen Quellseite entstanden ist.</summary>
+        public bool IsOverflowPage { get; set; }
+
         /// <summary>Platzierte Blöcke in ihrer vertikalen Reihenfolge.</summary>
         public List<PlacedBlock> Blocks { get; } = new List<PlacedBlock>();
 
@@ -270,6 +276,9 @@ namespace StatikManager.Modules.Werkzeuge
 
         private static OutputPage NeueSeite(double maxH, double w)
             => new OutputPage { MaxHeightPx = maxH, WidthPx = w };
+
+        private static OutputPage NeueSeite(double maxH, double w, int srcIdx, bool isOverflow)
+            => new OutputPage { MaxHeightPx = maxH, WidthPx = w, SourcePageIdx = srcIdx, IsOverflowPage = isOverflow };
 
         // ── Debug-Ausgabe ────────────────────────────────────────────────────
 
