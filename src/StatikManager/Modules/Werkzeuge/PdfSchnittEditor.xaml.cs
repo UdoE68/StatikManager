@@ -37,12 +37,18 @@ namespace StatikManager.Modules.Werkzeuge
         private const double ZoomMax  = 4.00;
         private const double ZoomStep = 0.15;
 
-        public PdfSchnittEditor() => InitializeComponent();
+        public PdfSchnittEditor()
+        {
+            InitializeComponent();
+            InitAutoSave();
+        }
 
         // ── Zustand ───────────────────────────────────────────────────────────
         private string?            _pdfPfad;
         private byte[]?            _pdfBytes;      // PDF als byte[] – verhindert Datei-Sperr-Probleme beim AutoSpeichern
         private bool               _hatUngespeicherteÄnderungen = false;
+        private System.Windows.Threading.DispatcherTimer? _autoSaveTimer;
+        private volatile bool      _autoSaveLäuft;
         private List<BitmapSource> _seitenBilder  = new();
         private double[]           _seitenYStart   = Array.Empty<double>();
         private double[]           _seitenHöhe     = Array.Empty<double>();
@@ -312,7 +318,7 @@ namespace StatikManager.Modules.Werkzeuge
             BtnTeileExportieren.IsEnabled     = false;
             BtnTeilLöschen.IsEnabled          = false;
 
-            LogException(new Exception($"[DEBUG] Starte PDF-Laden: {IO.Path.GetFileName(pfad)}"), "LadePdf");
+            System.Diagnostics.Debug.WriteLine($"[LadePdf] Starte PDF-Laden: {IO.Path.GetFileName(pfad)}");
 
             // Bearbeitete Version laden falls vorhanden (Original wird nie überschrieben)
             string bearbeitetPfad = BearbeitetPfadFür(pfad);
@@ -1405,7 +1411,7 @@ namespace StatikManager.Modules.Werkzeuge
                 int dragIdx = HoleSeitenIndexAusTag(_gezogeneCropSeite);
                 if (dragIdx >= 0) WendeCropModusAnNachDrag(dragIdx);
 
-                _hatUngespeicherteÄnderungen = true;
+                MarkiereAlsGeändert();
                 _gezogeneCropSeite = null;
                 e.Handled = true;
             }
@@ -1907,7 +1913,7 @@ namespace StatikManager.Modules.Werkzeuge
                     dialogGruppe.CropUnten  = Math.Min(newUntenPx  / refH, 0.49);
                 }
 
-                _hatUngespeicherteÄnderungen = true;
+                MarkiereAlsGeändert();
                 _autoRandAktiv = false;
 
                 AktualisiereCropLinien();
@@ -3396,7 +3402,7 @@ namespace StatikManager.Modules.Werkzeuge
             ZeicheCanvas();
             AktualisiereSchnitteLinien();
             TxtInfo.Text = $"Seitenwechsel gesetzt – Seite {si + 1} geteilt in 2 – Strg+Z zum R\u00fckg\u00e4ngigmachen";
-            _hatUngespeicherteÄnderungen = true;
+            MarkiereAlsGeändert();
         }
 
         private void Schere_MouseMove(object sender, MouseEventArgs e)
@@ -3457,7 +3463,7 @@ namespace StatikManager.Modules.Werkzeuge
                 double yFrac = Math.Max(0.01, Math.Min(0.99, (pos.Y - yBase) / pageH));
 
                 _scherenschnitte.Add((si, yFrac));
-                _hatUngespeicherteÄnderungen = true;
+                MarkiereAlsGeändert();
                 AktualisiereSchnitteLinien();
                 TxtInfo.Text = $"✂ {_scherenschnitte.Count} Schnitt(e) – Strg+Z rückgängig";
                 e.Handled = true;
@@ -3542,7 +3548,7 @@ namespace StatikManager.Modules.Werkzeuge
             SafeExecute(() =>
             {
                 _scherenschnitte.Clear();
-                _hatUngespeicherteÄnderungen = true;
+                MarkiereAlsGeändert();
                 AktualisiereSchnitteLinien();
                 TxtInfo.Text = "Alle Schnitte zurückgesetzt.";
             }, "BtnSchnittZurücksetzen_Click");
@@ -3883,7 +3889,7 @@ namespace StatikManager.Modules.Werkzeuge
                                     {
                                         AktualisiereSchnitteLinien();
                                         TxtInfo.Text = "Schnittlinie verschoben – Strg+Z zum Rückgängigmachen";
-                                        _hatUngespeicherteÄnderungen = true;
+                                        MarkiereAlsGeändert();
                                     }
                                     else
                                     {
@@ -4067,7 +4073,7 @@ namespace StatikManager.Modules.Werkzeuge
             }
 
             // Bug 3: Nach jeder Lösch-/Schneid-Aktion Dirty-Flag setzen
-            _hatUngespeicherteÄnderungen = true;
+            MarkiereAlsGeändert();
         }
 
         private ScherenZustand SpeichereZustand()
@@ -4149,7 +4155,7 @@ namespace StatikManager.Modules.Werkzeuge
             _ausgewählteParts.Clear();
             AktualisiereSchnitteLinien();
             TxtInfo.Text = "Teile verschmolzen – Strg+Z zum Rückgängigmachen";
-            _hatUngespeicherteÄnderungen = true;
+            MarkiereAlsGeändert();
         }
 
         /// <summary>Verbesserung 6: Schließt die Lücke eines als gelöscht markierten Parts.</summary>
@@ -4220,7 +4226,7 @@ namespace StatikManager.Modules.Werkzeuge
             BtnTeilLöschen.IsEnabled = false;
             string modusText = verschmelzen ? "verschmolzen" : "zusammengeschoben (getrennte Teile)";
             TxtInfo.Text = $"Teile {modusText} – Strg+Z zum Rückgängigmachen";
-            _hatUngespeicherteÄnderungen = true;
+            MarkiereAlsGeändert();
         }
 
         private BitmapSource? ErzeugeKompositBild(int si, List<int> sichtbareTeilIndizes)
@@ -4457,7 +4463,7 @@ namespace StatikManager.Modules.Werkzeuge
             ZeicheCanvas();
             AktualisiereSchnitteLinien();
             TxtInfo.Text = $"Leerzeile {(oberhalb ? "ober" : "unter")}halb eingefügt – Strg+Z zum Rückgängigmachen";
-            _hatUngespeicherteÄnderungen = true;
+            MarkiereAlsGeändert();
         }
 
         private void BtnTeilLöschen_Click(object sender, RoutedEventArgs e)
@@ -4512,7 +4518,7 @@ namespace StatikManager.Modules.Werkzeuge
                         _ausgewählteParts.Clear();
                         ZeicheCanvas();
                         TxtInfo.Text = $"Rückgängig ({_undoStack.Count} weitere Schritte)";
-                        _hatUngespeicherteÄnderungen = true;
+                        MarkiereAlsGeändert();
                         e.Handled = true;
                     }
                     else if (_scherenModus && _scherenschnitte.Count > 0)
@@ -4527,7 +4533,7 @@ namespace StatikManager.Modules.Werkzeuge
                 }
                 else if (e.Key == Key.S && (Keyboard.Modifiers & ModifierKeys.Control) != 0)
                 {
-                    SpeicherePdfMitÄnderungen(); e.Handled = true;
+                    SpeichereÄnderungen(); e.Handled = true;
                 }
                 else if (e.Key == Key.Delete && !_scherenModus)
                 {
@@ -4566,7 +4572,7 @@ namespace StatikManager.Modules.Werkzeuge
             _kompositBilder.Remove(seitenIdx);
             ZeicheCanvas();
             TxtInfo.Text = $"Seite {seitenIdx + 1} gelöscht – Strg+Z zum Rückgängigmachen";
-            _hatUngespeicherteÄnderungen = true;
+            MarkiereAlsGeändert();
         }
 
         // ── Feature 4: Seite einfügen ─────────────────────────────────────────────
@@ -4658,7 +4664,7 @@ namespace StatikManager.Modules.Werkzeuge
             }
 
             ZeicheCanvas();
-            _hatUngespeicherteÄnderungen = true;
+            MarkiereAlsGeändert();
         }
 
         private string ErzeugeEinfacheEingabe(string nachricht, string titel, string standard)
@@ -4768,7 +4774,7 @@ namespace StatikManager.Modules.Werkzeuge
             _seitenReihenfolge.Insert(ziel, seitenIdx);
             ZeicheCanvas();
             TxtInfo.Text = "Seite verschoben – Strg+Z zum Rückgängigmachen";
-            _hatUngespeicherteÄnderungen = true;
+            MarkiereAlsGeändert();
         }
 
         private void EnsureReihenfolge()
@@ -4839,10 +4845,37 @@ namespace StatikManager.Modules.Werkzeuge
             _seitenReihenfolge.Insert(insertPos, _dragQuellIdx);
             ZeicheCanvas();
             TxtInfo.Text = $"Seite {_dragQuellIdx + 1} verschoben – Strg+Z zum Rückgängigmachen";
-            _hatUngespeicherteÄnderungen = true;
+            MarkiereAlsGeändert();
         }
 
-        // ── Ctrl+S: PDF speichern ─────────────────────────────────────────────────
+        // ── AutoSave-Infrastruktur ────────────────────────────────────────────────
+
+        /// <summary>Initialisiert den Debounce-Timer für AutoSpeichern (1 Sekunde nach letzter Änderung).</summary>
+        private void InitAutoSave()
+        {
+            _autoSaveTimer = new System.Windows.Threading.DispatcherTimer
+            {
+                Interval = TimeSpan.FromSeconds(1)
+            };
+            _autoSaveTimer.Tick += (_, __) =>
+            {
+                _autoSaveTimer.Stop();
+                if (_hatUngespeicherteÄnderungen && _pdfPfad != null && !_autoSaveLäuft)
+                {
+                    _autoSaveLäuft = true;
+                    try { AutoSpeichern(); }
+                    finally { _autoSaveLäuft = false; }
+                }
+            };
+        }
+
+        /// <summary>Setzt das Dirty-Flag und startet (oder resettet) den AutoSave-Debounce-Timer.</summary>
+        private void MarkiereAlsGeändert()
+        {
+            _hatUngespeicherteÄnderungen = true;
+            _autoSaveTimer?.Stop();
+            _autoSaveTimer?.Start();
+        }
 
         /// <summary>Speichert die bearbeitete PDF ohne Dialog als _bearbeitet.pdf (Auto-Save).</summary>
         private void AutoSpeichern()
@@ -4879,6 +4912,7 @@ namespace StatikManager.Modules.Werkzeuge
                     {
                         IO.File.WriteAllBytes(bearbeitetPfad, neueBytes);
                         _pdfBytes = neueBytes;
+                        _hatUngespeicherteÄnderungen = false;
                         System.Diagnostics.Debug.WriteLine($"[AUTOSAVE] OK: {bearbeitetPfad} ({neueBytes.Length} Bytes, Versuch {versuch})");
                         return;
                     }
@@ -4896,6 +4930,7 @@ namespace StatikManager.Modules.Werkzeuge
                     IO.Path.GetFileNameWithoutExtension(_pdfPfad) + "_autosave.pdf");
                 IO.File.WriteAllBytes(fallback, neueBytes);
                 _pdfBytes = neueBytes;
+                _hatUngespeicherteÄnderungen = false;
                 System.Diagnostics.Debug.WriteLine($"[AUTOSAVE] Fallback gespeichert: {fallback}");
             }
             catch (Exception ex)
@@ -5341,6 +5376,9 @@ namespace StatikManager.Modules.Werkzeuge
                 pdfIn?.Dispose();
                 System.Diagnostics.Debug.WriteLine($"[BUG3-SPEICHERN] pdfOut.Save({zielPfad}) startet");
                 pdfOut.Save(zielPfad);
+                _pdfBytes = IO.File.ReadAllBytes(zielPfad);
+                _hatUngespeicherteÄnderungen = false;
+                SpeichereMetadaten();
                 string msg = autoSave
                     ? $"\u2714 Auto-gespeichert: {IO.Path.GetFileName(zielPfad)}"
                     : $"\u2714 PDF gespeichert: {IO.Path.GetFileName(zielPfad)}";
