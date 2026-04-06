@@ -44,6 +44,12 @@ namespace StatikManager.Modules.Werkzeuge
         /// <summary>Wenn true, wird dieser Block beim Reflow übersprungen.</summary>
         public bool IsDeleted { get; set; }
 
+        /// <summary>Wie groß die Lücke nach dem Löschen dargestellt wird. Nur relevant wenn IsDeleted == true.</summary>
+        public GapModus GapArt { get; set; } = GapModus.OriginalAbstand;
+
+        /// <summary>Lückengröße in mm. Nur relevant für GapModus.KundenAbstand. Muss >= 0 sein.</summary>
+        public double GapMm { get; set; } = 0.0;
+
         /// <summary>
         /// Zusätzliche Leerzeilen-Höhe in Pixeln.
         /// Für normale Blöcke immer 0.
@@ -65,7 +71,7 @@ namespace StatikManager.Modules.Werkzeuge
             => IsLeerzeile
                 ? $"[Block {BlockId}] Leerzeile {ExtraHeightPx:F0}px (SourcePageIdx=-1)"
                 : $"[Block {BlockId}] Seite {SourcePageIdx} Frac {FracOben:F3}–{FracUnten:F3}" +
-                  (IsDeleted ? " GELÖSCHT" : "");
+                  (IsDeleted ? $" GELÖSCHT [{GapArt}/{GapMm:F1}mm]" : "");
     }
 
     /// <summary>
