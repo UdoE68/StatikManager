@@ -5968,6 +5968,29 @@ namespace StatikManager.Modules.Werkzeuge
         }
 
         /// <summary>
+        /// Setzt GapArt und GapMm auf dem ContentBlock für (si, t).
+        /// Parallele Struktur zu SetzeContentBlockGelöscht.
+        /// </summary>
+        private void SetzeContentBlockGapInfo(int si, int t, GapModus modus, double mm)
+        {
+            if (_contentBlocks == null) return;
+            int bitmapCount = 0;
+            foreach (var b in _contentBlocks)
+            {
+                if (b.SourcePageIdx != si || b.IsLeerzeile) continue;
+                if (bitmapCount == t)
+                {
+                    b.GapArt = modus;
+                    b.GapMm  = mm;
+                    System.Diagnostics.Debug.WriteLine(
+                        $"[GAP-SYNC] B{b.BlockId} Seite={si} Teil={t} → GapArt={modus} GapMm={mm:F1}");
+                    return;
+                }
+                bitmapCount++;
+            }
+        }
+
+        /// <summary>
         /// Teilt den ContentBlock, der den Schnitt bei <paramref name="yFrac"/> auf Seite <paramref name="si"/>
         /// enthält, in zwei eigenständige Blöcke auf.
         ///
