@@ -1157,35 +1157,56 @@ namespace StatikManager.Modules.Werkzeuge
                 double fracU = Math.Max(fracO, Math.Min(1.0, block.FracUnten));
                 if (fracU <= fracO) continue;
 
-                double blockDisplayH = Math.Max(1, (fracU - fracO) * pageH);
-                double blockY        = currentY;
-                currentY += blockDisplayH;
+                double originalDisplayH = (fracU - fracO) * pageH;
 
-                // Gelöschter Block → Leerbereich (Blattgrösse bleibt erhalten)
+                // Gelöschter Block → Lücken-Platzhalter mit konfigurierter Höhe
                 if (block.IsDeleted)
                 {
-                    var placeholder = new Border
+                    double gapH = BerechneGapHöhe(block, sourceBmp.DpiY, originalDisplayH);
+                    if (gapH > 0)
                     {
-                        Width           = bmpPixelW,
-                        Height          = blockDisplayH,
-                        Background      = new SolidColorBrush(Color.FromRgb(0xE8, 0xE8, 0xE8)),
-                        BorderBrush     = new SolidColorBrush(Color.FromRgb(0xD0, 0xD0, 0xD0)),
-                        BorderThickness = new Thickness(1),
-                        Child           = new TextBlock
+                        double blockY      = currentY;
+                        currentY          += gapH;
+                        int capturedBlockId = block.BlockId;
+
+                        var placeholder = new Border
                         {
-                            Text                = "entfernt",
-                            Foreground          = new SolidColorBrush(Color.FromRgb(0xA0, 0xA0, 0xA0)),
-                            FontStyle           = FontStyles.Italic,
-                            FontSize            = 11,
-                            HorizontalAlignment = HorizontalAlignment.Center,
-                            VerticalAlignment   = VerticalAlignment.Center
-                        }
-                    };
-                    Canvas.SetLeft(placeholder, setX);
-                    Canvas.SetTop(placeholder,  blockY);
-                    PdfCanvas.Children.Add(placeholder);
+                            Width           = bmpPixelW,
+                            Height          = gapH,
+                            Background      = new SolidColorBrush(Color.FromRgb(0xE8, 0xE8, 0xE8)),
+                            BorderBrush     = new SolidColorBrush(Color.FromRgb(0xD0, 0xD0, 0xD0)),
+                            BorderThickness = new Thickness(1),
+                            Child           = new TextBlock
+                            {
+                                Text                = block.GapArt == GapModus.KundenAbstand
+                                                        ? $"↕  {block.GapMm:F1} mm"
+                                                        : "↕  Originalgröße",
+                                Foreground          = new SolidColorBrush(Color.FromRgb(0xA0, 0xA0, 0xA0)),
+                                FontStyle           = FontStyles.Italic,
+                                FontSize            = 11,
+                                HorizontalAlignment = HorizontalAlignment.Center,
+                                VerticalAlignment   = VerticalAlignment.Center
+                            }
+                        };
+
+                        // Rechtsklick → Abstand nachbearbeiten
+                        var cm = new ContextMenu();
+                        var mi = new MenuItem { Header = "↕  Abstand bearbeiten …" };
+                        mi.Click += (_, __) => BearbeiteBlockGap(capturedBlockId);
+                        cm.Items.Add(mi);
+                        placeholder.ContextMenu = cm;
+
+                        Canvas.SetLeft(placeholder, setX);
+                        Canvas.SetTop(placeholder,  blockY);
+                        PdfCanvas.Children.Add(placeholder);
+                    }
+                    // gapH == 0 (KeinAbstand): kein Platzhalter, currentY nicht erhöhen
                     continue;
                 }
+
+                double blockDisplayH = Math.Max(1, originalDisplayH);
+                double blockY2       = currentY;
+                currentY            += blockDisplayH;
 
                 int pixelY = (int)Math.Round(fracO * bmpPixelH);
                 int pixelH = (int)Math.Round((fracU - fracO) * bmpPixelH);
@@ -1281,10 +1302,33 @@ namespace StatikManager.Modules.Werkzeuge
                 blatt.ContextMenu = blockMenu;
 
                 Canvas.SetLeft(blatt, setX);
-                Canvas.SetTop(blatt,  blockY);
+                Canvas.SetTop(blatt,  blockY2);
                 PdfCanvas.Children.Add(blatt);
             }
         }
+
+        /// <summary>
+        /// Berechnet die Anzeige-Höhe der Lücke in Pixeln für einen gelöschten Block.
+        /// </summary>
+        /// <param name="block">Der gelöschte ContentBlock.</param>
+        /// <param name="sourceDpiY">DPI-Y der Quell-Bitmap (für mm→px Umrechnung).</param>
+        /// <param name="originalDisplayH">Originale Anzeige-Höhe des Blocks in Pixeln (für GapModus.OriginalAbstand).</param>
+        private static double BerechneGapHöhe(ContentBlock block, double sourceDpiY, double originalDisplayH)
+        {
+            switch (block.GapArt)
+            {
+                case GapModus.OriginalAbstand:
+                    return originalDisplayH;
+                case GapModus.KundenAbstand:
+                    double dpi = sourceDpiY > 0 ? sourceDpiY : 96.0;
+                    return block.GapMm * dpi / 25.4;
+                case GapModus.KeinAbstand:
+                default:
+                    return 0.0;
+            }
+        }
+
+        private void BearbeiteBlockGap(int blockId) { /* Task 6 */ }
 
         // Crop-Linien-Tags: visuelle Linie = "CROP_XXX", Hit-Zone = "CROP_XXX_HIT"
         private static bool IstCropLinie(Line l)
