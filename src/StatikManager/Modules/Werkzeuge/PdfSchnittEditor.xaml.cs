@@ -4761,6 +4761,9 @@ namespace StatikManager.Modules.Werkzeuge
                         _seitenReihenfolge = z.SeitenReihenfolge != null ? new List<int>(z.SeitenReihenfolge) : null;
                         _ausgewählteParts.Clear();
                         // Neumodell nach Altpfad-Undo resynchronisieren (Leerzeilen gehen verloren — Stufe 1)
+                        // BEKANNTE EINSCHRÄNKUNG: GapArt/GapMm gehen bei Undo verloren, da ScherenZustand
+                        // diese Werte nicht sichert. Nach Undo wird OriginalAbstand verwendet.
+                        // Siehe Plan: 2026-04-06-loeschdialog-gap-optionen.md, Abschnitt "Bekannte Einschränkungen".
                         if (_contentBlocks != null)
                         {
                             _contentBlocks = KonvertiereAltesModellZuBlöcken();
