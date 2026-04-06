@@ -141,6 +141,7 @@ namespace StatikManager.Modules.Werkzeuge
 
         // ── Teil-Auswahl & Löschung ───────────────────────────────────────────
         // Ausgewählte (SeitenIdx, TeilIdx) – TeilIdx=0 ist der erste Teil von oben
+        // NICHT persistiert: rein temporärer UI-Zustand pro Sitzung (kein Einfluss auf Export/Speichern).
         private readonly HashSet<(int Seite, int Teil)> _ausgewählteParts
             = new HashSet<(int, int)>();
         // Gelöschte (SeitenIdx, TeilIdx) – beim Export übersprungen
@@ -320,11 +321,17 @@ namespace StatikManager.Modules.Werkzeuge
 
             System.Diagnostics.Debug.WriteLine($"[LadePdf] Starte PDF-Laden: {IO.Path.GetFileName(pfad)}");
 
-            // Bearbeitete Version laden falls vorhanden (Original wird nie überschrieben)
+            // Lade-Entscheidung: Original vs. _bearbeitet.pdf
+            // Wenn SchnittState-JSON existiert → immer ORIGINAL laden, damit LadeSchnittState()
+            //   korrekt angewendet werden kann (kein Re-Compositing auf bereits gerenderter PDF).
+            // Wenn kein JSON aber _bearbeitet.pdf existiert → bearbeitete laden (Rückwärtskompatibilität).
             string bearbeitetPfad = BearbeitetPfadFür(pfad);
-            string pfadKopie = IO.File.Exists(bearbeitetPfad) ? bearbeitetPfad : pfad;
+            bool   jsonVorhanden  = IO.File.Exists(pfad + ".edit.json");
+            string pfadKopie      = (!jsonVorhanden && IO.File.Exists(bearbeitetPfad)) ? bearbeitetPfad : pfad;
             if (pfadKopie != pfad)
-                System.Diagnostics.Debug.WriteLine($"[LADEN] Bearbeitete Version gefunden: {IO.Path.GetFileName(bearbeitetPfad)}");
+                System.Diagnostics.Debug.WriteLine($"[LADEN] Bearbeitete Version geladen (kein JSON): {IO.Path.GetFileName(bearbeitetPfad)}");
+            else if (jsonVorhanden)
+                System.Diagnostics.Debug.WriteLine($"[LADEN] JSON-State vorhanden → Original laden: {IO.Path.GetFileName(pfad)}");
 
             var ladeThread = new Thread(() =>
             {
@@ -424,6 +431,10 @@ namespace StatikManager.Modules.Werkzeuge
                         double pendingScrollH = ps?.ScrollH ?? 0;
                         double pendingScrollV = ps?.ScrollV ?? 0;
 
+                        // SchnittState aus JSON wiederherstellen — NACH Seitenaufbau, VOR ZeicheCanvas
+                        // Damit werden Schnittlinien und gelöschte Bereiche sofort korrekt gerendert.
+                        LadeSchnittState();
+
                         ZeicheCanvas();
                         // Pixel-pro-mm fuer Sicherheitsabstand-Konvertierung — via _pdfBytes (kein Datei-Handle)
                         if (bilder!.Count > 0)
@@ -437,7 +448,12 @@ namespace StatikManager.Modules.Werkzeuge
                         BtnAuswahlmodus.IsEnabled         = true;
                         BtnSchereToggle.IsEnabled         = true;
                         BtnSeitenwechsel.IsEnabled        = true;
-                        TxtInfo.Text = $"{bilder!.Count} Seite(n) geladen";
+                        // SchnittZurücksetzen nur aktiv wenn Schnitte vorhanden (auch nach JSON-Restore)
+                        BtnSchnittZurücksetzen.IsEnabled  = _scherenschnitte.Count > 0;
+                        string ladeInfo = $"{bilder!.Count} Seite(n) geladen";
+                        if (_scherenschnitte.Count > 0 || _gelöschteParts.Count > 0 || _gelöschteSeiten.Count > 0)
+                            ladeInfo += $" – {_scherenschnitte.Count} Schnitt(e), {_gelöschteSeiten.Count} gelöschte Seite(n) wiederhergestellt";
+                        TxtInfo.Text = ladeInfo;
 
                         // Zoom und Scroll aus Sitzung anwenden
                         if (ps != null)
@@ -4912,6 +4928,12 @@ namespace StatikManager.Modules.Werkzeuge
                     {
                         IO.File.WriteAllBytes(bearbeitetPfad, neueBytes);
                         _pdfBytes = neueBytes;
+                        // Schritt 3: SchnittState-JSON nach PDF-Schreiben speichern
+                        try { SpeichereSchnittState(); }
+                        catch (Exception exJson)
+                        {
+                            System.Diagnostics.Debug.WriteLine($"[AUTOSAVE] JSON-Fehler (nicht kritisch): {exJson.Message}");
+                        }
                         _hatUngespeicherteÄnderungen = false;
                         System.Diagnostics.Debug.WriteLine($"[AUTOSAVE] OK: {bearbeitetPfad} ({neueBytes.Length} Bytes, Versuch {versuch})");
                         return;
@@ -4930,6 +4952,12 @@ namespace StatikManager.Modules.Werkzeuge
                     IO.Path.GetFileNameWithoutExtension(_pdfPfad) + "_autosave.pdf");
                 IO.File.WriteAllBytes(fallback, neueBytes);
                 _pdfBytes = neueBytes;
+                // SchnittState-JSON auch beim Fallback schreiben
+                try { SpeichereSchnittState(); }
+                catch (Exception exJson)
+                {
+                    System.Diagnostics.Debug.WriteLine($"[AUTOSAVE] Fallback JSON-Fehler (nicht kritisch): {exJson.Message}");
+                }
                 _hatUngespeicherteÄnderungen = false;
                 System.Diagnostics.Debug.WriteLine($"[AUTOSAVE] Fallback gespeichert: {fallback}");
             }
@@ -4969,58 +4997,50 @@ namespace StatikManager.Modules.Werkzeuge
             return true;
         }
 
-        /// <summary>Speichert die Änderungen als _bearbeitet.pdf neben dem Original. Original wird NIE angefasst.</summary>
+        /// <summary>
+        /// Speichert die Änderungen als _bearbeitet.pdf + SchnittState-JSON.
+        /// Delegiert an SpeichereGesamtzustand(). Original wird NIE angefasst.
+        /// </summary>
         private void SpeichereÄnderungen()
         {
             if (_pdfPfad == null || _seitenBilder.Count == 0) return;
 
-            string bearbeitetPfad = BearbeitetPfadFür(_pdfPfad);
-
-            try
+            if (!SpeichereGesamtzustand())
             {
-                // PDF im Speicher zusammenbauen — SpeicherInStream verwendet _pdfBytes via MemoryStream
-                byte[] neueBytes;
-                using (var ms = new IO.MemoryStream())
-                {
-                    SpeicherInStream(ms);
-                    neueBytes = ms.ToArray();
-                }
-
-                if (neueBytes.Length == 0)
-                {
-                    MessageBox.Show("Fehler: PDF konnte nicht erstellt werden.", "Speichern fehlgeschlagen",
-                        MessageBoxButton.OK, MessageBoxImage.Error);
-                    return;
-                }
-
-                // Schreiben nach _bearbeitet.pdf — Original bleibt unangetastet
-                IO.File.WriteAllBytes(bearbeitetPfad, neueBytes);
-                _pdfBytes = neueBytes;
-                _hatUngespeicherteÄnderungen = false;
-
-                // Metadaten (Schnittlinien etc.) als JSON neben dem Original speichern
-                SpeichereMetadaten();
-
-                AppZustand.Instanz.SetzeStatus("Gespeichert: " + IO.Path.GetFileName(bearbeitetPfad));
-                System.Diagnostics.Debug.WriteLine($"[SAVE] OK → {bearbeitetPfad}");
-            }
-            catch (Exception ex)
-            {
-                LogException(ex, "SpeichereÄnderungen");
-                MessageBox.Show($"Speichern fehlgeschlagen:\n{ex.Message}", "Speichern fehlgeschlagen",
+                MessageBox.Show("Speichern fehlgeschlagen. Siehe Log.", "Speichern fehlgeschlagen",
                     MessageBoxButton.OK, MessageBoxImage.Error);
+                return;
             }
+
+            string bearbeitetPfad = BearbeitetPfadFür(_pdfPfad);
+            AppZustand.Instanz.SetzeStatus("Gespeichert: " + IO.Path.GetFileName(bearbeitetPfad));
+            System.Diagnostics.Debug.WriteLine($"[SAVE] OK → {bearbeitetPfad}");
         }
 
-        /// <summary>Speichert Schnittlinien und Lösch-Zustand als JSON neben dem Original.</summary>
-        private void SpeichereMetadaten()
+        /// <summary>
+        /// Speichert Schnittlinien und Lösch-Zustand als JSON neben dem Original.
+        /// Dateipfad: _pdfPfad + ".edit.json" — immer relativ zum ORIGINAL (nicht _bearbeitet.pdf).
+        /// Wird beim AutoSpeichern, expliziten Speichern und SpeichereGesamtzustand aufgerufen.
+        /// </summary>
+        private void SpeichereSchnittState()
         {
             if (_pdfPfad == null) return;
             try
             {
                 string jsonPfad = _pdfPfad + ".edit.json";
+
+                // Meta für Konsistenzprüfung beim Laden
+                var fi = new IO.FileInfo(_pdfPfad);
+                long   groesse   = fi.Exists ? fi.Length : 0;
+                string geaendert = fi.Exists
+                    ? fi.LastWriteTimeUtc.ToString("o", System.Globalization.CultureInfo.InvariantCulture)
+                    : "";
+                string dateiName = IO.Path.GetFileName(_pdfPfad);
+
                 var sb = new System.Text.StringBuilder();
                 sb.AppendLine("{");
+
+                sb.AppendLine($"  \"meta\": {{\"datei\":\"{EscapeJsonString(dateiName)}\",\"groesse\":{groesse},\"letztGeaendert\":\"{geaendert}\"}},");
 
                 // Schnittlinien
                 sb.Append("  \"schnitte\": [");
@@ -5043,13 +5063,235 @@ namespace StatikManager.Modules.Werkzeuge
                 sb.AppendLine("}");
 
                 IO.File.WriteAllText(jsonPfad, sb.ToString(), System.Text.Encoding.UTF8);
-                System.Diagnostics.Debug.WriteLine($"[SAVE] Metadaten → {jsonPfad}");
+                System.Diagnostics.Debug.WriteLine($"[SAVE] SchnittState → {jsonPfad}");
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"[SAVE] Metadaten-Fehler (nicht kritisch): {ex.Message}");
-                // Nicht kritisch — kein MessageBox
+                System.Diagnostics.Debug.WriteLine($"[SAVE] SchnittState-Fehler (nicht kritisch): {ex.Message}");
+                // Nicht kritisch — kein MessageBox, Exception nach oben
+                throw;
             }
+        }
+
+        private static string EscapeJsonString(string s)
+            => s.Replace("\\", "\\\\").Replace("\"", "\\\"");
+
+        /// <summary>
+        /// Zentrale Speichermethode: schreibt _bearbeitet.pdf UND SchnittState-JSON.
+        /// Setzt _hatUngespeicherteÄnderungen = false NUR bei vollständigem Erfolg beider Schritte.
+        /// Gibt true zurück wenn alles geklappt hat.
+        /// </summary>
+        private bool SpeichereGesamtzustand()
+        {
+            if (_pdfPfad == null || _seitenBilder.Count == 0) return false;
+
+            // Schritt 1: PDF vollständig in Memory bauen
+            byte[] neueBytes;
+            try
+            {
+                using var ms = new IO.MemoryStream();
+                SpeicherInStream(ms);
+                neueBytes = ms.ToArray();
+                if (neueBytes.Length == 0)
+                {
+                    System.Diagnostics.Debug.WriteLine("[GESAMTZUSTAND] FEHLER: SpeicherInStream lieferte 0 Bytes");
+                    return false;
+                }
+            }
+            catch (Exception ex)
+            {
+                LogException(ex, "SpeichereGesamtzustand/Build");
+                return false;
+            }
+
+            // Schritt 2: PDF auf Disk schreiben
+            string bearbeitetPfad = BearbeitetPfadFür(_pdfPfad);
+            try
+            {
+                IO.File.WriteAllBytes(bearbeitetPfad, neueBytes);
+            }
+            catch (Exception ex)
+            {
+                LogException(ex, "SpeichereGesamtzustand/PDF");
+                return false;
+            }
+            _pdfBytes = neueBytes;
+
+            // Schritt 3: SchnittState-JSON schreiben
+            try
+            {
+                SpeichereSchnittState();
+            }
+            catch (Exception ex)
+            {
+                LogException(ex, "SpeichereGesamtzustand/JSON");
+                return false;  // PDF wurde geschrieben, JSON nicht → kein Dirty-Reset
+            }
+
+            // Nur bei vollständigem Erfolg dirty-Flag zurücksetzen
+            _hatUngespeicherteÄnderungen = false;
+            System.Diagnostics.Debug.WriteLine($"[GESAMTZUSTAND] OK → {bearbeitetPfad}");
+            return true;
+        }
+
+        /// <summary>
+        /// Lädt Schnittlinien und gelöschte Bereiche aus der JSON-Zustandsdatei wieder her.
+        /// Muss NACH dem vollständigen Aufbau von _seitenBilder aufgerufen werden (in LadePdf/Dispatcher).
+        /// Setzt _scherenschnitte, _gelöschteParts, _gelöschteSeiten — ohne ZeicheCanvas aufzurufen.
+        /// _ausgewählteParts wird NICHT persistiert: temporärer UI-Zustand pro Sitzung.
+        /// </summary>
+        private void LadeSchnittState()
+        {
+            if (_pdfPfad == null) return;
+            string jsonPfad = _pdfPfad + ".edit.json";
+            if (!IO.File.Exists(jsonPfad)) return;
+
+            try
+            {
+                string json = IO.File.ReadAllText(jsonPfad, System.Text.Encoding.UTF8);
+                int n = _seitenBilder.Count;
+
+                // Konsistenzprüfung: Meta abgleichen — bei Mismatch wird State nicht angewendet
+                if (!PrüfeJsonMeta(json, _pdfPfad))
+                {
+                    System.Diagnostics.Debug.WriteLine("[LOAD-STATE] Konsistenz-Mismatch: JSON passt nicht zur aktuellen PDF – State wird ignoriert");
+                    return;
+                }
+
+                // Atomar: erst in lokale Puffer parsen, dann in einem Zug übernehmen.
+                // So entsteht kein inkonsistenter Teilzustand wenn ein Abschnitt defekt ist.
+                var schnittePuffer = new List<(int Seite, double YFraction)>();
+                var partsPuffer    = new HashSet<(int Seite, int Teil)>();
+                var seitenPuffer   = new HashSet<int>();
+
+                // Schnitte wiederherstellen
+                string schnittAbschnitt = ExtrahiereJsonArray(json, "schnitte");
+                if (schnittAbschnitt != null)
+                {
+                    var matches = System.Text.RegularExpressions.Regex.Matches(
+                        schnittAbschnitt,
+                        @"\{""seite""\s*:\s*(\d+)\s*,\s*""fraktion""\s*:\s*([0-9.eE+\-]+)\s*\}");
+                    foreach (System.Text.RegularExpressions.Match m in matches)
+                    {
+                        int seite = int.Parse(m.Groups[1].Value);
+                        double frak = double.Parse(m.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture);
+                        if (seite >= 0 && seite < n && frak > 0.0 && frak < 1.0)
+                            schnittePuffer.Add((seite, frak));
+                    }
+                }
+
+                // Gelöschte Parts wiederherstellen
+                string partsAbschnitt = ExtrahiereJsonArray(json, "geloeschteParts");
+                if (partsAbschnitt != null)
+                {
+                    var matches = System.Text.RegularExpressions.Regex.Matches(
+                        partsAbschnitt,
+                        @"\{""seite""\s*:\s*(\d+)\s*,\s*""teil""\s*:\s*(\d+)\s*\}");
+                    foreach (System.Text.RegularExpressions.Match m in matches)
+                    {
+                        int seite = int.Parse(m.Groups[1].Value);
+                        int teil  = int.Parse(m.Groups[2].Value);
+                        if (seite >= 0 && seite < n)
+                            partsPuffer.Add((seite, teil));
+                    }
+                }
+
+                // Gelöschte Seiten wiederherstellen
+                string seitenAbschnitt = ExtrahiereJsonArray(json, "geloeschteSeiten");
+                if (seitenAbschnitt != null)
+                {
+                    var matches = System.Text.RegularExpressions.Regex.Matches(seitenAbschnitt, @"\d+");
+                    foreach (System.Text.RegularExpressions.Match m in matches)
+                    {
+                        int seite = int.Parse(m.Value);
+                        if (seite >= 0 && seite < n)
+                            seitenPuffer.Add(seite);
+                    }
+                }
+
+                // Atomar übernehmen
+                foreach (var s in schnittePuffer) _scherenschnitte.Add(s);
+                foreach (var p in partsPuffer)    _gelöschteParts.Add(p);
+                foreach (var s in seitenPuffer)   _gelöschteSeiten.Add(s);
+
+                System.Diagnostics.Debug.WriteLine(
+                    $"[LOAD-STATE] OK: {_scherenschnitte.Count} Schnitte, " +
+                    $"{_gelöschteParts.Count} gelöschte Parts, " +
+                    $"{_gelöschteSeiten.Count} gelöschte Seiten aus: {IO.Path.GetFileName(jsonPfad)}");
+            }
+            catch (Exception ex)
+            {
+                // Sauber zurückfallen: teilweise befüllten State verwerfen
+                _scherenschnitte.Clear();
+                _gelöschteParts.Clear();
+                _gelöschteSeiten.Clear();
+                System.Diagnostics.Debug.WriteLine($"[LOAD-STATE] Fehler (nicht kritisch): {ex.Message}");
+                // Editor zeigt unbearbeitete Original-PDF ohne State
+            }
+        }
+
+        /// <summary>
+        /// Prüft ob das Meta-Objekt im JSON zur aktuell geladenen PDF passt.
+        /// Fehlendes Meta (altes JSON-Format) gilt als kompatibel.
+        /// Gibt false zurück wenn Dateiname oder Größe nicht übereinstimmen.
+        /// </summary>
+        private static bool PrüfeJsonMeta(string json, string pdfPfad)
+        {
+            int metaIdx = json.IndexOf("\"meta\"", StringComparison.OrdinalIgnoreCase);
+            if (metaIdx < 0) return true; // kein Meta → altes Format, kompatibel laden
+
+            int objStart = json.IndexOf('{', metaIdx + 6);
+            if (objStart < 0) return true;
+            int objEnd = json.IndexOf('}', objStart + 1);
+            if (objEnd   < 0) return true;
+            string metaObj = json.Substring(objStart + 1, objEnd - objStart - 1);
+
+            // Dateiname prüfen
+            var dateiMatch = System.Text.RegularExpressions.Regex.Match(
+                metaObj, @"""datei""\s*:\s*""([^""]+)""");
+            if (dateiMatch.Success)
+            {
+                string jsonDatei = dateiMatch.Groups[1].Value;
+                string aktDatei  = IO.Path.GetFileName(pdfPfad);
+                if (!string.Equals(jsonDatei, aktDatei, StringComparison.OrdinalIgnoreCase))
+                {
+                    System.Diagnostics.Debug.WriteLine(
+                        $"[LOAD-STATE] Meta-Mismatch Dateiname: JSON={jsonDatei} / aktuell={aktDatei}");
+                    return false;
+                }
+            }
+
+            // Dateigröße prüfen
+            var groesseMatch = System.Text.RegularExpressions.Regex.Match(
+                metaObj, @"""groesse""\s*:\s*(\d+)");
+            if (groesseMatch.Success && long.TryParse(groesseMatch.Groups[1].Value, out long jsonGroesse))
+            {
+                var fi = new IO.FileInfo(pdfPfad);
+                if (fi.Exists && fi.Length != jsonGroesse)
+                {
+                    System.Diagnostics.Debug.WriteLine(
+                        $"[LOAD-STATE] Meta-Mismatch Größe: JSON={jsonGroesse} Bytes / aktuell={fi.Length} Bytes");
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// Extrahiert den Inhalt zwischen [ und ] für einen JSON-Schlüssel.
+        /// Beispiel: {"schnitte":[...]} → gibt den Inhalt zwischen den eckigen Klammern zurück.
+        /// </summary>
+        private static string ExtrahiereJsonArray(string json, string schlüssel)
+        {
+            string suche = $"\"{schlüssel}\"";
+            int keyIdx = json.IndexOf(suche, StringComparison.OrdinalIgnoreCase);
+            if (keyIdx < 0) return null;
+            int start = json.IndexOf('[', keyIdx + suche.Length);
+            if (start < 0) return null;
+            int end   = json.IndexOf(']', start + 1);
+            if (end   < 0) return null;
+            return json.Substring(start + 1, end - start - 1);
         }
 
         /// <summary>
@@ -5378,7 +5620,7 @@ namespace StatikManager.Modules.Werkzeuge
                 pdfOut.Save(zielPfad);
                 _pdfBytes = IO.File.ReadAllBytes(zielPfad);
                 _hatUngespeicherteÄnderungen = false;
-                SpeichereMetadaten();
+                SpeichereSchnittState();
                 string msg = autoSave
                     ? $"\u2714 Auto-gespeichert: {IO.Path.GetFileName(zielPfad)}"
                     : $"\u2714 PDF gespeichert: {IO.Path.GetFileName(zielPfad)}";
