@@ -869,6 +869,7 @@ namespace StatikManager.Modules.Werkzeuge
                 }
                 else
                 {
+                    // Basis-Layout ohne Überlauf
                     BerechneLayoutStatic(sichtbarBmps, SeitenAbstand, out var ordYStart, out var ordHöhe);
                     for (int di = 0; di < sichtbar.Count; di++)
                     {
@@ -876,8 +877,30 @@ namespace StatikManager.Modules.Werkzeuge
                         _seitenYStart[oi] = ordYStart[di];
                         _seitenHöhe[oi]   = ordHöhe[di];
                     }
-                    int lastOi = sichtbar[sichtbar.Count - 1];
-                    double gesamtH = _seitenYStart[lastOi] + _seitenHöhe[lastOi] + SeitenAbstand;
+
+                    BerechneSeitenOutput(); // nach BerechneLayoutStatic – _seitenHöhe ist jetzt befüllt
+
+                    // Überlauf-Verschiebung: Seiten nach einer Überlauf-Quelle nach unten verschieben
+                    double extraYAkkumuliert = 0.0;
+                    for (int di = 0; di < sichtbar.Count; di++)
+                    {
+                        int oi = sichtbar[di];
+                        _seitenYStart[oi] += extraYAkkumuliert;
+
+                        // Hat diese Quellseite eine Überlauf-Seite?
+                        if (_seitenOutput.TryGetValue(oi, out var outPages) && outPages.Count > 1)
+                        {
+                            // Platz für Überlauf-Seite: gleiche Höhe wie Quellseite + Abstand
+                            extraYAkkumuliert += _seitenHöhe[oi] + SeitenAbstand;
+                        }
+                    }
+
+                    int lastOi2  = sichtbar[sichtbar.Count - 1];
+                    double gesamtH = _seitenYStart[lastOi2] + _seitenHöhe[lastOi2] + SeitenAbstand;
+                    // Extra: falls die letzte Seite selbst überläuft
+                    if (_seitenOutput.TryGetValue(lastOi2, out var lastOut) && lastOut.Count > 1)
+                        gesamtH += _seitenHöhe[lastOi2] + SeitenAbstand;
+
                     double maxBmpW = sichtbarBmps.Max(b => (double)b.PixelWidth);
                     PdfCanvas.Width  = maxBmpW + SeiteX * 2;
                     PdfCanvas.Height = Math.Max(gesamtH, 1);
