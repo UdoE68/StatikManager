@@ -1328,7 +1328,22 @@ namespace StatikManager.Modules.Werkzeuge
             }
         }
 
-        private void BearbeiteBlockGap(int blockId) { /* Task 6 */ }
+        /// <summary>
+        /// Öffnet den GapDialog vorausgefüllt für einen bereits gelöschten Block.
+        /// Wird vom Rechtsklick-Kontextmenü des Lücken-Platzhalters aufgerufen.
+        /// </summary>
+        private void BearbeiteBlockGap(int blockId)
+        {
+            var block = _contentBlocks?.FirstOrDefault(b => b.BlockId == blockId && b.IsDeleted);
+            if (block == null) return;
+
+            var dlg = new GapDialog(block.GapArt, block.GapMm) { Owner = Window.GetWindow(this) };
+            if (dlg.ShowDialog() != true) return;
+
+            block.GapArt = dlg.GewählterModus;
+            block.GapMm  = dlg.EingabeGapMm;
+            ZeicheCanvas();
+        }
 
         // Crop-Linien-Tags: visuelle Linie = "CROP_XXX", Hit-Zone = "CROP_XXX_HIT"
         private static bool IstCropLinie(Line l)
