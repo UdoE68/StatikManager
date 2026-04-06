@@ -4251,71 +4251,41 @@ namespace StatikManager.Modules.Werkzeuge
         {
             if (_ausgewählteParts.Count == 0) return;
 
-            System.Diagnostics.Debug.WriteLine($"[BUG1-LOESCHEN] _ausgewählteParts: {string.Join(",", _ausgewählteParts.Select(p => $"si={p.Seite},t={p.Teil}"))}");
+            System.Diagnostics.Debug.WriteLine($"[LOESCHEN] _ausgewählteParts: {string.Join(",", _ausgewählteParts.Select(p => $"si={p.Seite},t={p.Teil}"))}");
 
-            // Nur fragen wenn es echte Schnitte gibt (sonst macht zusammenschieben keinen Sinn)
+            // GapDialog nur zeigen wenn Schnitte vorhanden (sonst kein sinnvoller Lücken-Kontext)
             bool hatSchnitte = _ausgewählteParts.Any(p => GetTeilGrenzen(p.Seite).Count > 1);
 
-            // Bug 2: Wenn nur das letzte (unterste) Segment gelöscht wird, ergibt "Lücke schliessen" keinen Sinn
-            bool nurLetztesSegment = hatSchnitte && _ausgewählteParts.All(p =>
-            {
-                var grenzen = GetTeilGrenzen(p.Seite);
-                return p.Teil == grenzen.Count - 1;
-            });
+            GapModus gewählterModus = GapModus.OriginalAbstand;
+            double   eingabeMm     = 0.0;
 
-            bool zusammenschieben = false;
-            if (hatSchnitte && !nurLetztesSegment)
+            if (hatSchnitte)
             {
-                zusammenschieben = ZeigeBinaryDialog(
-                    "Lücke schließen?",
-                    "Soll der freigewordene Bereich geschlossen werden?\n\n" +
-                    "Die Teile oberhalb und unterhalb rücken zusammen.\nDas Seitenformat (z.B. A4) bleibt erhalten.",
-                    "Lücke schließen",
-                    "Platzhalter behalten");
+                var dlg = new GapDialog { Owner = Window.GetWindow(this) };
+                if (dlg.ShowDialog() != true) return;
+                gewählterModus = dlg.GewählterModus;
+                eingabeMm      = dlg.EingabeGapMm;
             }
 
             // Aktuellen Zustand für Undo sichern
             _undoStack.Push(SpeichereZustand());
 
-            if (zusammenschieben)
+            foreach (var p in _ausgewählteParts)
             {
-                // ── VERBESSERUNG 2: Verschmelzen? ────────────────────────────
-                bool verschmelzen = true;
-                if (hatSchnitte)
-                {
-                    verschmelzen = ZeigeBinaryDialog(
-                        "Teile verschmelzen?",
-                        "Sollen die Teile zu einem Bild verbunden werden?\n\n" +
-                        "Verschmelzen: Teile werden zu einem Bild verbunden, kein Schnitt mehr sichtbar.\n" +
-                        "Getrennt lassen: Teile bleiben einzeln bearbeitbar (Schnittlinie bleibt).",
-                        "Teile verschmelzen",
-                        "Getrennt lassen");
-                }
-                SchiebeTeileZusammen(_ausgewählteParts.ToHashSet(), verschmelzen);
-            }
-            else
-            {
-                // Bisheriges Verhalten: als "gelöscht" markieren (grauer Overlay)
-                foreach (var p in _ausgewählteParts)
-                {
-                    if (_gelöschteParts.Contains(p)) _gelöschteParts.Remove(p);
-                    else _gelöschteParts.Add(p);
+                _gelöschteParts.Add(p);
 
-                    // Neues Modell synchronisieren: ContentBlock IsDeleted spiegelt _gelöschteParts
-                    if (_contentBlocks != null)
-                        SetzeContentBlockGelöscht(p.Seite, p.Teil, _gelöschteParts.Contains(p));
+                if (_contentBlocks != null)
+                {
+                    SetzeContentBlockGelöscht(p.Seite, p.Teil, true);
+                    SetzeContentBlockGapInfo(p.Seite, p.Teil, gewählterModus, eingabeMm);
                 }
-                _ausgewählteParts.Clear();
-                if (_contentBlocks != null) ZeicheCanvas();
-                else AktualisiereSchnitteLinien();
-                BtnTeilLöschen.IsEnabled = false;
-                int n = _gelöschteParts.Count;
-                TxtInfo.Text = n > 0
-                    ? $"{n} Teil(e) markiert als entfernt – Strg+Z zum Rückgängigmachen"
-                    : "Alle Markierungen aufgehoben";
             }
 
-            // Bug 3: Nach jeder Lösch-/Schneid-Aktion Dirty-Flag setzen
+            _ausgewählteParts.Clear();
+            if (_contentBlocks != null) ZeicheCanvas();
+            else AktualisiereSchnitteLinien();
+            BtnTeilLöschen.IsEnabled = false;
+            TxtInfo.Text = $"{_gelöschteParts.Count} Teil(e) entfernt – Strg+Z zum Rückgängigmachen";
             MarkiereAlsGeändert();
         }
 
