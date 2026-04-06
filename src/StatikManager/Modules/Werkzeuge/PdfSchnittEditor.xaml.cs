@@ -1351,6 +1351,7 @@ namespace StatikManager.Modules.Werkzeuge
         {
             try
             {
+                if (_reflowDebugModus) return;      // im Debug-Modus keine Crop-Interaktion
                 if (sender is not Line l || !IstCropLinie(l)) return;
                 // Basis-Tag speichern (ohne "_HIT") damit MouseMove-Handler ihn vergleichen kann
                 _gezogeneCropSeite = BasisTag(l.Tag?.ToString() ?? "");
@@ -3293,7 +3294,7 @@ namespace StatikManager.Modules.Werkzeuge
         {
             try
             {
-                if (!_seitenwechselModus) return;
+                if (!_seitenwechselModus || _reflowDebugModus) return;   // kein Seitenwechsel-Feedback im Debug-Modus
                 Point pos = e.GetPosition(PdfCanvas);
                 int si = HoleSeitenIndexBeiPos(pos.Y, pos.X);
 
@@ -3335,7 +3336,7 @@ namespace StatikManager.Modules.Werkzeuge
         {
             try
             {
-                if (!_seitenwechselModus || e.ChangedButton != MouseButton.Left) return;
+                if (!_seitenwechselModus || e.ChangedButton != MouseButton.Left || _reflowDebugModus) return;   // kein Seitenwechsel im Debug-Modus
                 Point pos = e.GetPosition(PdfCanvas);
                 int si = HoleSeitenIndexBeiPos(pos.Y, pos.X);
                 if (si < 0) return;
@@ -3426,7 +3427,7 @@ namespace StatikManager.Modules.Werkzeuge
         {
             try
             {
-                if (!_scherenModus) return;
+                if (!_scherenModus || _reflowDebugModus) return;   // kein Schere-Feedback im Debug-Modus
                 Point pos = e.GetPosition(PdfCanvas);
                 int si = HoleSeitenIndexBeiPos(pos.Y, pos.X);
 
@@ -3468,7 +3469,7 @@ namespace StatikManager.Modules.Werkzeuge
         {
             try
             {
-                if (!_scherenModus || e.ChangedButton != MouseButton.Left) return;
+                if (!_scherenModus || e.ChangedButton != MouseButton.Left || _reflowDebugModus) return;   // kein Schnitt im Debug-Modus
                 Point pos = e.GetPosition(PdfCanvas);
                 int si = HoleSeitenIndexBeiPos(pos.Y, pos.X);
                 if (si < 0) return;
@@ -4551,6 +4552,7 @@ namespace StatikManager.Modules.Werkzeuge
                 else if (e.Key == Key.R && Keyboard.Modifiers == (ModifierKeys.Control | ModifierKeys.Shift))
                 {
                     _reflowDebugModus = !_reflowDebugModus;
+                    ResetMausZustandBeimModuswechsel();
                     ZeicheCanvas();
                     e.Handled = true;
                 }
@@ -5292,6 +5294,25 @@ namespace StatikManager.Modules.Werkzeuge
         /// false = normaler ZeicheCanvas()-Pfad (Default).
         /// </summary>
         private bool _reflowDebugModus = false;
+
+        /// <summary>
+        /// Bereinigt sämtlichen Maus-/Drag-Zustand beim Wechsel in/aus dem Reflow-Debug-Modus.
+        /// Verhindert: hängende PdfCanvas-Captures, stale CropDrag-Handler, veraltete Drag-Flags.
+        /// </summary>
+        private void ResetMausZustandBeimModuswechsel()
+        {
+            // Crop-Drag: CaptureMouse freigeben + Handler entfernen
+            if (PdfCanvas.IsMouseCaptured) PdfCanvas.ReleaseMouseCapture();
+            PdfCanvas.MouseMove         -= CropCanvas_MouseMove;
+            PdfCanvas.MouseLeftButtonUp -= CropCanvas_MouseUp;
+
+            // Drag-Flags zurücksetzen (blatt-Drag, Schnitt-Drag)
+            _dragAktiv           = false;
+            _dragQuellIdx        = -1;
+            _gezogeneCropSeite   = null;
+            _schnittDragAktiv    = false;
+            _gezogenesSchnittIdx = -1;
+        }
 
         /// <summary>
         /// Rendert den Canvas auf Basis des aktuellen ReflowResult (Debug/Test-Pfad).
