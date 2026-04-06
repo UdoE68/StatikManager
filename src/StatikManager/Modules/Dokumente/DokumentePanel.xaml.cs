@@ -734,6 +734,13 @@ namespace StatikManager.Modules.Dokumente
 
         private void LadeVorschau(string pfad)
         {
+            // Ungespeicherte Änderungen im PDF-Editor prüfen bevor neue Datei geladen wird.
+            // Gilt auch beim Wechsel zu Nicht-PDF-Dateien (Word, HTML etc.) – dort wird
+            // PdfEditor.LadePdf() nie aufgerufen, daher muss die Prüfung hier stattfinden.
+            if (PdfEditor.Visibility == System.Windows.Visibility.Visible
+                && !PdfEditor.FrageObSpeichern())
+                return;
+
             _ladeGeneration++;
             _aktiverDateipfad = pfad;
             _dokumentGeladen  = false;
