@@ -43,10 +43,11 @@ namespace StatikManager.Modules.Werkzeuge
 In der `sealed class ProtoBlock` nach `public bool IsDeleted { get; set; }` einfügen:
 
 ```csharp
-/// <summary>Wie groß die Lücke nach dem Löschen sein soll. Nur relevant wenn IsDeleted == true.</summary>
-public GapModus GapModus { get; set; } = GapModus.OriginalAbstand;
+/// <summary>Wie groß die Lücke nach dem Löschen sein soll (GapModus). Nur relevant wenn IsDeleted == true.</summary>
+/// <remarks>Heißt GapArt (nicht GapModus) um Naming Collision mit dem Enum-Typ zu vermeiden.</remarks>
+public GapModus GapArt { get; set; } = GapModus.OriginalAbstand;
 
-/// <summary>Lückengröße in mm. Nur relevant für GapModus.KundenAbstand.</summary>
+/// <summary>Lückengröße in mm. Nur relevant für GapModus.KundenAbstand. Muss >= 0 sein.</summary>
 public double GapMm { get; set; } = 0.0;
 ```
 
@@ -59,8 +60,8 @@ public override string ToString()
 {
     if (IsDeleted)
     {
-        string gap = GapModus == GapModus.OriginalAbstand ? "[orig]"
-                   : GapModus == GapModus.KundenAbstand   ? $"[{GapMm:F1}mm]"
+        string gap = GapArt == GapModus.OriginalAbstand ? "[orig]"
+                   : GapArt == GapModus.KundenAbstand   ? $"[{GapMm:F1}mm]"
                    : "[0mm]";
         return $"[DEL {gap}]  B{Id}  {FracTop:F4} – {FracBottom:F4}";
     }
@@ -305,7 +306,7 @@ private void DeleteBlock(int blockId, GapModus modus, double gapMm)
     var block = _blocks.FirstOrDefault(b => b.Id == blockId);
     if (block == null) return;
     block.IsDeleted = true;
-    block.GapModus  = modus;
+    block.GapArt    = modus;
     block.GapMm     = gapMm;
     _selectedId     = -1;
     RenderBlocks();
@@ -363,7 +364,7 @@ private double BerechneLückenHöhePx(ProtoBlock block)
 {
     if (_originalBitmap == null) return 0.0;
 
-    switch (block.GapModus)
+    switch (block.GapArt)
     {
         case GapModus.OriginalAbstand:
             return (block.FracBottom - block.FracTop) * _originalBitmap.PixelHeight;
@@ -394,9 +395,9 @@ private void RenderLücke(ProtoBlock block, double gapH)
     double displayTop = CanvasPad + block.FracTop * _originalBitmap.PixelHeight;
     int    capturedId = block.Id;
 
-    string label = block.GapModus == GapModus.OriginalAbstand
+    string label = block.GapArt == GapModus.OriginalAbstand
         ? "↕  Originalabstand"
-        : block.GapModus == GapModus.KundenAbstand
+        : block.GapArt == GapModus.KundenAbstand
             ? $"↕  {block.GapMm:F1} mm"
             : "";
 
@@ -440,10 +441,10 @@ private void BearbeiteGap(int blockId)
     var block = _blocks.FirstOrDefault(b => b.Id == blockId && b.IsDeleted);
     if (block == null) return;
 
-    var dlg = new GapDialog(block.GapModus, block.GapMm) { Owner = this };
+    var dlg = new GapDialog(block.GapArt, block.GapMm) { Owner = this };
     if (dlg.ShowDialog() != true) return;
 
-    block.GapModus = dlg.GewählterModus;
+    block.GapArt = dlg.GewählterModus;
     block.GapMm    = dlg.EingabeGapMm;
     RenderBlocks();
 }
