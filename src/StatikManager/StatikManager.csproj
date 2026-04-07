@@ -39,6 +39,8 @@
   <ItemGroup>
     <!-- WinForms für FolderBrowserDialog -->
     <Reference Include="System.Windows.Forms"/>
+    <!-- Microsoft.CSharp wird für 'dynamic' in WordEinfuegenService benötigt -->
+    <Reference Include="Microsoft.CSharp"/>
   </ItemGroup>
 
   <ItemGroup>
