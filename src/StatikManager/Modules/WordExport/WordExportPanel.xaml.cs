@@ -14,6 +14,7 @@ namespace StatikManager.Modules.WordExport
     {
         private readonly DispatcherTimer _statusTimer;
         private string? _projektPfad;
+        private readonly Action<string?> _projektGeaendertHandler;
 
         public WordExportPanel()
         {
@@ -25,11 +26,12 @@ namespace StatikManager.Modules.WordExport
             _statusTimer.Start();
 
             // Auf Projektwechsel reagieren
-            AppZustand.Instanz.ProjektGeändert += pfad =>
+            _projektGeaendertHandler = pfad =>
             {
                 _projektPfad = pfad;
                 LadePositionen();
             };
+            AppZustand.Instanz.ProjektGeändert += _projektGeaendertHandler;
 
             // Einstellungen laden
             var ein = Einstellungen.Instanz;
@@ -348,6 +350,7 @@ namespace StatikManager.Modules.WordExport
 
         public void Bereinigen()
         {
+            AppZustand.Instanz.ProjektGeändert -= _projektGeaendertHandler;
             _statusTimer.Stop();
         }
     }
