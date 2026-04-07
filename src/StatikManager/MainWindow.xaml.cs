@@ -1,6 +1,7 @@
 using StatikManager.Core;
 using StatikManager.Modules.Bildschnitt;
 using StatikManager.Modules.Dokumente;
+using StatikManager.Modules.WordExport;
 using System.Windows;
 using System.Windows.Controls;
 
@@ -66,6 +67,7 @@ namespace StatikManager
             // Neues Modul hinzufügen: einfach eine weitere Zeile hier.
             _modulManager.Registrieren(new DokumenteModul());
             _modulManager.Registrieren(new BildschnittModul());
+            _modulManager.Registrieren(new WordExportModul());
 
             // ── Module in die Shell integrieren ─────────────────────────────
             IntegriereModule();
@@ -190,6 +192,20 @@ namespace StatikManager
         }
 
         private void MenüBeenden_Click(object sender, RoutedEventArgs e) => Close();
+
+        // ── Menü: Entwickler ─────────────────────────────────────────────────
+
+        private void MenüBlockPrototyp_Click(object sender, RoutedEventArgs e)
+        {
+            var wnd = new Modules.Werkzeuge.BlockPrototyp { Owner = this };
+            wnd.Show();
+        }
+
+        private void MenüBlockEditorPrototype_Click(object sender, RoutedEventArgs e)
+        {
+            var wnd = new Modules.Werkzeuge.BlockEditorPrototype { Owner = this };
+            wnd.Show();
+        }
 
         // ── Menü: Hilfe ───────────────────────────────────────────────────────
 
