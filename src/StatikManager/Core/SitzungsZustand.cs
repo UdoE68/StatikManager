@@ -20,6 +20,9 @@ namespace StatikManager.Core
         /// <summary>Zuletzt ausgewählte Datei.</summary>
         public string? AktiveDatei { get; set; }
 
+        /// <summary>Zuletzt in Word geöffnetes/verwendetes Dokument.</summary>
+        public string? WordExportLetztesDokument { get; set; }
+
         // ── PdfSchnittEditor – Darstellung ────────────────────────────────────
 
         public double ZoomFaktor       { get; set; } = 1.0;

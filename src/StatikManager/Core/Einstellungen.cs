@@ -50,6 +50,17 @@ namespace StatikManager.Core
         [XmlArrayItem("Vorlage")]
         public List<WordVorlage> WordVorlagen { get; set; } = new List<WordVorlage>();
 
+        // ── Word-Export-Einstellungen ─────────────────────────────────────────────
+
+        /// <summary>Standard-Bildbreite beim Einfügen in Word.</summary>
+        public BildbreiteOption WordExportBildbreite { get; set; } = BildbreiteOption.Seitenbreite;
+
+        /// <summary>Überschrift unter eingefügtes Bild schreiben.</summary>
+        public bool WordExportMitUeberschrift { get; set; } = true;
+
+        /// <summary>Maßstab in Beschriftung aufnehmen.</summary>
+        public bool WordExportMitMassstab { get; set; } = true;
+
         /// <summary>
         /// Bekannte Projekte mit Sichtbarkeits-Flag und optionalem Kurznamen.
         /// Wird durch den Dialog "Projekte verwalten" befüllt.
