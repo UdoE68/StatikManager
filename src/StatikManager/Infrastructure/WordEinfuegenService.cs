@@ -2,6 +2,7 @@
 using System;
 using System.IO;
 using System.Runtime.InteropServices;
+using StatikManager.Core;
 using Word = Microsoft.Office.Interop.Word;
 
 namespace StatikManager.Infrastructure
@@ -52,6 +53,9 @@ namespace StatikManager.Infrastructure
         /// </summary>
         public static void OeffneDokument(string pfad)
         {
+            if (!File.Exists(pfad))
+                throw new FileNotFoundException("Word-Datei nicht gefunden: " + pfad);
+
             var app = HoleOderStarteWord();
             app.Documents.Open(
                 FileName: pfad,
@@ -98,38 +102,48 @@ namespace StatikManager.Infrastructure
             if (app.Documents.Count == 0)
                 throw new InvalidOperationException("Kein Word-Dokument geöffnet.");
 
-            Word.Range cursor = app.Selection.Range;
-
-            Word.InlineShape shape = cursor.InlineShapes.AddPicture(
-                FileName: pngPfad,
-                LinkToFile: false,
-                SaveWithDocument: true);
-
-            float breitePixel = BerechneBildbreite(app, bildbreiteOption);
-            if (breitePixel > 0)
+            Word.Range cursor = null;
+            Word.InlineShape shape = null;
+            try
             {
-                // LockAspectRatio ist MsoTriState aus Microsoft.Office.Core (office-Assembly).
-                // Da EmbedInteropTypes=true, Zugriff via dynamic um Namespace-Referenz zu vermeiden.
-                // msoTrue = -1
-                dynamic dynShape = shape;
-                dynShape.LockAspectRatio = -1;
-                shape.Width = breitePixel;
-            }
+                cursor = app.Selection.Range;
 
-            if (mitUeberschrift || mitMassstab)
+                shape = cursor.InlineShapes.AddPicture(
+                    FileName: pngPfad,
+                    LinkToFile: false,
+                    SaveWithDocument: true);
+
+                float breitePixel = BerechneBildbreite(app, bildbreiteOption);
+                if (breitePixel > 0)
+                {
+                    // LockAspectRatio ist MsoTriState aus Microsoft.Office.Core (office-Assembly).
+                    // Da EmbedInteropTypes=true, Zugriff via dynamic um Namespace-Referenz zu vermeiden.
+                    // msoTrue = -1
+                    dynamic dynShape = shape;
+                    dynShape.LockAspectRatio = -1;
+                    shape.Width = breitePixel;
+                }
+
+                if (mitUeberschrift || mitMassstab)
+                {
+                    shape.Range.InsertParagraphAfter();
+
+                    Word.Range nachBild = shape.Range;
+                    nachBild.Collapse(Word.WdCollapseDirection.wdCollapseEnd);
+                    nachBild.MoveEnd(Word.WdUnits.wdParagraph, 1);
+                    nachBild.Collapse(Word.WdCollapseDirection.wdCollapseEnd);
+
+                    string beschriftung = BaueBeschriftung(ueberschrift, massstab, mitUeberschrift, mitMassstab);
+                    nachBild.InsertAfter(beschriftung);
+                }
+
+                app.Selection.EndOf(Word.WdUnits.wdParagraph);
+            }
+            finally
             {
-                shape.Range.InsertParagraphAfter();
-
-                Word.Range nachBild = shape.Range;
-                nachBild.Collapse(Word.WdCollapseDirection.wdCollapseEnd);
-                nachBild.MoveEnd(Word.WdUnits.wdParagraph, 1);
-                nachBild.Collapse(Word.WdCollapseDirection.wdCollapseEnd);
-
-                string beschriftung = BaueBeschriftung(ueberschrift, massstab, mitUeberschrift, mitMassstab);
-                nachBild.InsertAfter(beschriftung);
+                if (shape != null) try { Marshal.ReleaseComObject(shape); } catch { }
+                if (cursor != null) try { Marshal.ReleaseComObject(cursor); } catch { }
             }
-
-            app.Selection.EndOf(Word.WdUnits.wdParagraph);
         }
 
         // ── Hilfsmethoden ─────────────────────────────────────────────────
@@ -212,13 +226,4 @@ namespace StatikManager.Infrastructure
         }
     }
 
-    /// <summary>Wie breit das Bild in Word eingefügt wird.</summary>
-    public enum BildbreiteOption
-    {
-        Seitenbreite,
-        HalbeSeitenbreite,
-        Manuell_14cm,
-        Manuell_10cm,
-        Original
-    }
 }
