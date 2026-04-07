@@ -23,7 +23,20 @@ namespace StatikManager.Modules.WordExport
             // Status-Poll-Timer: alle 3 Sekunden Word-Status prüfen
             _statusTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
             _statusTimer.Tick += (_, _) => AktualisiereWordStatus();
-            _statusTimer.Start();
+
+            // Timer nur starten wenn Panel sichtbar
+            IsVisibleChanged += (_, e) =>
+            {
+                if ((bool)e.NewValue)
+                {
+                    AktualisiereWordStatus();
+                    _statusTimer.Start();
+                }
+                else
+                {
+                    _statusTimer.Stop();
+                }
+            };
 
             // Auf Projektwechsel reagieren
             _projektGeaendertHandler = pfad =>
@@ -38,8 +51,6 @@ namespace StatikManager.Modules.WordExport
             ChkMitUeberschrift.IsChecked = ein.WordExportMitUeberschrift;
             ChkMitMassstab.IsChecked     = ein.WordExportMitMassstab;
             WaehleBildbreiteComboBox(ein.WordExportBildbreite);
-
-            AktualisiereWordStatus();
         }
 
         // ── Word-Status ───────────────────────────────────────────────────
@@ -162,7 +173,23 @@ namespace StatikManager.Modules.WordExport
                 if (ausschnitteStart >= 0)
                 {
                     int arrayStart = jsonText.IndexOf('[', ausschnitteStart);
-                    int arrayEnd   = jsonText.LastIndexOf(']');
+
+                    // Array-Ende durch Klammer-Zählung finden
+                    int arrayEnd = -1;
+                    if (arrayStart >= 0)
+                    {
+                        int tiefe = 0;
+                        for (int i = arrayStart; i < jsonText.Length; i++)
+                        {
+                            if (jsonText[i] == '[') tiefe++;
+                            else if (jsonText[i] == ']')
+                            {
+                                tiefe--;
+                                if (tiefe == 0) { arrayEnd = i; break; }
+                            }
+                        }
+                    }
+
                     if (arrayStart >= 0 && arrayEnd > arrayStart)
                     {
                         string arrayText = jsonText.Substring(arrayStart + 1, arrayEnd - arrayStart - 1);
