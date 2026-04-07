@@ -1,0 +1,154 @@
+<UserControl x:Class="StatikManager.Modules.WordExport.WordExportPanel"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <!-- Abschnitt 1: Word-Dokument -->
+            <RowDefinition Height="Auto"/>
+            <!-- Trennlinie -->
+            <RowDefinition Height="1"/>
+            <!-- Abschnitt 2: Positionen-Liste -->
+            <RowDefinition Height="*"/>
+            <!-- Trennlinie -->
+            <RowDefinition Height="1"/>
+            <!-- Abschnitt 3: Einfüge-Optionen -->
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- ── 1. Word-Dokument ─────────────────────────────── -->
+        <DockPanel Grid.Row="0" Margin="8,8,8,6">
+            <TextBlock Text="Word-Dokument"
+                       FontWeight="SemiBold" FontSize="13"
+                       VerticalAlignment="Center"
+                       DockPanel.Dock="Top"
+                       Margin="0,0,0,6"/>
+
+            <StackPanel Orientation="Horizontal" DockPanel.Dock="Top">
+                <Button x:Name="BtnNeuErstellen"
+                        Content="Neu erstellen"
+                        Padding="8,3" Margin="0,0,4,0"
+                        Click="BtnNeuErstellen_Click"/>
+                <Button x:Name="BtnOeffnen"
+                        Content="Öffnen …"
+                        Padding="8,3" Margin="0,0,4,0"
+                        Click="BtnOeffnen_Click"/>
+                <Border Width="1" Background="#CCC" Margin="4,2,4,2"/>
+                <Ellipse x:Name="StatusKreis"
+                         Width="10" Height="10"
+                         Fill="Red"
+                         VerticalAlignment="Center"
+                         ToolTip="Word-Status"
+                         Margin="0,0,4,0"/>
+                <TextBlock x:Name="TxtWordStatus"
+                           Text="Word nicht verbunden"
+                           FontSize="11" Foreground="Gray"
+                           VerticalAlignment="Center"/>
+            </StackPanel>
+
+            <TextBlock x:Name="TxtDokumentPfad"
+                       Text=""
+                       FontSize="10" Foreground="Gray"
+                       TextTrimming="CharacterEllipsis"
+                       DockPanel.Dock="Top"
+                       Margin="0,4,0,0"
+                       ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"/>
+        </DockPanel>
+
+        <!-- Trennlinie -->
+        <Border Grid.Row="1" Background="#DDD"/>
+
+        <!-- ── 2. Positionen aus AxisVM ─────────────────────── -->
+        <DockPanel Grid.Row="2" Margin="8,8,8,0">
+            <DockPanel DockPanel.Dock="Top" Margin="0,0,0,6">
+                <TextBlock Text="Positionen aus AxisVM"
+                           FontWeight="SemiBold" FontSize="13"
+                           VerticalAlignment="Center"/>
+                <Button x:Name="BtnAktualisieren"
+                        Content="↻"
+                        FontSize="13"
+                        Width="24" Height="24"
+                        DockPanel.Dock="Right"
+                        ToolTip="Liste neu einlesen"
+                        Click="BtnAktualisieren_Click"/>
+            </DockPanel>
+
+            <TextBlock x:Name="TxtKeinePositionen"
+                       Text="Kein Projekt geladen."
+                       Foreground="Gray" FontStyle="Italic"
+                       FontSize="11"
+                       DockPanel.Dock="Top"
+                       Visibility="Visible"/>
+
+            <TreeView x:Name="PositionenTree"
+                      DockPanel.Dock="Top"
+                      Visibility="Collapsed"
+                      BorderThickness="0"
+                      Background="Transparent">
+                <TreeView.ItemTemplate>
+                    <HierarchicalDataTemplate ItemsSource="{Binding Ausschnitte}">
+                        <!-- Positions-Ebene -->
+                        <TextBlock FontWeight="SemiBold" FontSize="12">
+                            <Run Text="{Binding Id}"/>
+                            <Run Text=" – "/>
+                            <Run Text="{Binding Name}"/>
+                        </TextBlock>
+
+                        <!-- Ausschnitt-Ebene -->
+                        <HierarchicalDataTemplate.ItemTemplate>
+                            <DataTemplate>
+                                <DockPanel Margin="0,1">
+                                    <Button Content="Einfügen"
+                                            Padding="5,1"
+                                            FontSize="10"
+                                            DockPanel.Dock="Right"
+                                            Tag="{Binding}"
+                                            Click="BtnEinfuegen_Click"
+                                            ToolTip="An Cursor-Position in Word einfügen"/>
+                                    <TextBlock Text="{Binding Anzeigename}"
+                                               FontSize="11"
+                                               VerticalAlignment="Center"
+                                               TextTrimming="CharacterEllipsis"/>
+                                </DockPanel>
+                            </DataTemplate>
+                        </HierarchicalDataTemplate.ItemTemplate>
+                    </HierarchicalDataTemplate>
+                </TreeView.ItemTemplate>
+            </TreeView>
+        </DockPanel>
+
+        <!-- Trennlinie -->
+        <Border Grid.Row="3" Background="#DDD" Margin="0,8,0,0"/>
+
+        <!-- ── 3. Einfüge-Optionen ───────────────────────────── -->
+        <StackPanel Grid.Row="4" Margin="8,8,8,12">
+            <TextBlock Text="Einfüge-Optionen"
+                       FontWeight="SemiBold" FontSize="12"
+                       Margin="0,0,0,6"/>
+
+            <DockPanel Margin="0,0,0,4">
+                <TextBlock Text="Bildbreite:" Width="80" VerticalAlignment="Center"/>
+                <ComboBox x:Name="CbBildbreite"
+                          Width="160"
+                          SelectionChanged="CbBildbreite_SelectionChanged">
+                    <ComboBoxItem Content="Seitenbreite"       Tag="Seitenbreite"/>
+                    <ComboBoxItem Content="1/2 Seite"          Tag="HalbeSeitenbreite"/>
+                    <ComboBoxItem Content="Manuell 14 cm"      Tag="Manuell_14cm"/>
+                    <ComboBoxItem Content="Manuell 10 cm"      Tag="Manuell_10cm"/>
+                    <ComboBoxItem Content="Originalgröße"      Tag="Original"/>
+                </ComboBox>
+            </DockPanel>
+
+            <CheckBox x:Name="ChkMitUeberschrift"
+                      Content="Überschrift einfügen"
+                      Margin="0,0,0,3"
+                      Checked="Optionen_Geaendert"
+                      Unchecked="Optionen_Geaendert"/>
+            <CheckBox x:Name="ChkMitMassstab"
+                      Content="Maßstab in Beschriftung"
+                      Checked="Optionen_Geaendert"
+                      Unchecked="Optionen_Geaendert"/>
+        </StackPanel>
+
+    </Grid>
+</UserControl>
