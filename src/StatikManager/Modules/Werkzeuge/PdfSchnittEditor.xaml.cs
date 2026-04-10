@@ -28,7 +28,7 @@ namespace StatikManager.Modules.Werkzeuge
     {
         // ── Render-Konstanten ─────────────────────────────────────────────────
         private const int    RenderBreite  = 900;
-        private const double ExportDpi     = 150.0;  // DPI für Export-Render
+        private const double ExportDpi     = 250.0;  // DPI für Export-Render
         private const double SeitenAbstand = 30;
         private const int    SeiteX        = 20;
 
@@ -2961,11 +2961,7 @@ namespace StatikManager.Modules.Werkzeuge
                     bool        textmarkeGefunden = false;
                     if (vorlagePfad != null)
                     {
-                        // ── Diagnose: Neuer Vorlagen-Pfad aktiv ────────────────
-                        Dispatcher.Invoke(new Action(() => MessageBox.Show(
-                            $"Neuer Vorlagen-Exportpfad aktiv.\n\nVorlage:\n{vorlagePfad}",
-                            "Export-Diagnose", MessageBoxButton.OK, MessageBoxImage.Information)));
-
+                        App.LogFehler("Export/Vorlage", $"Vorlagen-Exportpfad: {vorlagePfad}");
                         wordDoc = ÖffneVorlage(wordApp, vorlagePfad);
                         NormiereAbsatzstil(wordDoc);
 
@@ -2985,6 +2981,11 @@ namespace StatikManager.Modules.Werkzeuge
                         wordDoc = wordApp.Documents.Add();
                         NormiereAbsatzstil(wordDoc);
                         SetzeWordSeitenFormat(wordDoc, nativeW_pts, nativeH_pts);
+                        // Initialen Leerabsatz von Documents.Add() minimieren —
+                        // verhindert Leerseite am Anfang: ohne dies schiebt der ~11pt-Absatz
+                        // das Bild auf Seite 2.
+                        try { if (wordDoc.Paragraphs.Count > 0)
+                                  wordDoc.Paragraphs[1].Range.Font.Size = 1f; } catch { }
                     }
 
                     var (availW_pt, availH_pt) = HoleSchreibbereich(wordDoc);
@@ -3009,39 +3010,6 @@ namespace StatikManager.Modules.Werkzeuge
                         $"Vorlage: {availW_pt:F1} × {availH_pt:F1} pt | " +
                         $"Druckbereich: {nativeW_eff:F1} × {nativeH_eff:F1} pt");
 
-                    // ── DIAGNOSE: Zielbereich-Breakdown als MessageBox ───────────
-                    {
-                        var ps2 = wordDoc!.PageSetup;
-                        double effUntererRand2    = Math.Max(ps2.BottomMargin, ps2.FooterDistance);
-                        double footerOberkante2   = ps2.PageHeight - ps2.FooterDistance;
-                        double satzspiegelH2      = ps2.PageHeight - ps2.TopMargin - effUntererRand2;
-                        string quelleBotM         = ps2.FooterDistance > ps2.BottomMargin
-                                                    ? $"FooterDistance ({ps2.FooterDistance:F1} pt)"
-                                                    : $"BottomMargin ({ps2.BottomMargin:F1} pt)";
-                        string quelleB = zellenB.HasValue ? "Tabellenbreite" : "Satzspiegel";
-                        string quelleH = zellenH.HasValue ? "Zeilenhöhe fix" : "Satzspiegel";
-                        Dispatcher.Invoke(new Action(() =>
-                            MessageBox.Show(
-                                $"── Seitenmaße ─────────────────────────\n" +
-                                $"Seitenhöhe:         {ps2.PageHeight:F1} pt\n" +
-                                $"TopMargin:          {ps2.TopMargin:F1} pt\n" +
-                                $"BottomMargin:       {ps2.BottomMargin:F1} pt\n" +
-                                $"HeaderDistance:     {ps2.HeaderDistance:F1} pt\n" +
-                                $"FooterDistance:     {ps2.FooterDistance:F1} pt\n\n" +
-                                $"── Footer-Analyse ──────────────────────\n" +
-                                $"Footer-Oberkante (PageH−FooterDist): {footerOberkante2:F1} pt von oben\n" +
-                                $"Eff. unterer Rand:  {effUntererRand2:F1} pt  (Quelle: {quelleBotM})\n" +
-                                $"Satzspiegel-Höhe:   {satzspiegelH2:F1} pt\n\n" +
-                                $"── Finaler Zielbereich ─────────────────\n" +
-                                $"Breite: {availW_pt:F0} pt  (Quelle: {quelleB})\n" +
-                                $"Höhe:   {availH_pt:F0} pt  (Quelle: {quelleH})\n\n" +
-                                $"── Bild ────────────────────────────────\n" +
-                                $"Breite: {nativeW_eff:F0} pt\n" +
-                                $"Höhe:   {nativeH_eff:F0} pt",
-                                "DIAGNOSE – Zielbereich",
-                                MessageBoxButton.OK, MessageBoxImage.Information)));
-                    }
-
                     double scaleW      = nativeW_eff > 0 ? availW_pt / nativeW_eff : 1.0;
                     double scaleH      = nativeH_eff > 0 ? availH_pt / nativeH_eff : 1.0;
                     double globalScale = Math.Min(1.0, Math.Min(scaleW, scaleH));
@@ -3056,12 +3024,7 @@ namespace StatikManager.Modules.Werkzeuge
                     if (globalScale < 0.99)
                     {
                         int prozent = (int)Math.Round(globalScale * 100.0);
-                        // ── DIAGNOSE (testweise): Bild passt nicht ──────────────
-                        Dispatcher.Invoke(new Action(() =>
-                            MessageBox.Show(
-                                $"Bild passt nicht.\nErforderliche Skalierung: {prozent} %\nSkalierungsdialog folgt.",
-                                "DIAGNOSE – Bild zu groß", MessageBoxButton.OK, MessageBoxImage.Information)));
-
+                        App.LogFehler("Export/Skalierung", $"Bild passt nicht, Skalierung erforderlich: {prozent} %");
                         SkalierungWahl wahl = SkalierungWahl.Abbrechen;
                         Dispatcher.Invoke(new Action(() =>
                         {
