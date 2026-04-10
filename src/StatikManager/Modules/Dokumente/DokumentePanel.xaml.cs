@@ -1769,11 +1769,115 @@ namespace StatikManager.Modules.Dokumente
             WordVorschau.Navigate("about:blank");
         }
 
-        // ── WordAutoRefreshService-Callbacks (Stubs – werden in Task 5 implementiert) ──
+        // ── WordAutoRefreshService-Events ─────────────────────────────────────
 
-        private void OnWordKonvertierungGestartet() { }
-        private void OnWordVorschauBereit(string basisPdfPfad) { }
-        private void OnWordKonvertierungFehler(string fehler) { }
+        private void OnWordKonvertierungGestartet()
+        {
+            // Auf UI-Thread (vom Service per BeginInvoke geliefert)
+            TxtWordLadeStatus.Text = "Vorschau wird aktualisiert …";
+        }
+
+        private void OnWordVorschauBereit(string basisPdfPfad)
+        {
+            // Auf UI-Thread. Scroll-Position merken, Seiten neu rendern, Position wiederherstellen.
+            if (_aktiverDateipfad == null) return;
+            if (WordInfoPanel.Visibility != Visibility.Visible) return;
+
+            var scrollPos = WordScrollViewer.VerticalOffset;
+
+            _wordVorschauCts?.Cancel();
+            var cts = new CancellationTokenSource();
+            _wordVorschauCts = cts;
+            var token = cts.Token;
+            var pfad  = _aktiverDateipfad;
+            int myGen = _ladeGeneration;
+
+            Logger.Info("WordAutoRefresh",
+                $"VorschauBereit: {Path.GetFileName(pfad)}, ScrollPos={scrollPos:F0}");
+
+            var t = new Thread(() =>
+            {
+                try { AppZustand.RenderSem.Wait(token); }
+                catch (OperationCanceledException) { return; }
+                try
+                {
+                    if (token.IsCancellationRequested) return;
+
+                    var bilder = new List<BitmapSource>();
+                    var lib = DocLib.Instance;
+                    using var docReader = lib.GetDocReader(
+                        basisPdfPfad,
+                        new PageDimensions(WordRenderBreite, WordRenderBreite * 2));
+                    int n = docReader.GetPageCount();
+
+                    for (int i = 0; i < n; i++)
+                    {
+                        if (token.IsCancellationRequested) return;
+                        try
+                        {
+                            using var pageReader = docReader.GetPageReader(i);
+                            var raw = pageReader.GetImage();
+                            int w = pageReader.GetPageWidth(), h = pageReader.GetPageHeight();
+                            if (raw == null || w <= 0 || h <= 0 || raw.Length < w * h * 4) continue;
+
+                            PdfRenderer.KompositioniereGegenWeiss(raw, w, h);
+                            var bmp = BitmapSource.Create(w, h, 96, 96,
+                                PixelFormats.Bgra32, null, raw, w * 4);
+                            bmp.Freeze();
+                            bilder.Add(bmp);
+                        }
+                        catch (Exception ex)
+                        {
+                            Logger.Warn("WordAutoRefresh", $"Seite {i + 1} übersprungen: {ex.Message}");
+                        }
+                    }
+
+                    if (token.IsCancellationRequested) return;
+
+                    var bilderFinal  = bilder;
+                    var scrollFinal  = scrollPos;
+                    Dispatcher.BeginInvoke(new Action(() =>
+                    {
+                        if (token.IsCancellationRequested || myGen != _ladeGeneration) return;
+                        _wordBasisPdf     = basisPdfPfad;
+                        _wordSeitenBilder = bilderFinal;
+                        BaueWordSeitenPanel();
+                        TxtWordLadeStatus.Text = bilderFinal.Count > 0
+                            ? $"{bilderFinal.Count} Seite(n) – aktualisiert"
+                            : "Vorschau nicht verfügbar";
+                        // Scroll-Position nach Layout wiederherstellen
+                        Dispatcher.BeginInvoke(new Action(() =>
+                            WordScrollViewer.ScrollToVerticalOffset(scrollFinal)),
+                            DispatcherPriority.Loaded);
+                    }));
+                }
+                catch (OperationCanceledException) { }
+                catch (Exception ex)
+                {
+                    App.LogFehler("OnWordVorschauBereit", App.GetExceptionKette(ex));
+                    Dispatcher.BeginInvoke(new Action(() =>
+                    {
+                        if (token.IsCancellationRequested || myGen != _ladeGeneration) return;
+                        TxtWordLadeStatus.Text = "⚠ Vorschau-Aktualisierung fehlgeschlagen";
+                    }));
+                }
+                finally
+                {
+                    AppZustand.RenderSem.Release();
+                }
+            })
+            { IsBackground = true, Name = "WordAutoRefreshRender" };
+            t.SetApartmentState(ApartmentState.STA);
+            t.Start();
+        }
+
+        private void OnWordKonvertierungFehler(string fehler)
+        {
+            // Auf UI-Thread. Altes Vorschaubild bleibt — nur Status aktualisieren.
+            TxtWordLadeStatus.Text = "⚠ Vorschau veraltet";
+            Logger.Warn("WordAutoRefresh", $"Fehler gemeldet: {fehler}");
+            // AppZustand.SetzeStatus wurde bereits vom Service gesetzt
+        }
 
         // LöscheCacheFürDatei → PdfCache.LöscheCacheFürDatei
 
