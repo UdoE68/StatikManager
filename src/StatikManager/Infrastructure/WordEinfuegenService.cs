@@ -155,6 +155,14 @@ namespace StatikManager.Infrastructure
                 if (_wordApp != null)
                 {
                     _ = _wordApp.Version;
+                    // Nur sichtbare Word-Instanzen verwenden – unsichtbare sind interne
+                    // Batch-Prozesse (WortDateienBatchZuPdf) und dürfen hier nicht verwendet werden.
+                    if (!_wordApp.Visible)
+                    {
+                        Marshal.ReleaseComObject(_wordApp);
+                        _wordApp = null;
+                        return null;
+                    }
                     return _wordApp;
                 }
             }
@@ -165,7 +173,13 @@ namespace StatikManager.Infrastructure
 
             try
             {
-                _wordApp = (Word.Application)Marshal.GetActiveObject("Word.Application");
+                var app = (Word.Application)Marshal.GetActiveObject("Word.Application");
+                if (!app.Visible)
+                {
+                    Marshal.ReleaseComObject(app);
+                    return null;
+                }
+                _wordApp = app;
                 return _wordApp;
             }
             catch
