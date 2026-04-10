@@ -35,6 +35,7 @@ _ReSharper*/
 # Lokale Einstellungen / Secrets
 *.env
 appsettings.Local.json
+.claude/settings.local.json
 
 # Logs
 *.log
