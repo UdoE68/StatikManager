@@ -55,6 +55,7 @@ namespace StatikManager.Modules.Dokumente
         private DispatcherTimer?         _abdeckungTimer;
         private readonly FileWatcherService  _fileWatcher;
         private readonly OrdnerWatcherService _ordnerWatcher;
+        private readonly WordAutoRefreshService _wordAutoRefresh;
 
         // Alle pdfium-Zugriffe laufen über AppZustand.RenderSem,
         // das auch PdfSchnittEditor.LadePdf nutzt → keine parallelen nativen Zugriffe.
@@ -124,6 +125,11 @@ namespace StatikManager.Modules.Dokumente
 
             _fileWatcher = new FileWatcherService(Dispatcher);
             _fileWatcher.DateiGeändert += OnDateiGeändert;
+
+            _wordAutoRefresh = new WordAutoRefreshService(Dispatcher);
+            _wordAutoRefresh.KonvertierungGestartet      += OnWordKonvertierungGestartet;
+            _wordAutoRefresh.VorschauBereit              += OnWordVorschauBereit;
+            _wordAutoRefresh.KonvertierungFehlgeschlagen += OnWordKonvertierungFehler;
 
             _ordnerWatcher = new OrdnerWatcherService(Dispatcher);
             _ordnerWatcher.OrdnerGeändert += AktualisiereNurStruktur;
@@ -757,17 +763,20 @@ namespace StatikManager.Modules.Dokumente
                         // damit kein paralleler pdfium-Zugriff entsteht.
                         _wordZoomCts?.Cancel();
                         _wordVorschauCts?.Cancel();
+                        _wordAutoRefresh.Stoppe();
                         ZeigeSchnittEditor();
                         AppZustand.Instanz.SetzeStatus("Lade PDF: " + Path.GetFileName(pfad) + " …");
                         PdfEditor.LadePdf(pfad);
                         // GibUI() kommt via AppZustand.LadeZustandGeändert aus PdfSchnittEditor
                         break;
                     case VorschauTyp.WordVorschau:
+                        _wordAutoRefresh.Starte(pfad, _cacheDir);
                         ZeigeWordInfo(pfad);
                         AppZustand.Instanz.SetzeStatus("Word: " + Path.GetFileName(pfad));
                         // GibUI() kommt aus den Dispatcher-Callbacks in StarteWordVorschauRendern
                         break;
                     case VorschauTyp.Browser:
+                        _wordAutoRefresh.Stoppe();
                         ZeigeBrowser(mitAbdeckung: false);
                         if (DateiTypen.IstHtmlDatei(Path.GetExtension(pfad)))
                         {
@@ -790,11 +799,13 @@ namespace StatikManager.Modules.Dokumente
                         GibUI(); // synchron: Navigation ist fire-and-forget
                         break;
                     case VorschauTyp.JsonVorschau:
+                        _wordAutoRefresh.Stoppe();
                         ZeigeBrowser(mitAbdeckung: false);
                         ZeigeJsonVorschau(pfad);
                         GibUI(); // synchron: kein Hintergrundladevorgang
                         break;
                     case VorschauTyp.KeinVorschau:
+                        _wordAutoRefresh.Stoppe();
                         ZeigeBrowser(mitAbdeckung: false);
                         ZeigeKeinVorschauHinweis(pfad);
                         GibUI(); // synchron: kein Hintergrundladevorgang
@@ -1742,11 +1753,11 @@ namespace StatikManager.Modules.Dokumente
             PdfCache.LöscheCacheFürDatei(_aktiverDateipfad, _cacheDir);
             AppZustand.Instanz.SetzeStatus("Datei geändert – Vorschau wird aktualisiert …");
 
-            // Word-Dateien nutzen WordInfoPanel + StarteWordVorschauRendern, nicht den Browser.
+            // Word-Dateien: Konvertierung via WordAutoRefreshService (kein Reset der Vorschau)
             if (DateiTypen.IstWordDatei(Path.GetExtension(_aktiverDateipfad)))
             {
-                Logger.Info("AutoRefresh", "Word-Datei → ZeigeWordInfo");
-                ZeigeWordInfo(_aktiverDateipfad);
+                Logger.Info("AutoRefresh", "Word-Datei → WordAutoRefreshService");
+                _wordAutoRefresh.DateiGeändertGemeldet();
                 return;
             }
 
@@ -1757,6 +1768,12 @@ namespace StatikManager.Modules.Dokumente
             _dokumentGeladen = false;
             WordVorschau.Navigate("about:blank");
         }
+
+        // ── WordAutoRefreshService-Callbacks (Stubs – werden in Task 5 implementiert) ──
+
+        private void OnWordKonvertierungGestartet() { }
+        private void OnWordVorschauBereit(string basisPdfPfad) { }
+        private void OnWordKonvertierungFehler(string fehler) { }
 
         // LöscheCacheFürDatei → PdfCache.LöscheCacheFürDatei
 
