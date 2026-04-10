@@ -3196,6 +3196,7 @@ namespace StatikManager.Modules.Werkzeuge
                     Dispatcher.BeginInvoke(new Action(() =>
                     {
                         TxtInfo.Text = $"Exportiert: {seiteNr} Seite(n) → {dateiName}";
+                        AppZustand.Instanz.MeldeWordExport(zielPfad);
                         if (MessageBox.Show(
                             $"Word-Dokument erstellt:\n{zielPfad}\n\nJetzt öffnen?",
                             "Export fertig", MessageBoxButton.YesNo,
