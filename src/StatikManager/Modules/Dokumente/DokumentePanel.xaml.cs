@@ -895,6 +895,7 @@ namespace StatikManager.Modules.Dokumente
                 : _cacheDir;
 
             App.LogFehler("WordVorschau", $"[DEBUG] Starte: {Path.GetFileName(pfad)}");
+            Logger.Info("AutoRefresh", $"StarteWordVorschauRendern: {Path.GetFileName(pfad)}, Gen={_ladeGeneration}");
 
             var t = new Thread(() =>
             {
@@ -1736,8 +1737,18 @@ namespace StatikManager.Modules.Dokumente
             // Wird vom FileWatcherService nach 2-s-Debounce auf dem UI-Thread aufgerufen.
             if (_aktiverDateipfad == null) return;
 
+            Logger.Info("AutoRefresh", $"OnDateiGeändert: {Path.GetFileName(_aktiverDateipfad)}");
+
             PdfCache.LöscheCacheFürDatei(_aktiverDateipfad, _cacheDir);
             AppZustand.Instanz.SetzeStatus("Datei geändert – Vorschau wird aktualisiert …");
+
+            // Word-Dateien nutzen WordInfoPanel + StarteWordVorschauRendern, nicht den Browser.
+            if (DateiTypen.IstWordDatei(Path.GetExtension(_aktiverDateipfad)))
+            {
+                Logger.Info("AutoRefresh", "Word-Datei → ZeigeWordInfo");
+                ZeigeWordInfo(_aktiverDateipfad);
+                return;
+            }
 
             // Erst zu about:blank navigieren – das verwirft den IE-Cache
             // für die bisherige PDF-URL vollständig.

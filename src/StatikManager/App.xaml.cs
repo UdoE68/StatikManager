@@ -149,13 +149,7 @@ namespace StatikManager
                                 {
                                     Application.Current.Dispatcher.Invoke(() =>
                                     {
-                                        var result = MessageBox.Show(
-                                            $"Zum Projektordner wechseln?\n\n{neuerPfad}",
-                                            "StatikManager",
-                                            MessageBoxButton.YesNo,
-                                            MessageBoxImage.Question);
-                                        if (result == MessageBoxResult.Yes)
-                                            Core.AppZustand.Instanz.SetzeProjekt(neuerPfad);
+                                        Core.AppZustand.Instanz.SetzeProjekt(neuerPfad);
                                     });
                                 }
                             }
