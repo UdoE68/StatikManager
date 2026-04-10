@@ -136,6 +136,7 @@ namespace StatikManager.Modules.Dokumente
 
             // UI-Freigabe wenn PdfSchnittEditor SetzeLaden(false) signalisiert
             AppZustand.Instanz.LadeZustandGeändert += aktiv => { if (!aktiv) GibUI(); };
+            AppZustand.Instanz.WordExportAbgeschlossen += OnWordExportAbgeschlossen;
 
             // Kein Sitzungsprojekt: erstes sichtbares Projekt aus der Liste laden
             Loaded += (_, _) =>
@@ -1879,6 +1880,22 @@ namespace StatikManager.Modules.Dokumente
             TxtWordLadeStatus.Text = "⚠ Vorschau veraltet";
             Logger.Warn("WordAutoRefresh", $"Fehler gemeldet: {fehler}");
             // AppZustand.SetzeStatus wurde bereits vom Service gesetzt
+        }
+
+        private void OnWordExportAbgeschlossen(string docxPfad)
+        {
+            // Nur reagieren wenn exportierte Datei im aktiven Projektordner liegt
+            if (_projektPfad == null) return;
+            if (!docxPfad.StartsWith(_projektPfad, StringComparison.OrdinalIgnoreCase)) return;
+            if (!File.Exists(docxPfad)) return;
+
+            // Dateiliste aktualisieren damit neue .docx im Baum erscheint
+            AktualisiereNurStruktur();
+
+            // .docx als aktive Vorschau laden → WordAutoRefreshService startet automatisch
+            LadeVorschau(docxPfad);
+
+            AppZustand.Instanz.SetzeStatus("Word-Export geöffnet: " + Path.GetFileName(docxPfad));
         }
 
         // LöscheCacheFürDatei → PdfCache.LöscheCacheFürDatei
