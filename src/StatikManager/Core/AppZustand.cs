@@ -78,5 +78,14 @@ namespace StatikManager.Core
 
         public void FordeModulWechsel(string modulId, string dateipfad)
             => ModulWechselAngefordert?.Invoke(modulId, dateipfad);
+
+        // ── Word-Export ───────────────────────────────────────────────────────
+
+        /// <summary>Wird ausgelöst wenn ein PDF erfolgreich nach Word exportiert wurde.
+        /// Parameter: vollständiger Pfad der erzeugten .docx-Datei.</summary>
+        public event Action<string>? WordExportAbgeschlossen;
+
+        public void MeldeWordExport(string docxPfad)
+            => WordExportAbgeschlossen?.Invoke(docxPfad);
     }
 }
