@@ -62,6 +62,7 @@ namespace StatikManager.Infrastructure
             _retryTimer = null;
             _retryAusstehend = false;
             _pfad     = null;
+            _cacheDir = "";
         }
 
         /// <summary>
@@ -89,12 +90,13 @@ namespace StatikManager.Infrastructure
             _cts = cts;
             var token = cts.Token;
 
-            // Cache löschen damit WortDateiZuPdf neu konvertiert
-            PdfCache.LöscheCacheFürDatei(pfad, cacheDir);
-
+            // Fallback-CacheDir berechnen bevor Cache gelöscht und Ziel-Pfad berechnet wird
             var effektiverCacheDir = string.IsNullOrEmpty(cacheDir)
                 ? Path.Combine(Path.GetTempPath(), "StatikManager", "preview")
                 : cacheDir;
+
+            // Cache löschen damit WortDateiZuPdf neu konvertiert
+            PdfCache.LöscheCacheFürDatei(pfad, effektiverCacheDir);
 
             var basisPdf = PdfCache.GetBasisPdfPfad(pfad, effektiverCacheDir);
             Directory.CreateDirectory(Path.GetDirectoryName(basisPdf)!);
@@ -179,7 +181,7 @@ namespace StatikManager.Infrastructure
                     }));
                 }
             })
-            { IsBackground = true, Name = "WordAutoRefresh" };
+            { IsBackground = true, Name = istRetry ? "WordAutoRefresh[Retry]" : "WordAutoRefresh" };
             t.SetApartmentState(ApartmentState.STA);
             t.Start();
         }
