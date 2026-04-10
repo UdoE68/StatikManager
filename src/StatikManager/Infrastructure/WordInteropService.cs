@@ -15,18 +15,25 @@ namespace StatikManager.Infrastructure
     {
         /// <summary>
         /// Öffnet eine Word-Datei unsichtbar und exportiert sie als PDF.
+        /// Die Quelldatei wird in eine temporäre Kopie geöffnet, damit das Original
+        /// nicht gesperrt wird (verhindert COMException wenn Nutzer die Datei gleichzeitig in
+        /// Word geöffnet hat und speichern möchte).
         /// </summary>
         public static void WortDateiZuPdf(string quellPfad, string zielpfad)
         {
             Logger.Info("Word→PDF", $"Starte: {System.IO.Path.GetFileName(quellPfad)}");
             Word.Application? wordApp = null;
             Word.Document?    doc     = null;
+            string tempKopie = Path.Combine(
+                Path.GetTempPath(),
+                "sm_pdf_" + Guid.NewGuid().ToString("N") + Path.GetExtension(quellPfad));
             try
             {
+                File.Copy(quellPfad, tempKopie, overwrite: true);
                 wordApp = new Word.Application { Visible = false };
-                wordApp.DisplayAlerts = Word.WdAlertLevel.wdAlertsNone;  // keine Dialoge auch wenn Datei bereits offen
+                wordApp.DisplayAlerts = Word.WdAlertLevel.wdAlertsNone;
                 doc     = wordApp.Documents.Open(
-                              FileName: quellPfad, ReadOnly: true,
+                              FileName: tempKopie, ReadOnly: true,
                               AddToRecentFiles: false, Visible: false);
                 doc.ExportAsFixedFormat(
                     OutputFileName: zielpfad,
@@ -39,6 +46,7 @@ namespace StatikManager.Infrastructure
                 wordApp?.Quit();
                 if (doc     != null) Marshal.ReleaseComObject(doc);
                 if (wordApp != null) Marshal.ReleaseComObject(wordApp);
+                try { File.Delete(tempKopie); } catch { }
             }
         }
 
@@ -70,17 +78,22 @@ namespace StatikManager.Infrastructure
                     var pdfPfad = PdfCache.GetBasisPdfPfad(file.FullName, cacheDir);
                     if (PdfCache.CacheGültig(pdfPfad, file.FullName)) continue;
 
+                    // Temporäre Kopie der Word-Datei verwenden, damit das Original
+                    // während der Konvertierung nicht gesperrt wird.
+                    string tempKopie = Path.Combine(
+                        Path.GetTempPath(),
+                        "sm_batch_" + Guid.NewGuid().ToString("N") + file.Extension);
+                    Word.Document? doc = null;
                     try
                     {
                         var tmpPfad = pdfPfad + ".tmp";
-                        var doc = wordApp.Documents.Open(
-                            FileName: file.FullName, ReadOnly: true,
+                        File.Copy(file.FullName, tempKopie, overwrite: true);
+                        doc = wordApp.Documents.Open(
+                            FileName: tempKopie, ReadOnly: true,
                             AddToRecentFiles: false, Visible: false);
                         doc.ExportAsFixedFormat(
                             OutputFileName: tmpPfad,
                             ExportFormat:   Word.WdExportFormat.wdExportFormatPDF);
-                        doc.Close(SaveChanges: false);
-                        Marshal.ReleaseComObject(doc);
 
                         if (File.Exists(pdfPfad)) File.Delete(pdfPfad);
                         File.Move(tmpPfad, pdfPfad);
@@ -88,6 +101,15 @@ namespace StatikManager.Infrastructure
                     catch (Exception ex)
                     {
                         Logger.Warn("BatchPdf", $"{file.Name}: {ex.Message}");
+                    }
+                    finally
+                    {
+                        if (doc != null)
+                        {
+                            try { doc.Close(SaveChanges: false); } catch { }
+                            try { Marshal.ReleaseComObject(doc); } catch { }
+                        }
+                        try { File.Delete(tempKopie); } catch { }
                     }
                 }
             }
