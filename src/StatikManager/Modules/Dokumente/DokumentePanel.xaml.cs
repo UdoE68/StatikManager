@@ -1750,9 +1750,6 @@ namespace StatikManager.Modules.Dokumente
 
             Logger.Info("AutoRefresh", $"OnDateiGeändert: {Path.GetFileName(_aktiverDateipfad)}");
 
-            PdfCache.LöscheCacheFürDatei(_aktiverDateipfad, _cacheDir);
-            AppZustand.Instanz.SetzeStatus("Datei geändert – Vorschau wird aktualisiert …");
-
             // Word-Dateien: Konvertierung via WordAutoRefreshService (kein Reset der Vorschau)
             if (DateiTypen.IstWordDatei(Path.GetExtension(_aktiverDateipfad)))
             {
@@ -1761,9 +1758,9 @@ namespace StatikManager.Modules.Dokumente
                 return;
             }
 
-            // Erst zu about:blank navigieren – das verwirft den IE-Cache
-            // für die bisherige PDF-URL vollständig.
-            // LoadCompleted erkennt das Flag und startet die Neuladung.
+            // Nicht-Word: Cache löschen und Browser-Vorschau aktualisieren
+            PdfCache.LöscheCacheFürDatei(_aktiverDateipfad, _cacheDir);
+            AppZustand.Instanz.SetzeStatus("Datei geändert – Vorschau wird aktualisiert …");
             _autoRefreshPfad = _aktiverDateipfad;
             _dokumentGeladen = false;
             WordVorschau.Navigate("about:blank");
@@ -1846,6 +1843,10 @@ namespace StatikManager.Modules.Dokumente
                         TxtWordLadeStatus.Text = bilderFinal.Count > 0
                             ? $"{bilderFinal.Count} Seite(n) – aktualisiert"
                             : "Vorschau nicht verfügbar";
+                        // Zoom neu berechnen (fit-width, konsistent mit initialem Laden)
+                        Dispatcher.BeginInvoke(
+                            new Action(() => AktualisiereWordZoom(WordAnsicht.Seitenbreite)),
+                            DispatcherPriority.Loaded);
                         // Scroll-Position nach Layout wiederherstellen
                         Dispatcher.BeginInvoke(new Action(() =>
                             WordScrollViewer.ScrollToVerticalOffset(scrollFinal)),
