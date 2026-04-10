@@ -628,10 +628,40 @@ namespace StatikManager.Modules.Dokumente
             {
                 parent.Items.Add(new TreeViewItem
                 {
-                    Header = DateiTypen.DateiIcon(file.Extension) + " " + file.Name,
+                    Header = ErstelleTreeItemHeader(file),
                     Tag    = file.FullName
                 });
             }
+        }
+
+        private static object ErstelleTreeItemHeader(FileInfo file)
+        {
+            string text = DateiTypen.DateiIcon(file.Extension) + " " + file.Name;
+
+            bool istPositionsPdf =
+                string.Equals(file.Name, "position.pdf", StringComparison.OrdinalIgnoreCase) &&
+                File.Exists(Path.Combine(file.DirectoryName ?? "", "position.html"));
+
+            if (!istPositionsPdf)
+                return text;
+
+            var punkt = new System.Windows.Shapes.Ellipse
+            {
+                Width  = 8,
+                Height = 8,
+                Fill   = new SolidColorBrush(Color.FromRgb(7, 99, 191)),
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(0, 0, 5, 0)
+            };
+            var label = new System.Windows.Controls.TextBlock
+            {
+                Text = text,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            var panel = new StackPanel { Orientation = Orientation.Horizontal };
+            panel.Children.Add(punkt);
+            panel.Children.Add(label);
+            return panel;
         }
 
         private bool EnthältDateien(DirectoryInfo dir)
