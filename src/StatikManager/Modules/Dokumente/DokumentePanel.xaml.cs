@@ -645,22 +645,19 @@ namespace StatikManager.Modules.Dokumente
             if (!istPositionsPdf)
                 return text;
 
-            var punkt = new System.Windows.Shapes.Ellipse
+            var panel = new StackPanel { Orientation = Orientation.Horizontal };
+            panel.Children.Add(new TextBlock
             {
-                Width  = 8,
-                Height = 8,
-                Fill   = new SolidColorBrush(Color.FromRgb(7, 99, 191)),
-                VerticalAlignment = VerticalAlignment.Center,
-                Margin = new Thickness(0, 0, 5, 0)
-            };
-            var label = new System.Windows.Controls.TextBlock
+                Text       = "● ",
+                Foreground = new SolidColorBrush(Color.FromRgb(7, 99, 191)),
+                FontSize   = 10,
+                VerticalAlignment = VerticalAlignment.Center
+            });
+            panel.Children.Add(new TextBlock
             {
                 Text = text,
                 VerticalAlignment = VerticalAlignment.Center
-            };
-            var panel = new StackPanel { Orientation = Orientation.Horizontal };
-            panel.Children.Add(punkt);
-            panel.Children.Add(label);
+            });
             return panel;
         }
 
