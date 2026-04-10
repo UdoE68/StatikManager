@@ -4,6 +4,31 @@ Was nicht funktioniert hat und warum. Damit niemand denselben Fehler zweimal mac
 
 ---
 
+## 2026-04-06 – PdfSchnittEditor: Overlay-Ansatz für Blocktrennung (grundlegend falsch)
+
+**Versuch 1:** `ZeicheSeite(i)` zeichnet vollständige Seite, darüber transparente `Border`-Rechtecke als "Teile".
+**Fehler:** Keine echte Trennung. Beim Löschen eines Teils bleibt das Bitmap der ganzen Seite sichtbar (Durchscheinen). Kein echter unabhängiger Block.
+**Grund:** Das Altmodell (`_scherenschnitte` als Koordinatenliste + `GetTeilGrenzen()` on-the-fly) produziert niemals physisch getrennte Elemente. Es ist ein Masken-Modell, kein Block-Modell.
+
+**Versuch 2:** `ZeicheSeiteAlsBlöcke()` in `ZeicheSeite()` eingebaut — CroppedBitmap pro Block, aber `_contentBlocks` parallel zu `_scherenschnitte` gepflegt.
+**Fehler:** Zwei konkurrierende Wahrheiten. `_contentBlocks` wurde von `SplitContentBlockBeiSchnitt()` korrekt geteilt, aber das Rendering las weiter aus `_seitenBilder[i]` (Altmodell). Kein echter physischer Split im Anzeigebild.
+**Grund:** Solange `_scherenschnitte` die führende Datenstruktur für Rendering UND Klick-Zuordnung ist, kann `_contentBlocks` kein echter Ersatz werden — nur ein Begleiter.
+
+**Versuch 3 (ERFOLGREICH — Prototyp):** Vollständig isolierter `BlockEditorPrototype` ohne Altmodell.
+- Einzige Wahrheit: `List<ProtoBlock>` + `_originalBitmap`
+- `SplitBlock()` entfernt Original, fügt zwei neue ein — keine Koordinatenliste
+- `RenderBlocks()` zeichnet nur `CroppedBitmap`-Ausschnitte — kein Gesamtbild
+- `DeleteBlock()` setzt `IsDeleted=true` → Block wird von `RenderBlocks()` vollständig übersprungen
+**Ergebnis:** PASS — Tests A/B/C bestanden, User-Bestätigung 2026-04-06.
+
+**Lessons Learned:**
+1. Ein Overlay ist kein Block. Solange das Ursprungsbild gezeichnet wird, gibt es keinen echten Split.
+2. Zwei parallele Datenmodelle (`_scherenschnitte` + `_contentBlocks`) können nicht gleichzeitig führend sein — eines muss gewinnen.
+3. Der richtige Migrationspfad: `_contentBlocks` wird die einzige Render-Wahrheit; `_scherenschnitte` dient nur noch als Eingabe für `SplitBlock()`.
+4. Kein Umbau am bestehenden Editor, solange der Prototyp nicht bewiesen hat, dass das Modell funktioniert.
+
+---
+
 ## 2026-04-05 – PdfSchnittEditor: AutoSpeichern / Datei gesperrt (4 Fehlversuche)
 
 **Versuch 1:** `AutoSpeichern()` schreibt direkt auf `_pdfPfad`
@@ -24,7 +49,23 @@ Was nicht funktioniert hat und warum. Damit niemand denselben Fehler zweimal mac
 
 **Versuch 6 (neu):** Komplette Neustrategie: AutoSpeichern baut PDF in MemoryStream,
 schreibt dann mit WriteAllBytes (kein File.Replace), Retry-Loop bei IOException
-**Ergebnis:** PASS — Build 0 Fehler, Commit ee2bc04, EXE-Zeitstempel 06.04.2026 00:05:11
+**Ergebnis:** PASS fuer Datei-Locking, aber AutoSpeichern als Konzept wurde danach aufgegeben.
+
+**Versuch 7 — PARADIGMENWECHSEL (ERFOLGREICH, 2026-04-06):** AutoSpeichern vollstaendig ersetzt durch Dirty-Flag + expliziten Speicher-Dialog.
+- `_hatUngespeicherteAenderungen` Feld statt AutoSpeichern-Aufrufen
+- `FrageObSpeichern()` zeigt Ja/Nein/Abbrechen-Dialog bei Positionswechsel und App-Schliessen
+- `SpeichereAenderungen()` mit Fehler-MessageBox statt lautlosem Scheitern
+- `MainWindow.OnClosing()` (nicht OnClosed!) fuer Window-Closing-Interceptor
+**Ergebnis:** PASS — Benutzer hat volle Kontrolle, kein unsichtbares Fehlschlagen mehr
+
+**Lehre zum Paradigma:** AutoSpeichern ist prinzipiell fehleranfaellig (Datei gesperrt, Benutzer bemerkt Fehler nicht). Wenn der Benutzer aktiv speichern oder verwerfen kann, ist das robuster und benutzerfreundlicher.
+
+**Versuch 8 — WriteAllBytes auf _pdfPfad (2026-04-06, letzter Datei-Lock-Fehler):**
+`SpeichereAenderungen()` und `AutoSpeichern()` verwendeten noch `WriteAllBytes(_pdfPfad, bytes)` als Schreibziel.
+**Fehler:** pdfium haelt `_pdfPfad` dauerhaft gesperrt — WriteAllBytes schlaegt immer fehl, auch mit MemoryStream-Aufbau und Retry-Schleife.
+**Grund:** Das Problem liegt nicht beim Lesen (bereits auf MemoryStream umgestellt), sondern beim Schreiben: pdfium gibt den Lese-Handle auf `_pdfPfad` nie frei solange das Dokument angezeigt wird. Die Datei kann daher prinzipiell nicht als Schreibziel dienen.
+**Loesung:** `BearbeitetPfadFuer(_pdfPfad)` Muster — Original-PDF ist permanent read-only, alle Schreibvorgaenge gehen auf `<name>_bearbeitet.pdf`. Siehe LEARNINGS.md 2026-04-06.
+**Verifikation:** `grep "WriteAllBytes(_pdfPfad"` → 0 Treffer. PASS.
 
 **Versuch 5 (ERFOLGREICH):** Alle Zugriffe auf MemoryStream umgestellt
 **Was hat funktioniert:**

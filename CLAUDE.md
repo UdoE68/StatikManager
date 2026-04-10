@@ -7,6 +7,35 @@ StatikManager ist eine modulare WPF-Desktopanwendung (.NET Framework 4.8, x64) z
 
 ---
 
+## Superpowers Plugin — Pflicht-Skills
+
+Das Superpowers Plugin ist installiert. Folgende Skills sind PFLICHT:
+
+1. **VOR JEDEM BUGFIX**: Skill `superpowers:systematic-debugging` aufrufen
+   - Erst diagnostizieren, dann fixen
+   - Keine Vermutungen — nur verifizierte Ursachen
+
+2. **VOR JEDEM NEUEN FEATURE**: Skills `superpowers:brainstorming` + `superpowers:writing-plans` aufrufen
+   - Erst planen, dann implementieren
+   - Plan in pruefbare Schritte zerlegen
+
+3. **VOR JEDEM "FERTIG"**: Skill `superpowers:verification-before-completion` aufrufen
+   - Bevor du sagst "fertig" oder "deployed": Verifiziere dass es funktioniert
+   - KEIN COMMIT ohne diesen Skill
+
+4. **BEI 2+ UNABHAENGIGEN TEILAUFGABEN**: Skill `superpowers:dispatching-parallel-agents` aufrufen
+
+5. **AM ENDE EINES FEATURE-BRANCH**: Skill `superpowers:finishing-a-development-branch` aufrufen
+
+Diese Skills ergaenzen den bestehenden Agenten-Workflow:
+- `@orchestrator` plant und delegiert
+- `@bibliothekar` liefert Vorwissen
+- `@entwickler` nutzt `systematic-debugging` und `writing-plans`
+- `@tester` nutzt `verification-before-completion`
+- **KEIN COMMIT OHNE TESTER-OK UND `verification-before-completion`**
+
+---
+
 ## Agenten-Struktur
 
 ### .claude/agents/ (Claude Code Sub-Agenten)
@@ -74,6 +103,28 @@ C:\KI\StatikManager_V1\src\StatikManager\Start_Debug.bat
 ```
 
 **Wichtig vor dem Build:** StatikManager.exe beenden (pdfium.dll wird sonst gesperrt).
+
+---
+
+## Build- und Start-Reihenfolge (PFLICHT)
+
+**NIEMALS den StatikManager mittendrin starten.** Erst wenn ALLE Code-Aenderungen fertig sind.
+
+Reihenfolge:
+1. Code aendern (alle Dateien fertigstellen)
+2. Build ausfuehren (MSBuild, siehe oben)
+3. Pruefen: 0 Fehler?
+4. `git add` + `git commit` + `git push`
+5. ERST DANN: StatikManager starten ueber `Start_Debug.bat`
+
+**Vor dem Start IMMER alte Instanz beenden:**
+```powershell
+taskkill /f /im StatikManager.exe 2>nul
+# Dann:
+C:\KI\StatikManager_V1\src\StatikManager\Start_Debug.bat
+```
+
+**Zustaendigkeit:** Der User testet den StatikManager selbst. Claude Code startet ihn nur um dem User die fertige Version bereitzustellen — nicht zum Zwischentesten.
 
 ---
 
