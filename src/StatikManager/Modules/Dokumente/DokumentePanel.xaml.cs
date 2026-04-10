@@ -1839,8 +1839,9 @@ namespace StatikManager.Modules.Dokumente
                     Dispatcher.BeginInvoke(new Action(() =>
                     {
                         if (token.IsCancellationRequested || myGen != _ladeGeneration) return;
-                        _wordBasisPdf     = basisPdfPfad;
-                        _wordSeitenBilder = bilderFinal;
+                        _wordBasisPdf      = basisPdfPfad;
+                        _wordSeitenBilder  = bilderFinal;
+                        _wordRenderBreite  = WordRenderBreite;
                         BaueWordSeitenPanel();
                         TxtWordLadeStatus.Text = bilderFinal.Count > 0
                             ? $"{bilderFinal.Count} Seite(n) – aktualisiert"
