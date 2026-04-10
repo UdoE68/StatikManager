@@ -34,6 +34,15 @@
 
                 <!-- Module fügen hier ihre Menüs ein (Index 1, vor Hilfe) -->
 
+                <MenuItem Header="_Entwickler">
+                    <MenuItem Header="Block-Prototyp öffnen"
+                              Click="MenüBlockPrototyp_Click"
+                              ToolTip="Isolierter Prototyp für physische Blocktrennung (V1)"/>
+                    <MenuItem Header="BlockEditor Prototype öffnen"
+                              Click="MenüBlockEditorPrototype_Click"
+                              ToolTip="Isolierter Prototyp – Variante B (Split / Delete / Render)"/>
+                </MenuItem>
+
                 <MenuItem x:Name="MenüHilfe" Header="_Hilfe">
                     <MenuItem Header="Über Statik-Manager"
                               Click="MenüÜber_Click"/>
