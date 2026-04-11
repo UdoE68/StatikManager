@@ -17,6 +17,11 @@
                 BorderThickness="0,0,0,1"
                 Padding="8,6">
             <WrapPanel Orientation="Horizontal">
+                <Button x:Name="BtnZurückZuDokumenten" Content="← Zu Dokumenten"
+                        Height="24" Padding="8,0" Margin="0,0,8,0"
+                        ToolTip="Zurück zur Dokumentenverwaltung und Dateiliste"
+                        Click="BtnZurückZuDokumenten_Click"/>
+                <Separator Width="1" Height="18" Background="#BBB" Margin="0,0,8,0"/>
                 <Button x:Name="BtnBildLaden" Content="&#x1F5BC; Bild laden"
                         Height="24" Padding="8,0" Margin="0,0,4,0"
                         Click="BtnBildLaden_Click"/>

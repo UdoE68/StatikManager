@@ -23,6 +23,9 @@ namespace StatikManager.Core
         /// <summary>Zuletzt in Word geöffnetes/verwendetes Dokument.</summary>
         public string? WordExportLetztesDokument { get; set; }
 
+        /// <summary>Zuletzt aktives Shell-Modul (Modul-Kennung: dokumente, bildschnitt, wordexport).</summary>
+        public string? AktivesModulId { get; set; }
+
         // ── PdfSchnittEditor – Darstellung ────────────────────────────────────
 
         public double ZoomFaktor       { get; set; } = 1.0;

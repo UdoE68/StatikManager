@@ -23,7 +23,11 @@ using Word = Microsoft.Office.Interop.Word;
 
 namespace StatikManager.Modules.Dokumente
 {
-    public partial class DokumentePanel : UserControl
+    public partial class DokumentePanel : UserControl,
+        ISitzungsWiederherstellung,
+        ISitzungsPersistenz,
+        IProjektLadenAusShell,
+        IHauptfensterSchliessenPruefung
     {
         // ── Felder ────────────────────────────────────────────────────────────
 
@@ -198,6 +202,8 @@ namespace StatikManager.Modules.Dokumente
                 LadeVorschau(sitzung.AktiveDatei!);
             }
         }
+
+        public bool DarfHauptfensterSchliessen() => PdfEditor.FrageObSpeichern();
 
         public void ProjektLaden()
         {

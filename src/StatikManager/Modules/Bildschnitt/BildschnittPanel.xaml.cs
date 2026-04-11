@@ -22,7 +22,7 @@ using DrawRect = System.Drawing.Rectangle;
 
 namespace StatikManager.Modules.Bildschnitt
 {
-    public partial class BildschnittPanel : UserControl
+    public partial class BildschnittPanel : UserControl, IBeiModulAnzeige
     {
         // Felder
         private System.Drawing.Bitmap? _quellBitmap;
@@ -102,6 +102,12 @@ namespace StatikManager.Modules.Bildschnitt
                 LadePdfDatei(pfad);
             else
                 LadeBildDatei(pfad);
+        }
+
+        public void BeiAnzeige(string? kontextDateiPfad)
+        {
+            if (!string.IsNullOrEmpty(kontextDateiPfad))
+                LadeDatei(kontextDateiPfad!);
         }
 
         private void LadeBildDatei(string pfad)
@@ -658,6 +664,9 @@ namespace StatikManager.Modules.Bildschnitt
         }
 
         // ── Button-Handler ─────────────────────────────────────────────────────
+
+        private void BtnZurückZuDokumenten_Click(object sender, RoutedEventArgs e)
+            => AppZustand.Instanz.FordeModulWechsel("dokumente", string.Empty);
 
         public void BtnBildLaden_Click(object sender, RoutedEventArgs e)
         {

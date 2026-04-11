@@ -1,5 +1,4 @@
 using StatikManager.Core;
-using StatikManager.Modules.Bildschnitt;
 using StatikManager.Modules.Dokumente;
 using StatikManager.Modules.WordExport;
 using System.Windows;
@@ -66,7 +65,7 @@ namespace StatikManager
             // ── Module registrieren ──────────────────────────────────────────
             // Neues Modul hinzufügen: einfach eine weitere Zeile hier.
             _modulManager.Registrieren(new DokumenteModul());
-            _modulManager.Registrieren(new BildschnittModul());
+            _modulManager.Registrieren(new Modules.Bildschnitt.BildschnittModul());
             _modulManager.Registrieren(new WordExportModul());
 
             // ── Module in die Shell integrieren ─────────────────────────────
@@ -75,9 +74,10 @@ namespace StatikManager
             // ── Sitzung nach vollständiger UI-Initialisierung laden ──────────
             Loaded += (_, _) =>
             {
-                var sitzung = Core.SitzungsZustand.Laden();
-                if (HauptInhalt.Content is Modules.Dokumente.DokumentePanel panel)
-                    panel.SitzungWiederherstellen(sitzung);
+                var sitzung = SitzungsZustand.Laden();
+                if (HauptInhalt.Content is ISitzungsWiederherstellung sw)
+                    sw.SitzungWiederherstellen(sitzung);
+                WechsleZuModulNachSitzung(sitzung);
             };
         }
 
@@ -111,9 +111,31 @@ namespace StatikManager
             {
                 if (!_panels.TryGetValue(modulId, out var panel)) return;
                 HauptInhalt.Content = panel;
-                if (panel is Modules.Bildschnitt.BildschnittPanel bp)
-                    bp.LadeDatei(pfad);
+                if (panel is IBeiModulAnzeige bei)
+                    bei.BeiAnzeige(pfad);
             };
+        }
+
+        private string ErmittleAktivesModulId()
+        {
+            var content = HauptInhalt.Content;
+            foreach (var kv in _panels)
+            {
+                if (ReferenceEquals(kv.Value, content))
+                    return kv.Key;
+            }
+            return "dokumente";
+        }
+
+        private void WechsleZuModulNachSitzung(SitzungsZustand sitzung)
+        {
+            var id = sitzung.AktivesModulId;
+            if (string.IsNullOrEmpty(id) || id == "dokumente") return;
+            if (!_panels.TryGetValue(id!, out var panel)) return;
+
+            HauptInhalt.Content = panel;
+            if (panel is IBeiModulAnzeige bei)
+                bei.BeiAnzeige(sitzung.AktiveDatei);
         }
 
         // ── Status-Anzeige ────────────────────────────────────────────────────
@@ -161,14 +183,8 @@ namespace StatikManager
 
         private void MenüProjektLaden_Click(object sender, RoutedEventArgs e)
         {
-            // Weiterleitung an das Dokumente-Modul (generisch über Interface möglich,
-            // hier direkt da "Projekt laden" im Datei-Menü Konvention ist)
-            var modul = _modulManager.FindeModul("dokumente") as DokumenteModul;
-            // Alternativ: IModul um eine "AktionAusführen(string)" Methode erweitern
-            // Für jetzt: der Werkzeugleisten-Button des Moduls übernimmt diese Aufgabe.
-            // Dieser Klick delegiert an das Panel des Moduls über den gleichen Weg.
-            if (HauptInhalt.Content is Modules.Dokumente.DokumentePanel panel)
-                panel.ProjektLaden();
+            if (HauptInhalt.Content is IProjektLadenAusShell p)
+                p.ProjektLaden();
         }
 
         private void MenüEinstellungen_Click(object sender, RoutedEventArgs e)
@@ -222,22 +238,25 @@ namespace StatikManager
 
         protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
         {
-            if (HauptInhalt.Content is Modules.Dokumente.DokumentePanel panel)
+            if (HauptInhalt.Content is IHauptfensterSchliessenPruefung pr &&
+                !pr.DarfHauptfensterSchliessen())
             {
-                if (!panel.PdfEditor.FrageObSpeichern())
-                {
-                    e.Cancel = true;
-                    return;
-                }
+                e.Cancel = true;
+                return;
             }
             base.OnClosing(e);
         }
 
         protected override void OnClosed(System.EventArgs e)
         {
-            // Sitzung speichern bevor Ressourcen freigegeben werden
-            if (HauptInhalt.Content is Modules.Dokumente.DokumentePanel panel)
-                Core.SitzungsZustand.Speichern(panel.SitzungSpeichern());
+            // Sitzung immer vom Dokumente-Panel (Quelle der Wahrheit), unabhängig vom sichtbaren Modul
+            if (_panels.TryGetValue("dokumente", out var dokumentePanel) &&
+                dokumentePanel is ISitzungsPersistenz sp)
+            {
+                var sitzung = sp.SitzungSpeichern();
+                sitzung.AktivesModulId = ErmittleAktivesModulId();
+                SitzungsZustand.Speichern(sitzung);
+            }
 
             base.OnClosed(e);
             _modulManager.AllesBereinigen();
