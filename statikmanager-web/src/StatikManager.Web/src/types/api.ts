@@ -2,6 +2,15 @@ export type SessionResponse = {
   rootPath: string | null;
 };
 
+export type SavedProject = {
+  path: string;
+  name: string | null;
+};
+
+export type ProjectsResponse = {
+  projects: SavedProject[];
+};
+
 export type ErrorResponse = {
   error: string;
 };

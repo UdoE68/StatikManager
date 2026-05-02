@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using StatikManager.Api.Contracts;
+using StatikManager.Api.Contracts.Projects;
 using StatikManager.Api.Contracts.Session;
 using StatikManager.Api.Infrastructure;
 using StatikManager.Api.Services;
@@ -14,6 +15,7 @@ builder.Services.ConfigureHttpJsonOptions(o =>
 });
 
 builder.Services.AddSingleton<IFileSystemService, FileSystemService>();
+builder.Services.AddSingleton<ProjectListStore>();
 
 builder.Services.AddCors(options =>
 {
@@ -91,6 +93,28 @@ app.MapGet("/api/preview/stream", (string? path, IFileSystemService fs) =>
     var fehler = fs.TryOpenPreviewRead(path, out var stream, out var contentType);
     return fehler is null
         ? Results.File(stream!, contentType: contentType, enableRangeProcessing: true)
+        : Results.BadRequest(new ErrorResponse(fehler));
+});
+
+app.MapGet("/api/projects", (ProjectListStore store) =>
+    Results.Json(new ProjectsResponse(store.GetAll())));
+
+app.MapPost("/api/projects", (AddProjectRequest? req, ProjectListStore store) =>
+{
+    if (req is null)
+        return Results.BadRequest(new ErrorResponse("Anfrage fehlt oder ist ungültig."));
+
+    var fehler = store.TryAdd(req.Path, req.Name);
+    return fehler is null
+        ? Results.Json(new ProjectsResponse(store.GetAll()))
+        : Results.BadRequest(new ErrorResponse(fehler));
+});
+
+app.MapDelete("/api/projects", (string? path, ProjectListStore store) =>
+{
+    var fehler = store.TryRemove(path);
+    return fehler is null
+        ? Results.Json(new ProjectsResponse(store.GetAll()))
         : Results.BadRequest(new ErrorResponse(fehler));
 });
 

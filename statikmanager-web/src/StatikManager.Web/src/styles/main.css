@@ -103,6 +103,23 @@ body {
   border-radius: 3px;
 }
 
+.select--compact {
+  flex: 1 1 12rem;
+  min-width: 10rem;
+  max-width: min(28rem, 100%);
+  padding: 0.22rem 0.4rem;
+  font-size: 0.8rem;
+  border: 1px solid #aaa;
+  border-radius: 3px;
+  background: #fff;
+}
+
+.app-header-row-projekte {
+  margin-top: 0.35rem;
+  padding-top: 0.35rem;
+  border-top: 1px solid #ddd;
+}
+
 .btn--compact {
   padding: 0.28rem 0.55rem;
   font-size: 0.78rem;

@@ -6,6 +6,7 @@ import type {
   ErrorResponse,
   FileKind,
   FileMetaResponse,
+  ProjectsResponse,
   SessionResponse,
 } from "./types/api";
 
@@ -30,6 +31,14 @@ app.innerHTML = `
             placeholder="z. B. C:\\Projekte\\MeinStatikProjekt" spellcheck="false" />
           <button id="btn-oeffnen" type="button" class="btn btn--compact">Öffnen</button>
           <button id="btn-ordner" type="button" class="btn btn-secondary btn--compact">Ordner …</button>
+        </div>
+        <div class="app-header-row app-header-row-projekte">
+          <label class="label label--inline" for="projekt-select">Projekte</label>
+          <select id="projekt-select" class="select select--compact" aria-label="Gespeicherte Projekte">
+            <option value="">— Projekt wählen —</option>
+          </select>
+          <button id="btn-projekt-speichern" type="button" class="btn btn-secondary btn--compact" title="Aktuelles Projekt in die Liste speichern">Speichern</button>
+          <button id="btn-projekt-entfernen" type="button" class="btn btn-secondary btn--compact" title="Ausgewähltes Projekt aus der Liste entfernen">Entfernen</button>
         </div>
         <p id="ordner-hinweis" class="hinweis hinweis--compact" role="status" hidden></p>
         <p id="fehler" class="fehler fehler--compact" role="alert" hidden></p>
@@ -635,22 +644,118 @@ async function ladeDateiMeta(relPath: string): Promise<void> {
   }
 }
 
+async function ladeProjektliste(aktuellesRoot: string | null): Promise<void> {
+  const sel = el("#projekt-select", "select");
+  try {
+    const res = await fetch("/api/projects");
+    const raw: unknown = await res.json();
+    if (!res.ok) return;
+    const data = raw as ProjectsResponse;
+    const projects = data.projects ?? [];
+    sel.innerHTML = '<option value="">— Projekt wählen —</option>';
+    for (const p of projects) {
+      const opt = document.createElement("option");
+      opt.value = p.path;
+      opt.textContent =
+        p.name && p.name.trim() !== "" ? `${p.name} — ${p.path}` : p.path;
+      sel.appendChild(opt);
+    }
+    if (aktuellesRoot) {
+      const found = projects.some((p) => p.path === aktuellesRoot);
+      sel.value = found ? aktuellesRoot : "";
+    } else {
+      sel.value = "";
+    }
+  } catch {
+    /* API optional */
+  }
+}
+
+async function aktuellesProjektInListeSpeichern(): Promise<void> {
+  setFehler(null);
+  try {
+    const res = await fetch("/api/session/root");
+    const data = (await res.json()) as SessionResponse;
+    if (!res.ok || !data.rootPath) {
+      setFehler("Kein geöffnetes Projekt — bitte zuerst einen Ordner öffnen.");
+      return;
+    }
+    const res2 = await fetch("/api/projects", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: data.rootPath, name: null }),
+    });
+    const raw2: unknown = await res2.json();
+    if (!res2.ok) {
+      const err = raw2 as Partial<ErrorResponse>;
+      setFehler(
+        typeof err.error === "string" ? err.error : `Fehler (${res2.status})`
+      );
+      return;
+    }
+    await ladeProjektliste(data.rootPath);
+  } catch {
+    setFehler("Projektliste konnte nicht aktualisiert werden.");
+  }
+}
+
+async function projektAusListeEntfernen(): Promise<void> {
+  const sel = el("#projekt-select", "select");
+  const path = sel.value;
+  if (!path) {
+    setFehler("Bitte ein Projekt in der Liste auswählen.");
+    return;
+  }
+  setFehler(null);
+  try {
+    const res = await fetch(
+      `/api/projects?path=${encodeURIComponent(path)}`,
+      { method: "DELETE" }
+    );
+    const raw: unknown = await res.json();
+    if (!res.ok) {
+      const err = raw as Partial<ErrorResponse>;
+      setFehler(
+        typeof err.error === "string" ? err.error : `Fehler (${res.status})`
+      );
+      return;
+    }
+    const resSess = await fetch("/api/session/root");
+    const session = (await resSess.json()) as SessionResponse;
+    await ladeProjektliste(session.rootPath ?? null);
+  } catch {
+    setFehler("Projekt konnte nicht entfernt werden.");
+  }
+}
+
+function aufProjektSelectChange(): void {
+  const sel = el("#projekt-select", "select");
+  const path = sel.value;
+  if (!path) return;
+  void projektRootSetzen(path);
+}
+
 async function ladeSession(): Promise<void> {
+  let rootFuerSelect: string | null = null;
   try {
     const res = await fetch("/api/session/root");
     const data = (await res.json()) as SessionResponse;
     if (!res.ok) {
       setFehler("Session konnte nicht geladen werden.");
+      await ladeProjektliste(null);
       return;
     }
     setRootAnzeige(data.rootPath ?? null);
     setFehler(null);
+    rootFuerSelect = data.rootPath ?? null;
     if (data.rootPath) {
+      el("#pfad-input", "input").value = data.rootPath;
       browsePfadAktuell = "";
       metaLeeren();
       ordnerHinweisAusblenden();
       await initialisiereBrowseBaum();
     } else {
+      el("#pfad-input", "input").value = "";
       el("#browse-liste", "ul").innerHTML = "";
       aktualisiereBrowseToolbar();
       setBrowseFehler(null);
@@ -658,7 +763,9 @@ async function ladeSession(): Promise<void> {
     }
   } catch {
     setFehler("Verbindung zur API fehlgeschlagen.");
+    rootFuerSelect = null;
   }
+  await ladeProjektliste(rootFuerSelect);
 }
 
 async function projektRootSetzen(pfad: string): Promise<void> {
@@ -688,6 +795,8 @@ async function projektRootSetzen(pfad: string): Promise<void> {
     browsePfadAktuell = "";
     metaLeeren();
     await initialisiereBrowseBaum();
+    el("#pfad-input", "input").value = session.rootPath ?? "";
+    await ladeProjektliste(session.rootPath ?? null);
   } catch {
     setFehler("Projekt konnte nicht gesetzt werden (Netzwerk).");
   }
@@ -784,3 +893,13 @@ btnHoch.addEventListener("click", () => {
 const browseListe = el("#browse-liste", "ul");
 browseListe.addEventListener("click", aufBrowseListeKlick);
 browseListe.addEventListener("keydown", aufBrowseListeKey);
+
+const projektSelect = el("#projekt-select", "select");
+projektSelect.addEventListener("change", aufProjektSelectChange);
+
+el("#btn-projekt-speichern", "button").addEventListener("click", () =>
+  void aktuellesProjektInListeSpeichern()
+);
+el("#btn-projekt-entfernen", "button").addEventListener("click", () =>
+  void projektAusListeEntfernen()
+);
