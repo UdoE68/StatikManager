@@ -648,6 +648,7 @@ async function ladeSession(): Promise<void> {
     if (data.rootPath) {
       browsePfadAktuell = "";
       metaLeeren();
+      ordnerHinweisAusblenden();
       await initialisiereBrowseBaum();
     } else {
       el("#browse-liste", "ul").innerHTML = "";
@@ -683,6 +684,7 @@ async function projektRootSetzen(pfad: string): Promise<void> {
     const session = raw as SessionResponse;
     setRootAnzeige(session.rootPath ?? null);
     setFehler(null);
+    ordnerHinweisAusblenden();
     browsePfadAktuell = "";
     metaLeeren();
     await initialisiereBrowseBaum();
@@ -694,6 +696,12 @@ async function projektRootSetzen(pfad: string): Promise<void> {
 async function projektOeffnen(): Promise<void> {
   const input = el("#pfad-input", "input");
   await projektRootSetzen(input.value);
+}
+
+function ordnerHinweisAusblenden(): void {
+  const h = el("#ordner-hinweis", "p");
+  h.hidden = true;
+  h.textContent = "";
 }
 
 function ordnerHinweisAnzeigen(): void {
