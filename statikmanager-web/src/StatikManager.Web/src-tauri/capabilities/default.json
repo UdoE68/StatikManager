@@ -1,0 +1,9 @@
+{
+  "identifier": "default",
+  "description": "Hauptfenster: Kernfunktionen und nativer Ordnerdialog",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "dialog:default"
+  ]
+}

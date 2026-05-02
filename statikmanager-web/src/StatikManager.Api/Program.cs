@@ -3,7 +3,6 @@ using System.Text.Json.Serialization;
 using StatikManager.Api.Contracts;
 using StatikManager.Api.Contracts.Projects;
 using StatikManager.Api.Contracts.Session;
-using StatikManager.Api.Infrastructure;
 using StatikManager.Api.Services;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -51,25 +50,6 @@ app.MapPost("/api/session/root", (SetRootRequest? req, IFileSystemService fs) =>
     return fehler is null
         ? Results.Json(fs.GetSession())
         : Results.BadRequest(new ErrorResponse(fehler));
-});
-
-app.MapPost("/api/session/pick-root", (IFileSystemService fs) =>
-{
-    try
-    {
-        var path = WindowsFolderPicker.PickFolderOnStaThread();
-        if (path is null)
-            return Results.NoContent();
-
-        var fehler = fs.TrySetRoot(path);
-        return fehler is null
-            ? Results.Json(fs.GetSession())
-            : Results.BadRequest(new ErrorResponse(fehler));
-    }
-    catch (Exception ex)
-    {
-        return Results.BadRequest(new ErrorResponse($"Ordnerdialog fehlgeschlagen: {ex.Message}"));
-    }
 });
 
 app.MapGet("/api/browse", (string? path, IFileSystemService fs) =>

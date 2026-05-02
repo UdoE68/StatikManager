@@ -7,3 +7,6 @@
 # Node / Vite
 **/node_modules/
 src/StatikManager.Api/wwwroot/
+
+# Tauri (Rust)
+src/StatikManager.Web/src-tauri/target/

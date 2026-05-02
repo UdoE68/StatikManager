@@ -1,5 +1,7 @@
 import "./styles/main.css";
 
+import { isTauri } from "@tauri-apps/api/core";
+
 import type {
   BrowseEntry,
   BrowseResponse,
@@ -864,7 +866,30 @@ function ordnerHinweisAnzeigen(): void {
   const h = el("#ordner-hinweis", "p");
   h.hidden = false;
   h.textContent =
-    "Bitte Projektpfad oben einfügen. Der native Ordnerdialog wird später über Desktop-Wrapper/Tauri umgesetzt.";
+    "Im Browser: Projektpfad manuell eintragen und „Öffnen“ wählen. Nativer Ordnerdialog: App per „npm run tauri:dev“ (Tauri) starten — siehe TAURI-DESKTOP.md.";
+}
+
+async function ordnerWaehlenKlick(): Promise<void> {
+  if (!isTauri()) {
+    ordnerHinweisAnzeigen();
+    return;
+  }
+  try {
+    const { open } = await import("@tauri-apps/plugin-dialog");
+    const selected = await open({
+      title: "Projektordner wählen",
+      directory: true,
+      multiple: false,
+    });
+    if (selected === null) return;
+    const path = Array.isArray(selected) ? selected[0] : selected;
+    if (typeof path !== "string" || path === "") return;
+    el("#pfad-input", "input").value = path;
+    await projektOeffnen();
+  } catch (e) {
+    console.error(e);
+    setFehler("Ordnerdialog konnte nicht geöffnet werden.");
+  }
 }
 
 function aufBrowseListeKlick(ev: MouseEvent): void {
@@ -923,7 +948,7 @@ const btn = el("#btn-oeffnen", "button");
 btn.addEventListener("click", () => void projektOeffnen());
 
 const btnOrdner = el("#btn-ordner", "button");
-btnOrdner.addEventListener("click", () => ordnerHinweisAnzeigen());
+btnOrdner.addEventListener("click", () => void ordnerWaehlenKlick());
 
 const input = el("#pfad-input", "input");
 input.addEventListener("keydown", (ev) => {

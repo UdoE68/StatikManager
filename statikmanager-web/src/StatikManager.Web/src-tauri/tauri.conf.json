@@ -1,0 +1,30 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "StatikManager Web",
+  "version": "0.0.1",
+  "identifier": "de.statikmanager.web",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:5173",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../StatikManager.Api/wwwroot"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "StatikManager Web",
+        "width": 1280,
+        "height": 800,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": false,
+    "targets": "msi"
+  }
+}
