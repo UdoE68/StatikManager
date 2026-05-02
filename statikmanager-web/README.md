@@ -1,6 +1,8 @@
-# StatikManager Web (Milestone 1)
+# StatikManager Web
 
 Separates Mini-Projekt: ASP.NET Core Minimal API + Vite/TypeScript. Kein Bezug zum WPF-StatikManager im übergeordneten Ordner.
+
+**Stand:** Milestone 2 (Projekt-Root setzen/abfragen, nur Arbeitsspeicher).
 
 ## Voraussetzungen
 
@@ -30,7 +32,7 @@ npm install
 npm run dev
 ```
 
-Browser: `http://localhost:5173` — ruft `/api/health` über den Proxy auf.
+Browser: `http://localhost:5173` — UI für Projektpfad und Session-API (Proxy `/api`).
 
 ### Variante B – Ein Prozess (Frontend aus `wwwroot`)
 
@@ -51,11 +53,13 @@ dotnet run
 
 Browser: `http://localhost:5156` — dieselbe Origin für UI und API.
 
-## API (Milestone 1)
+## API
 
-| Methode | Pfad           | Antwort        |
-|---------|----------------|----------------|
-| GET     | `/api/health`  | `{ "ok": true }` |
+| Methode | Pfad                 | Antwort / Hinweis |
+|---------|----------------------|-------------------|
+| GET     | `/api/health`        | `{ "ok": true }` |
+| GET     | `/api/session/root`  | `{ "rootPath": "<absolut>" \| null }` — gesetztes Root (nur RAM) |
+| POST    | `/api/session/root`  | Body: `{ "rootPath": "..." }`. Erfolg **200** und gleiche JSON wie GET. Fehler **400** mit `{ "error": "..." }` (z. B. leerer Pfad, existiert nicht, ist eine Datei). |
 
 ## Build / Typecheck
 

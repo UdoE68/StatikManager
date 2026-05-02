@@ -10,13 +10,87 @@ body {
 }
 
 .shell {
-  max-width: 40rem;
+  max-width: 42rem;
   margin: 3rem auto;
   padding: 0 1rem;
 }
 
 .muted {
   color: #666;
+}
+
+.muted-small {
+  font-size: 0.9rem;
+  margin-top: 2rem;
+}
+
+.h2 {
+  font-size: 1.1rem;
+  margin: 0 0 0.75rem;
+}
+
+.panel {
+  margin-top: 1.25rem;
+}
+
+.label {
+  display: block;
+  font-size: 0.875rem;
+  margin-bottom: 0.35rem;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.input {
+  flex: 1 1 12rem;
+  min-width: 0;
+  padding: 0.45rem 0.6rem;
+  font: inherit;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+}
+
+.btn {
+  padding: 0.45rem 0.85rem;
+  font: inherit;
+  cursor: pointer;
+  border: 1px solid #333;
+  border-radius: 4px;
+  background: #f4f4f4;
+}
+
+.btn:hover {
+  background: #eaeaea;
+}
+
+.fehler {
+  margin: 0.75rem 0 0;
+  padding: 0.5rem 0.65rem;
+  border-radius: 4px;
+  background: #fde8e8;
+  color: #8b1a1a;
+  border: 1px solid #f0b4b4;
+}
+
+.aktuell-label {
+  margin: 1rem 0 0.25rem;
+  font-size: 0.875rem;
+  color: #444;
+}
+
+.root-anzeige {
+  margin: 0;
+  padding: 0.5rem 0.65rem;
+  background: #f7f7f7;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  word-break: break-all;
+  font-size: 0.95rem;
 }
 
 .status.ok {
