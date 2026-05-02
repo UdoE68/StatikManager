@@ -245,18 +245,86 @@ body {
   overflow: auto;
 }
 
+.browse-tree-root ul {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 0.85rem;
+}
+
+.browse-tree-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.75rem;
+  flex: 1;
+  min-width: 0;
+}
+
+.browse-tree-toggle {
+  flex: 0 0 auto;
+  width: 1.35rem;
+  height: 1.35rem;
+  padding: 0;
+  margin: 0;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  cursor: pointer;
+  font-size: 0.75rem;
+  line-height: 1;
+  color: #333;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.browse-tree-toggle:hover,
+.browse-tree-toggle:focus {
+  background: #e0e8f4;
+  outline: none;
+}
+
+.browse-tree-expanded > .browse-tree-row .browse-tree-toggle {
+  transform: rotate(90deg);
+}
+
+.browse-tree-leaf-spacer {
+  flex: 0 0 1.35rem;
+  width: 1.35rem;
+}
+
+.browse-tree-children {
+  margin: 0;
+  padding: 0 0 0 0.5rem;
+  border-left: 1px solid #e8e8e8;
+}
+
+.browse-tree-root > .browse-tree-item > .browse-tree-row,
+.browse-tree-children > .browse-tree-item > .browse-tree-row {
+  padding: 0.45rem 0.65rem 0.45rem 0.35rem;
+  border-bottom: 1px solid #eee;
+}
+
+.browse-tree-root > .browse-tree-item:last-child > .browse-tree-row,
+.browse-tree-children > .browse-tree-item:last-child > .browse-tree-row {
+  border-bottom: none;
+}
+
+.browse-tree-node.browse-tree-current-dir > .browse-tree-row {
+  background: #f0f7ff;
+  box-shadow: inset 3px 0 0 #6ae;
+}
+
 .browse-zeile {
   display: flex;
   flex-wrap: wrap;
   justify-content: space-between;
   gap: 0.5rem 1rem;
-  padding: 0.45rem 0.65rem;
-  border-bottom: 1px solid #eee;
   font-size: 0.95rem;
 }
 
-.browse-zeile:last-child {
-  border-bottom: none;
+.browse-tree-node {
+  margin: 0;
 }
 
 .browse-dir {
@@ -278,6 +346,15 @@ body {
 .browse-dir:focus {
   background: #eef6ff;
   outline: none;
+}
+
+.browse-tree-current-dir:hover,
+.browse-tree-current-dir:focus {
+  background: #fafafa;
+}
+
+.browse-tree-current-dir > .browse-tree-row:hover {
+  background: #e5f0fc;
 }
 
 .browse-leer {

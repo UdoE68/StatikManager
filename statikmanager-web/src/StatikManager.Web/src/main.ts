@@ -14,7 +14,6 @@ if (!app) throw new Error("#app fehlt");
 
 let browsePfadAktuell = "";
 let ausgewaehlteDateiRel: string | null = null;
-let letzteBrowseEntries: BrowseEntry[] = [];
 
 app.innerHTML = `
   <main class="shell">
@@ -45,7 +44,7 @@ app.innerHTML = `
             <span id="browse-pfad-anzeige" class="browse-pfad"></span>
           </div>
           <p id="browse-fehler" class="fehler" role="alert" hidden></p>
-          <ul id="browse-liste" class="browse-liste" aria-live="polite"></ul>
+          <ul id="browse-liste" class="browse-liste browse-tree-root" role="tree" aria-label="Projektordner"></ul>
         </section>
       </div>
 
@@ -311,50 +310,264 @@ function aktualisiereBrowseToolbar(): void {
       : browsePfadAktuell.replace(/\//g, " \\ ");
 }
 
-function rendereBrowseListe(entries: BrowseEntry[]): void {
-  const ul = el("#browse-liste", "ul");
+function normalisiereRelPfad(rel: string): string {
+  return rel.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+}
+
+function findeDirektesOrdnerKind(
+  ul: HTMLUListElement,
+  relPath: string
+): HTMLLIElement | null {
+  for (const child of ul.children) {
+    if (child.tagName !== "LI") continue;
+    const li = child as HTMLLIElement;
+    if (!li.classList.contains("browse-dir")) continue;
+    if (li.dataset.relativePath === relPath) return li;
+  }
+  return null;
+}
+
+function erzeugeDateiKnoten(e: BrowseEntry): HTMLLIElement {
+  const li = document.createElement("li");
+  li.className =
+    "browse-tree-node browse-zeile browse-file browse-tree-item";
+  li.dataset.relativePath = e.relativePath;
+  li.dataset.isDirectory = "false";
+  li.tabIndex = 0;
+  li.setAttribute("role", "treeitem");
+
+  const row = document.createElement("div");
+  row.className = "browse-tree-row browse-tree-row-leaf";
+  const spacer = document.createElement("span");
+  spacer.className = "browse-tree-leaf-spacer";
+  spacer.setAttribute("aria-hidden", "true");
+  const name = document.createElement("span");
+  name.className = "browse-name";
+  name.textContent = e.name;
+  const meta = document.createElement("span");
+  meta.className = "browse-meta";
+  meta.textContent = `${formatZeit(e.modifiedUtc)} · ${formatBytes(e.sizeBytes)}`;
+  row.append(spacer, name, meta);
+  li.appendChild(row);
+  return li;
+}
+
+function erzeugeOrdnerKnoten(e: BrowseEntry): HTMLLIElement {
+  const li = document.createElement("li");
+  li.className =
+    "browse-tree-node browse-zeile browse-dir browse-tree-item";
+  li.dataset.relativePath = e.relativePath;
+  li.dataset.isDirectory = "true";
+  li.dataset.loaded = "false";
+  li.tabIndex = 0;
+  li.setAttribute("role", "treeitem");
+  li.setAttribute("aria-expanded", "false");
+
+  const row = document.createElement("div");
+  row.className = "browse-tree-row";
+
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.className = "browse-tree-toggle";
+  toggle.setAttribute("aria-expanded", "false");
+  toggle.setAttribute(
+    "aria-label",
+    `Ordner „${e.name}“ ein- oder ausklappen`
+  );
+  toggle.textContent = "\u25B8";
+
+  const name = document.createElement("span");
+  name.className = "browse-dir-label browse-name";
+  name.textContent = e.name;
+
+  const meta = document.createElement("span");
+  meta.className = "browse-meta";
+  meta.textContent = `${formatZeit(e.modifiedUtc)} · Ordner`;
+
+  row.append(toggle, name, meta);
+
+  const kindUl = document.createElement("ul");
+  kindUl.className = "browse-tree-children";
+  kindUl.hidden = true;
+  kindUl.setAttribute("role", "group");
+
+  li.append(row, kindUl);
+  return li;
+}
+
+function fuelleOrdnerKinder(ul: HTMLUListElement, entries: BrowseEntry[]): void {
   ul.innerHTML = "";
   if (entries.length === 0) {
-    const li = document.createElement("li");
-    li.className = "browse-leer";
-    li.textContent = "(Ordner ist leer)";
-    ul.appendChild(li);
+    const leer = document.createElement("li");
+    leer.className = "browse-tree-leer browse-leer";
+    leer.textContent = "(Ordner ist leer)";
+    ul.appendChild(leer);
     return;
   }
-
   for (const e of entries) {
-    const li = document.createElement("li");
-    li.className = "browse-zeile";
-    if (e.isDirectory) {
-      li.classList.add("browse-dir");
-      li.dataset.relativePath = e.relativePath;
-      li.tabIndex = 0;
-      li.setAttribute("role", "button");
-      const name = document.createElement("span");
-      name.className = "browse-name";
-      name.textContent = e.name;
-      const meta = document.createElement("span");
-      meta.className = "browse-meta";
-      meta.textContent = `${formatZeit(e.modifiedUtc)} · Ordner`;
-      li.append(name, meta);
-    } else {
-      li.classList.add("browse-file");
-      li.dataset.relativePath = e.relativePath;
-      li.tabIndex = 0;
-      li.setAttribute("role", "button");
-      if (ausgewaehlteDateiRel === e.relativePath) {
-        li.classList.add("browse-selected");
-        li.setAttribute("aria-current", "true");
-      }
-      const name = document.createElement("span");
-      name.className = "browse-name";
-      name.textContent = e.name;
-      const meta = document.createElement("span");
-      meta.className = "browse-meta";
-      meta.textContent = `${formatZeit(e.modifiedUtc)} · ${formatBytes(e.sizeBytes)}`;
-      li.append(name, meta);
+    ul.appendChild(
+      e.isDirectory ? erzeugeOrdnerKnoten(e) : erzeugeDateiKnoten(e)
+    );
+  }
+}
+
+async function holeBrowseEntries(relPath: string): Promise<BrowseEntry[]> {
+  const query =
+    relPath === "" ? "" : `?path=${encodeURIComponent(relPath)}`;
+  const res = await fetch(`/api/browse${query}`);
+  const raw: unknown = await res.json();
+  if (!res.ok) {
+    const err = raw as Partial<ErrorResponse>;
+    throw new Error(
+      typeof err.error === "string" ? err.error : `Fehler (${res.status})`
+    );
+  }
+  const data = raw as BrowseResponse;
+  return data.entries ?? [];
+}
+
+async function ladeKinderInOrdner(li: HTMLLIElement): Promise<void> {
+  if (li.dataset.loaded === "true") return;
+  const relPath = li.dataset.relativePath ?? "";
+  const entries = await holeBrowseEntries(relPath);
+  const kindUl = li.querySelector(
+    ":scope > ul.browse-tree-children"
+  ) as HTMLUListElement;
+  fuelleOrdnerKinder(kindUl, entries);
+  li.dataset.loaded = "true";
+}
+
+function setToggleExpanded(li: HTMLLIElement, expanded: boolean): void {
+  const btn = li.querySelector(".browse-tree-toggle");
+  const kindUl = li.querySelector(
+    ":scope > ul.browse-tree-children"
+  ) as HTMLUListElement | null;
+  li.classList.toggle("browse-tree-expanded", expanded);
+  btn?.setAttribute("aria-expanded", expanded ? "true" : "false");
+  li.setAttribute("aria-expanded", expanded ? "true" : "false");
+  if (kindUl) kindUl.hidden = !expanded;
+}
+
+async function toggleOrdnerExpand(li: HTMLLIElement): Promise<void> {
+  const wirdGeoeffnet = !li.classList.contains("browse-tree-expanded");
+  if (wirdGeoeffnet) {
+    try {
+      setBrowseFehler(null);
+      await ladeKinderInOrdner(li);
+    } catch (e) {
+      const msg =
+        e instanceof Error ? e.message : "Ordner konnte nicht geladen werden.";
+      setBrowseFehler(msg);
+      return;
     }
-    ul.appendChild(li);
+    setToggleExpanded(li, true);
+  } else {
+    setToggleExpanded(li, false);
+  }
+}
+
+async function expandOrdnerOeffnen(li: HTMLLIElement): Promise<void> {
+  try {
+    setBrowseFehler(null);
+    await ladeKinderInOrdner(li);
+  } catch (e) {
+    const msg =
+      e instanceof Error ? e.message : "Ordner konnte nicht geladen werden.";
+    setBrowseFehler(msg);
+    throw e;
+  }
+  setToggleExpanded(li, true);
+}
+
+async function ensureExpandedPath(relPath: string): Promise<void> {
+  const norm = normalisiereRelPfad(relPath);
+  if (!norm) return;
+
+  const segments = norm.split("/").filter(Boolean);
+  let pathSoFar = "";
+  let parentUl = el("#browse-liste", "ul");
+
+  for (const seg of segments) {
+    pathSoFar = pathSoFar ? `${pathSoFar}/${seg}` : seg;
+    const knoten = findeDirektesOrdnerKind(parentUl, pathSoFar);
+    if (!knoten) break;
+    await expandOrdnerOeffnen(knoten);
+    const nextUl = knoten.querySelector(
+      ":scope > ul.browse-tree-children"
+    ) as HTMLUListElement | null;
+    if (!nextUl) break;
+    parentUl = nextUl;
+  }
+}
+
+function aktualisiereBaumHighlight(): void {
+  const ul = el("#browse-liste", "ul");
+  ul.querySelectorAll("li.browse-tree-node").forEach((node) => {
+    const li = node as HTMLLIElement;
+    const path = li.dataset.relativePath ?? "";
+    if (li.classList.contains("browse-dir")) {
+      const cur = browsePfadAktuell === path;
+      li.classList.toggle("browse-tree-current-dir", cur);
+    }
+    if (li.classList.contains("browse-file")) {
+      const sel =
+        ausgewaehlteDateiRel !== null && ausgewaehlteDateiRel === path;
+      li.classList.toggle("browse-selected", sel);
+      if (sel) li.setAttribute("aria-current", "true");
+      else li.removeAttribute("aria-current");
+    }
+  });
+}
+
+function scrollAktuellenOrdnerInsSichtfeld(): void {
+  const ul = el("#browse-liste", "ul");
+  const hit = ul.querySelector(
+    "li.browse-dir.browse-tree-current-dir"
+  ) as HTMLElement | null;
+  hit?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+}
+
+function baumeRootAusEntries(entries: BrowseEntry[]): void {
+  const ul = el("#browse-liste", "ul");
+  ul.innerHTML = "";
+  fuelleOrdnerKinder(ul, entries);
+  aktualisiereBaumHighlight();
+}
+
+async function navigiereZuOrdner(relPath: string): Promise<void> {
+  browsePfadAktuell = normalisiereRelPfad(relPath);
+  ausgewaehlteDateiRel = null;
+  metaLeeren();
+  aktualisiereBrowseToolbar();
+  try {
+    await ensureExpandedPath(browsePfadAktuell);
+  } catch {
+    /* Fehler bereits via expandOrdnerOeffnen / setBrowseFehler */
+  }
+  aktualisiereBaumHighlight();
+  scrollAktuellenOrdnerInsSichtfeld();
+}
+
+async function initialisiereBrowseBaum(): Promise<void> {
+  browsePfadAktuell = "";
+  ausgewaehlteDateiRel = null;
+  aktualisiereBrowseToolbar();
+  setBrowseFehler(null);
+  metaLeeren();
+
+  const ul = el("#browse-liste", "ul");
+  ul.innerHTML = "";
+
+  try {
+    const entries = await holeBrowseEntries("");
+    baumeRootAusEntries(entries);
+  } catch (e) {
+    const msg =
+      e instanceof Error
+        ? e.message
+        : "Ordnerliste konnte nicht geladen werden (Netzwerk).";
+    setBrowseFehler(msg);
+    baumeRootAusEntries([]);
   }
 }
 
@@ -402,52 +615,18 @@ async function ladeDateiMeta(relPath: string): Promise<void> {
       setMetaFehler(msg);
       el("#meta-inhalt", "div").innerHTML = "";
       vorschauLeeren();
-      rendereBrowseListe(letzteBrowseEntries);
+      aktualisiereBaumHighlight();
       return;
     }
 
     const meta = raw as FileMetaResponse;
     rendereMeta(meta);
-    rendereBrowseListe(letzteBrowseEntries);
+    aktualisiereBaumHighlight();
     await zeigeVorschau(meta);
   } catch {
     setMetaFehler("Metadaten konnten nicht geladen werden (Netzwerk).");
     el("#meta-inhalt", "div").innerHTML = "";
     vorschauLeeren();
-  }
-}
-
-async function ladeBrowse(relPath: string): Promise<void> {
-  browsePfadAktuell = relPath;
-  ausgewaehlteDateiRel = null;
-  aktualisiereBrowseToolbar();
-  setBrowseFehler(null);
-  metaLeeren();
-
-  const query =
-    relPath === "" ? "" : `?path=${encodeURIComponent(relPath)}`;
-
-  try {
-    const res = await fetch(`/api/browse${query}`);
-    const raw: unknown = await res.json();
-
-    if (!res.ok) {
-      const err = raw as Partial<ErrorResponse>;
-      setBrowseFehler(
-        typeof err.error === "string" ? err.error : `Fehler (${res.status})`
-      );
-      letzteBrowseEntries = [];
-      rendereBrowseListe([]);
-      return;
-    }
-
-    const data = raw as BrowseResponse;
-    letzteBrowseEntries = data.entries ?? [];
-    rendereBrowseListe(letzteBrowseEntries);
-  } catch {
-    setBrowseFehler("Ordnerliste konnte nicht geladen werden (Netzwerk).");
-    letzteBrowseEntries = [];
-    rendereBrowseListe([]);
   }
 }
 
@@ -464,10 +643,9 @@ async function ladeSession(): Promise<void> {
     if (data.rootPath) {
       browsePfadAktuell = "";
       metaLeeren();
-      await ladeBrowse("");
+      await initialisiereBrowseBaum();
     } else {
-      letzteBrowseEntries = [];
-      rendereBrowseListe([]);
+      el("#browse-liste", "ul").innerHTML = "";
       aktualisiereBrowseToolbar();
       setBrowseFehler(null);
       metaLeeren();
@@ -502,7 +680,7 @@ async function projektRootSetzen(pfad: string): Promise<void> {
     setFehler(null);
     browsePfadAktuell = "";
     metaLeeren();
-    await ladeBrowse("");
+    await initialisiereBrowseBaum();
   } catch {
     setFehler("Projekt konnte nicht gesetzt werden (Netzwerk).");
   }
@@ -523,35 +701,51 @@ function ordnerHinweisAnzeigen(): void {
 
 function aufBrowseListeKlick(ev: MouseEvent): void {
   const t = ev.target as HTMLElement | null;
-  const li = t?.closest?.("li.browse-dir, li.browse-file") as HTMLLIElement | null;
-  if (!li) return;
-  const p = li.dataset.relativePath;
-  if (p === undefined) return;
-
-  if (li.classList.contains("browse-dir")) {
-    void ladeBrowse(p);
+  if (t?.closest?.("button.browse-tree-toggle")) {
+    const btn = t.closest("button.browse-tree-toggle");
+    const li = btn?.closest("li.browse-dir") as HTMLLIElement | null;
+    if (li) {
+      ev.preventDefault();
+      void toggleOrdnerExpand(li);
+    }
     return;
   }
 
-  if (li.classList.contains("browse-file")) {
-    void ladeDateiMeta(p);
+  const fileLi = t?.closest?.("li.browse-file") as HTMLLIElement | null;
+  if (fileLi?.dataset.relativePath) {
+    void ladeDateiMeta(fileLi.dataset.relativePath);
+    return;
+  }
+
+  const dirLi = t?.closest?.("li.browse-dir") as HTMLLIElement | null;
+  if (dirLi?.dataset.relativePath) {
+    void navigiereZuOrdner(dirLi.dataset.relativePath);
   }
 }
 
 function aufBrowseListeKey(ev: KeyboardEvent): void {
   if (ev.key !== "Enter" && ev.key !== " ") return;
-  const li = ev.target as HTMLElement | null;
-  if (!li?.matches("li.browse-dir, li.browse-file")) return;
-  ev.preventDefault();
-  const p = li.dataset.relativePath;
-  if (p === undefined) return;
+  const t = ev.target as HTMLElement | null;
 
-  if (li.classList.contains("browse-dir")) {
-    void ladeBrowse(p);
+  const toggle = t?.closest?.("button.browse-tree-toggle");
+  if (toggle) {
+    ev.preventDefault();
+    const li = toggle.closest("li.browse-dir") as HTMLLIElement | null;
+    if (li) void toggleOrdnerExpand(li);
     return;
   }
 
-  void ladeDateiMeta(p);
+  const li = t?.closest?.("li.browse-dir, li.browse-file") as
+    | HTMLLIElement
+    | null;
+  if (!li?.dataset.relativePath) return;
+  ev.preventDefault();
+
+  if (li.classList.contains("browse-dir")) {
+    void navigiereZuOrdner(li.dataset.relativePath);
+    return;
+  }
+  void ladeDateiMeta(li.dataset.relativePath);
 }
 
 void checkHealth();
@@ -571,7 +765,7 @@ input.addEventListener("keydown", (ev) => {
 const btnHoch = el("#btn-hoch", "button");
 btnHoch.addEventListener("click", () => {
   const neu = parentRelativePath(browsePfadAktuell);
-  void ladeBrowse(neu);
+  void navigiereZuOrdner(neu);
 });
 
 const browseListe = el("#browse-liste", "ul");
