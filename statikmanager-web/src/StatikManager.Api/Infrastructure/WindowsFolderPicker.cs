@@ -4,20 +4,40 @@ using System.Windows.Forms;
 namespace StatikManager.Api.Infrastructure;
 
 /// <summary>
-/// Öffnet einen Windows-Ordnerdialog auf einem dedizierten STA-Thread.
+/// Öffnet einen Windows-Ordnerdialog ausschließlich auf einem STA-Thread (kein Task.Run, kein async).
 /// </summary>
 internal static class WindowsFolderPicker
 {
-    /// <summary>Gibt den gewählten Pfad zurück oder null bei Abbruch/Fehler im Dialog.</summary>
-    public static string? PickFolder()
-    {
-        string? selected = null;
-        Exception? caught = null;
+    private static readonly object VisualStylesLock = new();
+    private static bool _visualStylesRegistered;
 
-        void Run()
+    private static void EnsureVisualStylesOnce()
+    {
+        lock (VisualStylesLock)
+        {
+            if (_visualStylesRegistered)
+                return;
+            Application.EnableVisualStyles();
+            Application.SetCompatibleTextRenderingDefault(false);
+            _visualStylesRegistered = true;
+        }
+    }
+
+    /// <summary>
+    /// Zeigt den Dialog. Rückgabe: gewählter Pfad, oder <c>null</c> bei Abbruch.
+    /// </summary>
+    /// <exception cref="Exception">Dialog oder WinForms-Fehler.</exception>
+    public static string? PickFolderOnStaThread()
+    {
+        string? auswahl = null;
+        Exception? threadFehler = null;
+
+        void DialogThreadProc()
         {
             try
             {
+                EnsureVisualStylesOnce();
+
                 using var dlg = new FolderBrowserDialog
                 {
                     Description = "Projektordner auswählen",
@@ -25,26 +45,28 @@ internal static class WindowsFolderPicker
                     ShowNewFolderButton = true,
                 };
 
-                if (dlg.ShowDialog() == DialogResult.OK)
-                    selected = dlg.SelectedPath;
+                var dr = dlg.ShowDialog();
+                if (dr == DialogResult.OK)
+                    auswahl = dlg.SelectedPath;
             }
             catch (Exception ex)
             {
-                caught = ex;
+                threadFehler = ex;
             }
         }
 
-        var thread = new Thread(Run)
+        var thread = new Thread(new ThreadStart(DialogThreadProc))
         {
             IsBackground = false,
         };
+
         thread.SetApartmentState(ApartmentState.STA);
         thread.Start();
         thread.Join();
 
-        if (caught is not null)
-            throw caught;
+        if (threadFehler is not null)
+            throw threadFehler;
 
-        return selected;
+        return auswahl;
     }
 }

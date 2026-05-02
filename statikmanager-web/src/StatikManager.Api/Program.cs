@@ -51,12 +51,18 @@ app.MapPost("/api/session/root", (SetRootRequest? req, IFileSystemService fs) =>
         : Results.BadRequest(new ErrorResponse(fehler));
 });
 
-app.MapPost("/api/session/pick-root", () =>
+app.MapPost("/api/session/pick-root", (IFileSystemService fs) =>
 {
     try
     {
-        var path = WindowsFolderPicker.PickFolder();
-        return Results.Json(new PickRootResponse(path));
+        var path = WindowsFolderPicker.PickFolderOnStaThread();
+        if (path is null)
+            return Results.NoContent();
+
+        var fehler = fs.TrySetRoot(path);
+        return fehler is null
+            ? Results.Json(fs.GetSession())
+            : Results.BadRequest(new ErrorResponse(fehler));
     }
     catch (Exception ex)
     {

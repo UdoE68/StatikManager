@@ -6,7 +6,6 @@ import type {
   ErrorResponse,
   FileKind,
   FileMetaResponse,
-  PickRootResponse,
   SessionResponse,
 } from "./types/api";
 
@@ -521,6 +520,10 @@ async function ordnerWaehlen(): Promise<void> {
       method: "POST",
     });
 
+    if (res.status === 204) {
+      return;
+    }
+
     const raw: unknown = await res.json();
 
     if (!res.ok) {
@@ -533,14 +536,14 @@ async function ordnerWaehlen(): Promise<void> {
       return;
     }
 
-    const pick = raw as PickRootResponse;
-    if (pick.rootPath === null || pick.rootPath === "") {
-      return;
-    }
-
+    const session = raw as SessionResponse;
     const input = el("#pfad-input", "input");
-    input.value = pick.rootPath;
-    await projektRootSetzen(pick.rootPath);
+    input.value = session.rootPath ?? "";
+    setRootAnzeige(session.rootPath ?? null);
+    setFehler(null);
+    browsePfadAktuell = "";
+    metaLeeren();
+    await ladeBrowse("");
   } catch {
     setFehler("Ordnerdialog nicht erreichbar (Netzwerk oder Server).");
   }
