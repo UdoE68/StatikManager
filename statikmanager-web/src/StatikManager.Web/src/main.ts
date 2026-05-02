@@ -30,6 +30,7 @@ app.innerHTML = `
         <button id="btn-oeffnen" type="button" class="btn">Projekt öffnen</button>
         <button id="btn-ordner" type="button" class="btn btn-secondary">Ordner wählen</button>
       </div>
+      <p id="ordner-hinweis" class="hinweis" role="status" hidden></p>
       <p id="fehler" class="fehler" role="alert" hidden></p>
       <p class="aktuell-label">Aktuelles Projekt-Root</p>
       <p id="root-anzeige" class="root-anzeige">—</p>
@@ -512,41 +513,12 @@ async function projektOeffnen(): Promise<void> {
   await projektRootSetzen(input.value);
 }
 
-async function ordnerWaehlen(): Promise<void> {
+function ordnerHinweisAnzeigen(): void {
   setFehler(null);
-
-  try {
-    const res = await fetch("/api/session/pick-root", {
-      method: "POST",
-    });
-
-    if (res.status === 204) {
-      return;
-    }
-
-    const raw: unknown = await res.json();
-
-    if (!res.ok) {
-      const err = raw as Partial<ErrorResponse>;
-      setFehler(
-        typeof err.error === "string"
-          ? err.error
-          : `Ordnerdialog: Fehler (${res.status})`
-      );
-      return;
-    }
-
-    const session = raw as SessionResponse;
-    const input = el("#pfad-input", "input");
-    input.value = session.rootPath ?? "";
-    setRootAnzeige(session.rootPath ?? null);
-    setFehler(null);
-    browsePfadAktuell = "";
-    metaLeeren();
-    await ladeBrowse("");
-  } catch {
-    setFehler("Ordnerdialog nicht erreichbar (Netzwerk oder Server).");
-  }
+  const h = el("#ordner-hinweis", "p");
+  h.hidden = false;
+  h.textContent =
+    "Bitte Projektpfad oben einfügen. Der native Ordnerdialog wird später über Desktop-Wrapper/Tauri umgesetzt.";
 }
 
 function aufBrowseListeKlick(ev: MouseEvent): void {
@@ -589,7 +561,7 @@ const btn = el("#btn-oeffnen", "button");
 btn.addEventListener("click", () => void projektOeffnen());
 
 const btnOrdner = el("#btn-ordner", "button");
-btnOrdner.addEventListener("click", () => void ordnerWaehlen());
+btnOrdner.addEventListener("click", () => ordnerHinweisAnzeigen());
 
 const input = el("#pfad-input", "input");
 input.addEventListener("keydown", (ev) => {
