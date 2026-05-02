@@ -96,26 +96,52 @@ app.MapGet("/api/preview/stream", (string? path, IFileSystemService fs) =>
         : Results.BadRequest(new ErrorResponse(fehler));
 });
 
-app.MapGet("/api/projects", (ProjectListStore store) =>
-    Results.Json(new ProjectsResponse(store.GetAll())));
-
-app.MapPost("/api/projects", (AddProjectRequest? req, ProjectListStore store) =>
+app.MapGet("/api/projects", (ProjectListStore store, ILoggerFactory loggerFactory) =>
 {
-    if (req is null)
-        return Results.BadRequest(new ErrorResponse("Anfrage fehlt oder ist ungültig."));
-
-    var fehler = store.TryAdd(req.Path, req.Name);
-    return fehler is null
-        ? Results.Json(new ProjectsResponse(store.GetAll()))
-        : Results.BadRequest(new ErrorResponse(fehler));
+    try
+    {
+        return Results.Json(new ProjectsResponse(store.GetAll()));
+    }
+    catch (Exception ex)
+    {
+        loggerFactory.CreateLogger("ProjectsApi").LogError(ex, "GET /api/projects");
+        return Results.Json(new ProjectsResponse(Array.Empty<SavedProjectDto>()));
+    }
 });
 
-app.MapDelete("/api/projects", (string? path, ProjectListStore store) =>
+app.MapPost("/api/projects", (AddProjectRequest? req, ProjectListStore store, ILogger<Program> logger) =>
 {
-    var fehler = store.TryRemove(path);
-    return fehler is null
-        ? Results.Json(new ProjectsResponse(store.GetAll()))
-        : Results.BadRequest(new ErrorResponse(fehler));
+    try
+    {
+        if (req is null)
+            return Results.BadRequest(new ErrorResponse("Anfrage fehlt oder ist ungültig."));
+
+        var fehler = store.TryAdd(req.Path, req.Name);
+        return fehler is null
+            ? Results.Json(new ProjectsResponse(store.GetAll()))
+            : Results.BadRequest(new ErrorResponse(fehler));
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "POST /api/projects");
+        return Results.BadRequest(new ErrorResponse($"Projektliste (Server): {ex.Message}"));
+    }
+});
+
+app.MapDelete("/api/projects", (string? path, ProjectListStore store, ILogger<Program> logger) =>
+{
+    try
+    {
+        var fehler = store.TryRemove(path);
+        return fehler is null
+            ? Results.Json(new ProjectsResponse(store.GetAll()))
+            : Results.BadRequest(new ErrorResponse(fehler));
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "DELETE /api/projects");
+        return Results.BadRequest(new ErrorResponse($"Projektliste (Server): {ex.Message}"));
+    }
 });
 
 app.MapFallbackToFile("index.html");

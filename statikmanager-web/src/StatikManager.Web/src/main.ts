@@ -644,12 +644,35 @@ async function ladeDateiMeta(relPath: string): Promise<void> {
   }
 }
 
+function logProjectsApiError(
+  operation: string,
+  res: Response,
+  bodyText: string
+): void {
+  const snippet =
+    bodyText.length > 500 ? `${bodyText.slice(0, 500)}…` : bodyText;
+  console.error(
+    `[StatikManager /api/projects] ${operation} → ${res.status} ${res.statusText}`,
+    snippet || "(leer)"
+  );
+}
+
 async function ladeProjektliste(aktuellesRoot: string | null): Promise<void> {
   const sel = el("#projekt-select", "select");
   try {
     const res = await fetch("/api/projects");
-    const raw: unknown = await res.json();
-    if (!res.ok) return;
+    const text = await res.text();
+    let raw: unknown;
+    try {
+      raw = text.trim() ? JSON.parse(text) : {};
+    } catch {
+      logProjectsApiError("GET", res, text);
+      return;
+    }
+    if (!res.ok) {
+      logProjectsApiError("GET", res, text);
+      return;
+    }
     const data = raw as ProjectsResponse;
     const projects = data.projects ?? [];
     sel.innerHTML = '<option value="">— Projekt wählen —</option>';
@@ -666,8 +689,8 @@ async function ladeProjektliste(aktuellesRoot: string | null): Promise<void> {
     } else {
       sel.value = "";
     }
-  } catch {
-    /* API optional */
+  } catch (e) {
+    console.error("[StatikManager /api/projects] GET (Netzwerk)", e);
   }
 }
 
@@ -685,8 +708,19 @@ async function aktuellesProjektInListeSpeichern(): Promise<void> {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ path: data.rootPath, name: null }),
     });
-    const raw2: unknown = await res2.json();
+    const body2 = await res2.text();
+    let raw2: unknown;
+    try {
+      raw2 = body2.trim() ? JSON.parse(body2) : {};
+    } catch {
+      logProjectsApiError("POST", res2, body2);
+      setFehler(
+        `Unerwartete Antwort (${res2.status}). Details in der Browser-Konsole.`
+      );
+      return;
+    }
     if (!res2.ok) {
+      logProjectsApiError("POST", res2, body2);
       const err = raw2 as Partial<ErrorResponse>;
       setFehler(
         typeof err.error === "string" ? err.error : `Fehler (${res2.status})`
@@ -694,8 +728,9 @@ async function aktuellesProjektInListeSpeichern(): Promise<void> {
       return;
     }
     await ladeProjektliste(data.rootPath);
-  } catch {
-    setFehler("Projektliste konnte nicht aktualisiert werden.");
+  } catch (e) {
+    console.error("[StatikManager /api/projects] POST (Netzwerk)", e);
+    setFehler("Projektliste konnte nicht aktualisiert werden (Netzwerk).");
   }
 }
 
@@ -712,8 +747,19 @@ async function projektAusListeEntfernen(): Promise<void> {
       `/api/projects?path=${encodeURIComponent(path)}`,
       { method: "DELETE" }
     );
-    const raw: unknown = await res.json();
+    const textDel = await res.text();
+    let raw: unknown;
+    try {
+      raw = textDel.trim() ? JSON.parse(textDel) : {};
+    } catch {
+      logProjectsApiError("DELETE", res, textDel);
+      setFehler(
+        `Unerwartete Antwort (${res.status}). Details in der Browser-Konsole.`
+      );
+      return;
+    }
     if (!res.ok) {
+      logProjectsApiError("DELETE", res, textDel);
       const err = raw as Partial<ErrorResponse>;
       setFehler(
         typeof err.error === "string" ? err.error : `Fehler (${res.status})`

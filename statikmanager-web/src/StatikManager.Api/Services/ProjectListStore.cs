@@ -19,7 +19,15 @@ public sealed class ProjectListStore
     {
         var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
         var dir = Path.Combine(appData, "StatikManagerWeb");
-        Directory.CreateDirectory(dir);
+        try
+        {
+            Directory.CreateDirectory(dir);
+        }
+        catch (Exception)
+        {
+            /* TryWriteAll erstellt bei Bedarf erneut */
+        }
+
         _filePath = Path.Combine(dir, "projekte.json");
     }
 
@@ -55,13 +63,15 @@ public sealed class ProjectListStore
             var list = ReadAll();
             foreach (var item in list)
             {
-                if (PathsEqual(item.Path, full))
+                if (PathsEqual(item.FullPath, full))
                     return "Dieses Projekt ist bereits gespeichert.";
             }
 
             var shortName = string.IsNullOrWhiteSpace(name) ? null : name.Trim();
             list.Add(new SavedProjectDto(full, shortName));
-            WriteAll(list);
+            var writeErr = TryWriteAll(list);
+            if (writeErr is not null)
+                return writeErr;
         }
 
         return null;
@@ -86,12 +96,14 @@ public sealed class ProjectListStore
         lock (_lock)
         {
             var list = ReadAll();
-            var idx = list.FindIndex(p => PathsEqual(p.Path, full));
+            var idx = list.FindIndex(p => PathsEqual(p.FullPath, full));
             if (idx < 0)
                 return "Projekt ist nicht in der Liste.";
 
             list.RemoveAt(idx);
-            WriteAll(list);
+            var writeErr = TryWriteAll(list);
+            if (writeErr is not null)
+                return writeErr;
         }
 
         return null;
@@ -120,6 +132,9 @@ public sealed class ProjectListStore
         try
         {
             var json = File.ReadAllText(_filePath);
+            if (string.IsNullOrWhiteSpace(json))
+                return [];
+
             var parsed = JsonSerializer.Deserialize<List<SavedProjectDto>>(json, JsonOptions);
             return parsed ?? [];
         }
@@ -129,9 +144,21 @@ public sealed class ProjectListStore
         }
     }
 
-    private void WriteAll(List<SavedProjectDto> list)
+    private string? TryWriteAll(List<SavedProjectDto> list)
     {
-        var json = JsonSerializer.Serialize(list, JsonOptions);
-        File.WriteAllText(_filePath, json);
+        try
+        {
+            var dir = Path.GetDirectoryName(_filePath);
+            if (!string.IsNullOrEmpty(dir))
+                Directory.CreateDirectory(dir);
+
+            var json = JsonSerializer.Serialize(list, JsonOptions);
+            File.WriteAllText(_filePath, json);
+            return null;
+        }
+        catch (Exception ex)
+        {
+            return $"Projektliste konnte nicht gespeichert werden: {ex.Message}";
+        }
     }
 }
