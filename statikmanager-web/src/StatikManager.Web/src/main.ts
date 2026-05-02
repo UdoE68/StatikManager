@@ -19,7 +19,7 @@ let letzteBrowseEntries: BrowseEntry[] = [];
 app.innerHTML = `
   <main class="shell">
     <h1>StatikManager Web</h1>
-    <p class="muted">Milestone 4 – Metadaten</p>
+    <p class="muted">Milestone 5 – Metadaten &amp; Vorschau</p>
 
     <section class="panel" aria-labelledby="projekt-label">
       <h2 id="projekt-label" class="h2">Projekt</h2>
@@ -47,14 +47,21 @@ app.innerHTML = `
         </section>
       </div>
 
-      <div class="layout-spalte-rechts">
+      <div class="layout-spalte-rechts layout-spalte-rechts-stapel">
         <section class="panel panel-inner" aria-labelledby="meta-label">
           <h2 id="meta-label" class="h2">Datei-Info</h2>
           <p id="meta-fehler" class="fehler" role="alert" hidden></p>
           <div id="meta-inhalt" class="meta-inhalt">
             <p class="meta-platzhalter">Keine Datei ausgewählt.</p>
           </div>
-          <p class="meta-hinweis muted-small">Milestone 4: nur Metadaten, keine Vorschau.</p>
+        </section>
+
+        <section class="panel panel-inner" aria-labelledby="vorschau-label">
+          <h2 id="vorschau-label" class="h2">Vorschau</h2>
+          <p id="vorschau-fehler" class="fehler" role="alert" hidden></p>
+          <div id="vorschau-inhalt" class="vorschau-inhalt">
+            <p class="vorschau-platzhalter">Keine Datei ausgewählt.</p>
+          </div>
         </section>
       </div>
     </div>
@@ -139,6 +146,117 @@ function setMetaFehler(text: string | null): void {
   fehler.textContent = text;
 }
 
+function setVorschauFehler(text: string | null): void {
+  const fehler = el("#vorschau-fehler", "p");
+  if (text === null || text === "") {
+    fehler.hidden = true;
+    fehler.textContent = "";
+    return;
+  }
+  fehler.hidden = false;
+  fehler.textContent = text;
+}
+
+function vorschauLeeren(): void {
+  setVorschauFehler(null);
+  const w = el("#vorschau-inhalt", "div");
+  w.innerHTML = '<p class="vorschau-platzhalter">Keine Datei ausgewählt.</p>';
+}
+
+function previewStreamUrl(relPath: string): string {
+  return `/api/preview/stream?path=${encodeURIComponent(relPath)}`;
+}
+
+async function leseFehlerAusAntwort(res: Response): Promise<string> {
+  try {
+    const j = (await res.json()) as Partial<ErrorResponse>;
+    if (typeof j.error === "string") return j.error;
+  } catch {
+    /* Antwort war kein JSON */
+  }
+  return `Fehler (${res.status})`;
+}
+
+async function zeigeVorschau(meta: FileMetaResponse): Promise<void> {
+  const wrap = el("#vorschau-inhalt", "div");
+  setVorschauFehler(null);
+  wrap.innerHTML = "";
+
+  if (meta.kind === "other") {
+    const p = document.createElement("p");
+    p.className = "vorschau-keine muted-small";
+    p.textContent =
+      "Für diesen Dateityp gibt es keine Vorschau — es werden nur die Metadaten angezeigt.";
+    wrap.appendChild(p);
+    return;
+  }
+
+  const url = previewStreamUrl(meta.relativePath);
+
+  try {
+    switch (meta.kind) {
+      case "pdf": {
+        const iframe = document.createElement("iframe");
+        iframe.className = "vorschau-iframe vorschau-pdf";
+        iframe.title = `PDF: ${meta.name}`;
+        iframe.src = url;
+        wrap.appendChild(iframe);
+        break;
+      }
+      case "image": {
+        const img = document.createElement("img");
+        img.className = "vorschau-img";
+        img.alt = meta.name;
+        img.src = url;
+        img.addEventListener("error", () => {
+          setVorschauFehler("Bild konnte nicht geladen werden.");
+        });
+        wrap.appendChild(img);
+        break;
+      }
+      case "html": {
+        const iframe = document.createElement("iframe");
+        iframe.className = "vorschau-iframe vorschau-html";
+        iframe.title = `HTML: ${meta.name}`;
+        iframe.setAttribute("sandbox", "allow-same-origin");
+        iframe.src = url;
+        wrap.appendChild(iframe);
+        break;
+      }
+      case "json":
+      case "text": {
+        const res = await fetch(url);
+        if (!res.ok) {
+          setVorschauFehler(await leseFehlerAusAntwort(res));
+          return;
+        }
+        const rawText = await res.text();
+        if (meta.kind === "json") {
+          try {
+            const parsed: unknown = JSON.parse(rawText);
+            const pre = document.createElement("pre");
+            pre.className = "vorschau-pre";
+            pre.textContent = JSON.stringify(parsed, null, 2);
+            wrap.appendChild(pre);
+          } catch {
+            setVorschauFehler("Inhalt ist kein gültiges JSON.");
+          }
+        } else {
+          const pre = document.createElement("pre");
+          pre.className = "vorschau-pre";
+          pre.textContent = rawText;
+          wrap.appendChild(pre);
+        }
+        break;
+      }
+      default:
+        break;
+    }
+  } catch {
+    setVorschauFehler("Vorschau konnte nicht geladen werden.");
+  }
+}
+
 function setRootAnzeige(rootPath: string | null): void {
   const rootAnzeige = el("#root-anzeige", "p");
   rootAnzeige.textContent =
@@ -150,6 +268,7 @@ function metaLeeren(): void {
   setMetaFehler(null);
   const inh = el("#meta-inhalt", "div");
   inh.innerHTML = '<p class="meta-platzhalter">Keine Datei ausgewählt.</p>';
+  vorschauLeeren();
 }
 
 function parentRelativePath(rel: string): string {
@@ -264,6 +383,9 @@ function rendereMeta(meta: FileMetaResponse): void {
 async function ladeDateiMeta(relPath: string): Promise<void> {
   ausgewaehlteDateiRel = relPath;
   setMetaFehler(null);
+  setVorschauFehler(null);
+  el("#vorschau-inhalt", "div").innerHTML =
+    '<p class="vorschau-platzhalter">Lade Vorschau …</p>';
 
   const q = `?path=${encodeURIComponent(relPath)}`;
 
@@ -277,6 +399,7 @@ async function ladeDateiMeta(relPath: string): Promise<void> {
         typeof err.error === "string" ? err.error : `Fehler (${res.status})`;
       setMetaFehler(msg);
       el("#meta-inhalt", "div").innerHTML = "";
+      vorschauLeeren();
       rendereBrowseListe(letzteBrowseEntries);
       return;
     }
@@ -284,8 +407,11 @@ async function ladeDateiMeta(relPath: string): Promise<void> {
     const meta = raw as FileMetaResponse;
     rendereMeta(meta);
     rendereBrowseListe(letzteBrowseEntries);
+    await zeigeVorschau(meta);
   } catch {
     setMetaFehler("Metadaten konnten nicht geladen werden (Netzwerk).");
+    el("#meta-inhalt", "div").innerHTML = "";
+    vorschauLeeren();
   }
 }
 

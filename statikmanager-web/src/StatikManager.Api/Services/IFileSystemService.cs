@@ -22,4 +22,9 @@ public interface IFileSystemService
     /// Metadaten einer Datei relativ zum Root.
     /// </summary>
     string? TryGetFileMeta(string? relativePath, out FileMetaResponse? meta);
+
+    /// <summary>
+    /// Öffnet eine Datei zum Streamen (Vorschau). Aufrufer muss den Stream schließen — bei Results.File übernimmt ASP.NET Core das.
+    /// </summary>
+    string? TryOpenPreviewRead(string? relativePath, out Stream? stream, out string contentType);
 }

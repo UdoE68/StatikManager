@@ -156,6 +156,63 @@ public sealed class FileSystemService : IFileSystemService
         return null;
     }
 
+    public string? TryOpenPreviewRead(string? relativePath, out Stream? stream, out string contentType)
+    {
+        stream = null;
+        contentType = "application/octet-stream";
+
+        if (string.IsNullOrWhiteSpace(relativePath))
+            return "Pfad darf nicht leer sein.";
+
+        var fehler = TryResolveTargetUnderRoot(relativePath, out _, out var targetFull);
+        if (fehler is not null)
+            return fehler;
+
+        if (Directory.Exists(targetFull))
+            return "Pfad ist ein Ordner, keine Datei.";
+
+        if (!File.Exists(targetFull))
+            return "Die Datei existiert nicht.";
+
+        var ext = Path.GetExtension(targetFull).ToLowerInvariant();
+        contentType = NormalizePreviewContentType(ext, MimeFromExtension(ext));
+
+        try
+        {
+            stream = new FileStream(
+                targetFull,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.Read,
+                bufferSize: 64 * 1024,
+                FileOptions.Asynchronous);
+        }
+        catch (Exception)
+        {
+            return "Die Datei konnte nicht geöffnet werden.";
+        }
+
+        return null;
+    }
+
+    private static string NormalizePreviewContentType(string extLower, string mime)
+    {
+        if (mime.Contains("charset", StringComparison.OrdinalIgnoreCase))
+            return mime;
+
+        if (mime.StartsWith("text/", StringComparison.OrdinalIgnoreCase))
+            return mime + "; charset=utf-8";
+
+        if (extLower is ".html" or ".htm")
+            return "text/html; charset=utf-8";
+
+        if (extLower == ".json"
+            || string.Equals(mime, "application/json", StringComparison.OrdinalIgnoreCase))
+            return "application/json; charset=utf-8";
+
+        return mime;
+    }
+
     /// <summary>
     /// Löst einen relativen Pfad unterhalb des Roots auf (oder Root bei leerem Pfad).
     /// </summary>

@@ -10,16 +10,22 @@ body {
 }
 
 .shell {
-  max-width: 56rem;
+  max-width: 62rem;
   margin: 3rem auto;
   padding: 0 1rem;
 }
 
 .layout-haupt {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(16rem, 20rem);
+  grid-template-columns: minmax(0, 1fr) minmax(18rem, 22rem);
   gap: 1rem;
   align-items: start;
+}
+
+.layout-spalte-rechts-stapel {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
 }
 
 @media (max-width: 700px) {
@@ -33,7 +39,51 @@ body {
 }
 
 .meta-inhalt {
-  min-height: 8rem;
+  min-height: 6rem;
+}
+
+.vorschau-inhalt {
+  min-height: 10rem;
+}
+
+.vorschau-platzhalter {
+  margin: 0;
+  color: #666;
+  font-style: italic;
+}
+
+.vorschau-keine {
+  margin: 0;
+}
+
+.vorschau-iframe {
+  width: 100%;
+  min-height: 22rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background: #fafafa;
+}
+
+.vorschau-img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+}
+
+.vorschau-pre {
+  margin: 0;
+  padding: 0.65rem;
+  max-height: 45vh;
+  overflow: auto;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  background: #fafafa;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .meta-platzhalter {

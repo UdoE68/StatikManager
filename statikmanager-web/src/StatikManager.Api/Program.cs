@@ -66,6 +66,14 @@ app.MapGet("/api/file/meta", (string? path, IFileSystemService fs) =>
         : Results.BadRequest(new ErrorResponse(fehler));
 });
 
+app.MapGet("/api/preview/stream", (string? path, IFileSystemService fs) =>
+{
+    var fehler = fs.TryOpenPreviewRead(path, out var stream, out var contentType);
+    return fehler is null
+        ? Results.File(stream!, contentType: contentType, enableRangeProcessing: true)
+        : Results.BadRequest(new ErrorResponse(fehler));
+});
+
 app.MapFallbackToFile("index.html");
 
 app.Run();
