@@ -16,50 +16,55 @@ let browsePfadAktuell = "";
 let ausgewaehlteDateiRel: string | null = null;
 
 app.innerHTML = `
-  <main class="shell">
-    <h1>StatikManager Web</h1>
-    <p class="muted">Milestone 5 – Metadaten &amp; Vorschau</p>
-
-    <section class="panel" aria-labelledby="projekt-label">
-      <h2 id="projekt-label" class="h2">Projekt</h2>
-      <label class="label" for="pfad-input">Projektpfad</label>
-      <div class="row">
-        <input id="pfad-input" class="input" type="text" autocomplete="off"
-          placeholder="z. B. C:\\Projekte\\MeinStatikProjekt" spellcheck="false" />
-        <button id="btn-oeffnen" type="button" class="btn">Projekt öffnen</button>
-        <button id="btn-ordner" type="button" class="btn btn-secondary">Ordner wählen</button>
+  <main class="shell app-shell">
+    <header class="app-header">
+      <div class="app-header-brand">
+        <h1 class="app-title">StatikManager Web</h1>
+        <span class="app-header-tag muted">Metadaten &amp; Vorschau</span>
       </div>
-      <p id="ordner-hinweis" class="hinweis" role="status" hidden></p>
-      <p id="fehler" class="fehler" role="alert" hidden></p>
-      <p class="aktuell-label">Aktuelles Projekt-Root</p>
-      <p id="root-anzeige" class="root-anzeige">—</p>
-    </section>
+      <section class="app-header-project" aria-labelledby="projekt-label">
+        <h2 id="projekt-label" class="h2 app-header-projekt-label">Projekt</h2>
+        <div class="app-header-row">
+          <label class="label label--inline" for="pfad-input">Pfad</label>
+          <input id="pfad-input" class="input input--compact" type="text" autocomplete="off"
+            placeholder="z. B. C:\\Projekte\\MeinStatikProjekt" spellcheck="false" />
+          <button id="btn-oeffnen" type="button" class="btn btn--compact">Öffnen</button>
+          <button id="btn-ordner" type="button" class="btn btn-secondary btn--compact">Ordner …</button>
+        </div>
+        <p id="ordner-hinweis" class="hinweis hinweis--compact" role="status" hidden></p>
+        <p id="fehler" class="fehler fehler--compact" role="alert" hidden></p>
+        <div class="app-root-row">
+          <span class="aktuell-label aktuell-label--inline">Root</span>
+          <p id="root-anzeige" class="root-anzeige root-anzeige--compact">—</p>
+        </div>
+      </section>
+    </header>
 
-    <div class="layout-haupt">
-      <div class="layout-spalte-links">
-        <section class="panel panel-inner" id="browse-panel" aria-labelledby="browse-label">
-          <h2 id="browse-label" class="h2">Ordnerinhalt</h2>
-          <div class="browse-toolbar">
-            <button id="btn-hoch" type="button" class="btn btn-secondary" disabled>Nach oben</button>
+    <div class="layout-haupt app-workspace">
+      <aside class="layout-spalte-links app-pane-tree">
+        <section class="panel panel-inner panel--chrome" id="browse-panel" aria-labelledby="browse-label">
+          <h2 id="browse-label" class="h2 h2--pane">Ordner</h2>
+          <div class="browse-toolbar browse-toolbar--compact">
+            <button id="btn-hoch" type="button" class="btn btn-secondary btn--compact" disabled>Nach oben</button>
             <span id="browse-pfad-anzeige" class="browse-pfad"></span>
           </div>
-          <p id="browse-fehler" class="fehler" role="alert" hidden></p>
-          <ul id="browse-liste" class="browse-liste browse-tree-root" role="tree" aria-label="Projektordner"></ul>
+          <p id="browse-fehler" class="fehler fehler--compact" role="alert" hidden></p>
+          <ul id="browse-liste" class="browse-liste browse-tree-root browse-tree--compact" role="tree" aria-label="Projektordner"></ul>
         </section>
-      </div>
+      </aside>
 
-      <div class="layout-spalte-rechts layout-spalte-rechts-stapel">
-        <section class="panel panel-inner" aria-labelledby="meta-label">
-          <h2 id="meta-label" class="h2">Datei-Info</h2>
-          <p id="meta-fehler" class="fehler" role="alert" hidden></p>
+      <div class="layout-spalte-rechts layout-spalte-rechts-stapel app-pane-detail">
+        <section class="panel panel-inner panel--chrome panel--meta" aria-labelledby="meta-label">
+          <h2 id="meta-label" class="h2 h2--pane">Datei-Info</h2>
+          <p id="meta-fehler" class="fehler fehler--compact" role="alert" hidden></p>
           <div id="meta-inhalt" class="meta-inhalt">
             <p class="meta-platzhalter">Keine Datei ausgewählt.</p>
           </div>
         </section>
 
-        <section class="panel panel-inner" aria-labelledby="vorschau-label">
-          <h2 id="vorschau-label" class="h2">Vorschau</h2>
-          <p id="vorschau-fehler" class="fehler" role="alert" hidden></p>
+        <section class="panel panel-inner panel--chrome panel--preview" aria-labelledby="vorschau-label">
+          <h2 id="vorschau-label" class="h2 h2--pane">Vorschau</h2>
+          <p id="vorschau-fehler" class="fehler fehler--compact" role="alert" hidden></p>
           <div id="vorschau-inhalt" class="vorschau-inhalt">
             <p class="vorschau-platzhalter">Keine Datei ausgewählt.</p>
           </div>
@@ -67,9 +72,9 @@ app.innerHTML = `
       </div>
     </div>
 
-    <section class="panel muted-small">
-      <p id="health-status" class="status">API …</p>
-    </section>
+    <footer class="app-statusbar">
+      <p id="health-status" class="status status--bar">API …</p>
+    </footer>
   </main>
 `;
 
