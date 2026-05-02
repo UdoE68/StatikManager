@@ -1,8 +1,16 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using StatikManager.Api.Contracts;
 using StatikManager.Api.Contracts.Session;
 using StatikManager.Api.Services;
 
 var builder = WebApplication.CreateBuilder(args);
+
+builder.Services.ConfigureHttpJsonOptions(o =>
+{
+    o.SerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
+    o.SerializerOptions.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase));
+});
 
 builder.Services.AddSingleton<IFileSystemService, FileSystemService>();
 
@@ -47,6 +55,14 @@ app.MapGet("/api/browse", (string? path, IFileSystemService fs) =>
     var fehler = fs.TryBrowse(path, out var resp);
     return fehler is null
         ? Results.Json(resp!)
+        : Results.BadRequest(new ErrorResponse(fehler));
+});
+
+app.MapGet("/api/file/meta", (string? path, IFileSystemService fs) =>
+{
+    var fehler = fs.TryGetFileMeta(path, out var meta);
+    return fehler is null
+        ? Results.Json(meta!)
         : Results.BadRequest(new ErrorResponse(fehler));
 });
 

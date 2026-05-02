@@ -1,4 +1,5 @@
 using StatikManager.Api.Contracts.Browse;
+using StatikManager.Api.Contracts.File;
 using StatikManager.Api.Contracts.Session;
 
 namespace StatikManager.Api.Services;
@@ -16,4 +17,9 @@ public interface IFileSystemService
     /// Listet den angegebenen Unterordner relativ zum Root. Leer/null = Root.
     /// </summary>
     string? TryBrowse(string? relativePath, out BrowseResponse? response);
+
+    /// <summary>
+    /// Metadaten einer Datei relativ zum Root.
+    /// </summary>
+    string? TryGetFileMeta(string? relativePath, out FileMetaResponse? meta);
 }

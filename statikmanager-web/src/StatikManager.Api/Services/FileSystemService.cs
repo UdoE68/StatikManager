@@ -1,5 +1,7 @@
 using System.IO;
+using Microsoft.AspNetCore.StaticFiles;
 using StatikManager.Api.Contracts.Browse;
+using StatikManager.Api.Contracts.File;
 using StatikManager.Api.Contracts.Session;
 
 namespace StatikManager.Api.Services;
@@ -8,6 +10,20 @@ public sealed class FileSystemService : IFileSystemService
 {
     private readonly object _lock = new();
     private string? _rootPath;
+
+    private static readonly FileExtensionContentTypeProvider MimeProvider = new();
+
+    private static readonly HashSet<string> BildErweiterungen =
+    [
+        ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tif", ".tiff", ".webp", ".svg",
+    ];
+
+    private static readonly HashSet<string> TextErweiterungen =
+    [
+        ".txt", ".md", ".csv", ".xml", ".css", ".js", ".mjs", ".cjs", ".ts", ".tsx",
+        ".cs", ".log", ".yaml", ".yml", ".ini", ".bat", ".cmd", ".ps1", ".sh",
+        ".gitignore", ".env", ".jsonl",
+    ];
 
     public SessionResponse GetSession()
     {
@@ -53,40 +69,9 @@ public sealed class FileSystemService : IFileSystemService
     {
         response = null;
 
-        string? root;
-        lock (_lock)
-        {
-            root = _rootPath;
-        }
-
-        if (string.IsNullOrEmpty(root))
-            return "Kein Projekt gewählt.";
-
-        string rootFull;
-        try
-        {
-            rootFull = Path.GetFullPath(root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
-        }
-        catch (Exception)
-        {
-            return "Interner Fehler: Projekt-Root ist ungültig.";
-        }
-
-        string targetFull;
-        try
-        {
-            var relNormalized = NormalizeRelativeInput(relativePath);
-            targetFull = string.IsNullOrEmpty(relNormalized)
-                ? rootFull
-                : Path.GetFullPath(Path.Combine(rootFull, relNormalized));
-        }
-        catch (Exception)
-        {
-            return "Der Pfad ist ungültig.";
-        }
-
-        if (!LiegtUnterhalbOderIstRoot(rootFull, targetFull))
-            return "Zugriff außerhalb des Projektordners ist nicht erlaubt.";
+        var fehler = TryResolveTargetUnderRoot(relativePath, out var rootFull, out var targetFull);
+        if (fehler is not null)
+            return fehler;
 
         if (File.Exists(targetFull))
             return "Pfad ist eine Datei, kein Ordner.";
@@ -136,6 +121,106 @@ public sealed class FileSystemService : IFileSystemService
 
         response = new BrowseResponse(entries);
         return null;
+    }
+
+    public string? TryGetFileMeta(string? relativePath, out FileMetaResponse? meta)
+    {
+        meta = null;
+
+        if (string.IsNullOrWhiteSpace(relativePath))
+            return "Pfad darf nicht leer sein.";
+
+        var fehler = TryResolveTargetUnderRoot(relativePath, out var rootFull, out var targetFull);
+        if (fehler is not null)
+            return fehler;
+
+        if (Directory.Exists(targetFull))
+            return "Pfad ist ein Ordner, keine Datei.";
+
+        if (!File.Exists(targetFull))
+            return "Die Datei existiert nicht.";
+
+        var fi = new FileInfo(targetFull);
+        var ext = fi.Extension.ToLowerInvariant();
+        var kind = ClassifyKind(ext);
+        var mime = MimeFromExtension(ext);
+
+        meta = new FileMetaResponse(
+            ToApiRelativePath(rootFull, fi.FullName),
+            fi.Name,
+            kind,
+            fi.Length,
+            fi.LastWriteTimeUtc,
+            mime);
+
+        return null;
+    }
+
+    /// <summary>
+    /// Löst einen relativen Pfad unterhalb des Roots auf (oder Root bei leerem Pfad).
+    /// </summary>
+    private string? TryResolveTargetUnderRoot(string? relativePath, out string rootFull, out string targetFull)
+    {
+        rootFull = "";
+        targetFull = "";
+
+        string? root;
+        lock (_lock)
+        {
+            root = _rootPath;
+        }
+
+        if (string.IsNullOrEmpty(root))
+            return "Kein Projekt gewählt.";
+
+        try
+        {
+            rootFull = Path.GetFullPath(root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        }
+        catch (Exception)
+        {
+            return "Interner Fehler: Projekt-Root ist ungültig.";
+        }
+
+        try
+        {
+            var relNormalized = NormalizeRelativeInput(relativePath);
+            targetFull = string.IsNullOrEmpty(relNormalized)
+                ? rootFull
+                : Path.GetFullPath(Path.Combine(rootFull, relNormalized));
+        }
+        catch (Exception)
+        {
+            return "Der Pfad ist ungültig.";
+        }
+
+        if (!LiegtUnterhalbOderIstRoot(rootFull, targetFull))
+            return "Zugriff außerhalb des Projektordners ist nicht erlaubt.";
+
+        return null;
+    }
+
+    private static FileKind ClassifyKind(string extLower)
+    {
+        if (extLower == ".pdf")
+            return FileKind.Pdf;
+        if (extLower is ".html" or ".htm")
+            return FileKind.Html;
+        if (extLower == ".json")
+            return FileKind.Json;
+        if (BildErweiterungen.Contains(extLower))
+            return FileKind.Image;
+        if (TextErweiterungen.Contains(extLower))
+            return FileKind.Text;
+        return FileKind.Other;
+    }
+
+    private static string MimeFromExtension(string extLower)
+    {
+        var fakeName = "f" + extLower;
+        return MimeProvider.TryGetContentType(fakeName, out var mime)
+            ? mime
+            : "application/octet-stream";
     }
 
     /// <summary>

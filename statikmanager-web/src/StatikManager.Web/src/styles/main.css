@@ -10,9 +10,64 @@ body {
 }
 
 .shell {
-  max-width: 42rem;
+  max-width: 56rem;
   margin: 3rem auto;
   padding: 0 1rem;
+}
+
+.layout-haupt {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(16rem, 20rem);
+  gap: 1rem;
+  align-items: start;
+}
+
+@media (max-width: 700px) {
+  .layout-haupt {
+    grid-template-columns: 1fr;
+  }
+}
+
+.panel-inner {
+  margin-top: 0;
+}
+
+.meta-inhalt {
+  min-height: 8rem;
+}
+
+.meta-platzhalter {
+  margin: 0;
+  color: #666;
+  font-style: italic;
+}
+
+.meta-hinweis {
+  margin: 0.75rem 0 0;
+}
+
+.meta-dl {
+  margin: 0;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.35rem 1rem;
+  font-size: 0.9rem;
+}
+
+.meta-dl dt {
+  margin: 0;
+  color: #444;
+  font-weight: 600;
+}
+
+.meta-dl dd {
+  margin: 0;
+  word-break: break-all;
+}
+
+.browse-selected {
+  background: #e8f2ff !important;
+  outline: 2px solid #6ae;
 }
 
 .muted {
@@ -147,6 +202,16 @@ body {
 .browse-dir {
   cursor: pointer;
   background: #fafafa;
+}
+
+.browse-file {
+  cursor: pointer;
+}
+
+.browse-file:hover,
+.browse-file:focus {
+  background: #f5f5f5;
+  outline: none;
 }
 
 .browse-dir:hover,

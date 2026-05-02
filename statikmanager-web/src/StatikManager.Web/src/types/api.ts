@@ -17,3 +17,20 @@ export type BrowseEntry = {
 export type BrowseResponse = {
   entries: BrowseEntry[];
 };
+
+export type FileKind =
+  | "pdf"
+  | "image"
+  | "html"
+  | "json"
+  | "text"
+  | "other";
+
+export type FileMetaResponse = {
+  relativePath: string;
+  name: string;
+  kind: FileKind;
+  sizeBytes: number;
+  modifiedUtc: string;
+  mimeType: string;
+};

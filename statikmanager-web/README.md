@@ -2,7 +2,7 @@
 
 Separates Mini-Projekt: ASP.NET Core Minimal API + Vite/TypeScript. Kein Bezug zum WPF-StatikManager im übergeordneten Ordner.
 
-**Stand:** Milestone 3 (Ordnerliste relativ zum Root, Navigation).
+**Stand:** Milestone 4 (Datei auswählen, Metadaten rechts — keine Vorschau).
 
 ## Voraussetzungen
 
@@ -61,6 +61,7 @@ Browser: `http://localhost:5156` — dieselbe Origin für UI und API.
 | GET     | `/api/session/root`  | `{ "rootPath": "<absolut>" \| null }` — gesetztes Root (nur RAM) |
 | POST    | `/api/session/root`  | Body: `{ "rootPath": "..." }`. Erfolg **200** und gleiche JSON wie GET. Fehler **400** mit `{ "error": "..." }` (z. B. leerer Pfad, existiert nicht, ist eine Datei). |
 | GET     | `/api/browse`        | Query optional `path`: relativer Unterpfad zum Root (`/` in URLs). Leer oder fehlend = Root. Antwort `{ "entries": [ { "name", "relativePath", "isDirectory", "sizeBytes", "modifiedUtc" } ] }`. Ordner zuerst, dann Dateien, jeweils alphabetisch. Kein Root gesetzt / Pfad außerhalb des Roots / keine Ordner → **400** `{ "error": "..." }`. |
+| GET     | `/api/file/meta`     | Query **`path`** (Pflicht): relative Pfadangabe zur Datei. Gleiche Sicherheitsregeln wie Browse. Antwort `{ "relativePath", "name", "kind" }` mit `kind` ∈ `pdf`, `image`, `html`, `json`, `text`, `other`, plus `sizeBytes`, `modifiedUtc`, `mimeType`. Ordner / nicht vorhanden / außerhalb Root → **400**. |
 
 ## Build / Typecheck
 
