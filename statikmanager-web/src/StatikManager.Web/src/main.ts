@@ -6,6 +6,7 @@ import type {
   ErrorResponse,
   FileKind,
   FileMetaResponse,
+  PickRootResponse,
   SessionResponse,
 } from "./types/api";
 
@@ -28,6 +29,7 @@ app.innerHTML = `
         <input id="pfad-input" class="input" type="text" autocomplete="off"
           placeholder="z. B. C:\\Projekte\\MeinStatikProjekt" spellcheck="false" />
         <button id="btn-oeffnen" type="button" class="btn">Projekt öffnen</button>
+        <button id="btn-ordner" type="button" class="btn btn-secondary">Ordner wählen</button>
       </div>
       <p id="fehler" class="fehler" role="alert" hidden></p>
       <p class="aktuell-label">Aktuelles Projekt-Root</p>
@@ -475,10 +477,7 @@ async function ladeSession(): Promise<void> {
   }
 }
 
-async function projektOeffnen(): Promise<void> {
-  const input = el("#pfad-input", "input");
-  const pfad = input.value;
-
+async function projektRootSetzen(pfad: string): Promise<void> {
   setFehler(null);
 
   try {
@@ -506,6 +505,44 @@ async function projektOeffnen(): Promise<void> {
     await ladeBrowse("");
   } catch {
     setFehler("Projekt konnte nicht gesetzt werden (Netzwerk).");
+  }
+}
+
+async function projektOeffnen(): Promise<void> {
+  const input = el("#pfad-input", "input");
+  await projektRootSetzen(input.value);
+}
+
+async function ordnerWaehlen(): Promise<void> {
+  setFehler(null);
+
+  try {
+    const res = await fetch("/api/session/pick-root", {
+      method: "POST",
+    });
+
+    const raw: unknown = await res.json();
+
+    if (!res.ok) {
+      const err = raw as Partial<ErrorResponse>;
+      setFehler(
+        typeof err.error === "string"
+          ? err.error
+          : `Ordnerdialog: Fehler (${res.status})`
+      );
+      return;
+    }
+
+    const pick = raw as PickRootResponse;
+    if (pick.rootPath === null || pick.rootPath === "") {
+      return;
+    }
+
+    const input = el("#pfad-input", "input");
+    input.value = pick.rootPath;
+    await projektRootSetzen(pick.rootPath);
+  } catch {
+    setFehler("Ordnerdialog nicht erreichbar (Netzwerk oder Server).");
   }
 }
 
@@ -547,6 +584,9 @@ void ladeSession();
 
 const btn = el("#btn-oeffnen", "button");
 btn.addEventListener("click", () => void projektOeffnen());
+
+const btnOrdner = el("#btn-ordner", "button");
+btnOrdner.addEventListener("click", () => void ordnerWaehlen());
 
 const input = el("#pfad-input", "input");
 input.addEventListener("keydown", (ev) => {
