@@ -1,0 +1,9 @@
+# .NET
+**/bin/
+**/obj/
+*.user
+*.suo
+
+# Node / Vite
+**/node_modules/
+src/StatikManager.Api/wwwroot/
