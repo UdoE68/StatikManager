@@ -100,3 +100,73 @@ body {
 .status.err {
   color: #a60f0f;
 }
+
+.browse-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.btn-secondary {
+  border-color: #888;
+  background: #fff;
+}
+
+.browse-pfad {
+  font-size: 0.875rem;
+  color: #444;
+  word-break: break-all;
+}
+
+.browse-liste {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  max-height: 22rem;
+  overflow: auto;
+}
+
+.browse-zeile {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+  padding: 0.45rem 0.65rem;
+  border-bottom: 1px solid #eee;
+  font-size: 0.95rem;
+}
+
+.browse-zeile:last-child {
+  border-bottom: none;
+}
+
+.browse-dir {
+  cursor: pointer;
+  background: #fafafa;
+}
+
+.browse-dir:hover,
+.browse-dir:focus {
+  background: #eef6ff;
+  outline: none;
+}
+
+.browse-leer {
+  padding: 0.65rem;
+  color: #666;
+  font-style: italic;
+}
+
+.browse-name {
+  font-weight: 500;
+}
+
+.browse-meta {
+  font-size: 0.85rem;
+  color: #555;
+  white-space: nowrap;
+}

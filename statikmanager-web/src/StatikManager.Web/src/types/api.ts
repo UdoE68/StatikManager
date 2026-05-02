@@ -5,3 +5,15 @@ export type SessionResponse = {
 export type ErrorResponse = {
   error: string;
 };
+
+export type BrowseEntry = {
+  name: string;
+  relativePath: string;
+  isDirectory: boolean;
+  sizeBytes: number | null;
+  modifiedUtc: string;
+};
+
+export type BrowseResponse = {
+  entries: BrowseEntry[];
+};

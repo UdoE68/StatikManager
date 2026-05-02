@@ -42,6 +42,14 @@ app.MapPost("/api/session/root", (SetRootRequest? req, IFileSystemService fs) =>
         : Results.BadRequest(new ErrorResponse(fehler));
 });
 
+app.MapGet("/api/browse", (string? path, IFileSystemService fs) =>
+{
+    var fehler = fs.TryBrowse(path, out var resp);
+    return fehler is null
+        ? Results.Json(resp!)
+        : Results.BadRequest(new ErrorResponse(fehler));
+});
+
 app.MapFallbackToFile("index.html");
 
 app.Run();

@@ -2,7 +2,7 @@
 
 Separates Mini-Projekt: ASP.NET Core Minimal API + Vite/TypeScript. Kein Bezug zum WPF-StatikManager im übergeordneten Ordner.
 
-**Stand:** Milestone 2 (Projekt-Root setzen/abfragen, nur Arbeitsspeicher).
+**Stand:** Milestone 3 (Ordnerliste relativ zum Root, Navigation).
 
 ## Voraussetzungen
 
@@ -32,7 +32,7 @@ npm install
 npm run dev
 ```
 
-Browser: `http://localhost:5173` — UI für Projektpfad und Session-API (Proxy `/api`).
+Browser: `http://localhost:5173` — Projekt öffnen, Ordnerliste und „Nach oben“ (Proxy `/api`).
 
 ### Variante B – Ein Prozess (Frontend aus `wwwroot`)
 
@@ -60,6 +60,7 @@ Browser: `http://localhost:5156` — dieselbe Origin für UI und API.
 | GET     | `/api/health`        | `{ "ok": true }` |
 | GET     | `/api/session/root`  | `{ "rootPath": "<absolut>" \| null }` — gesetztes Root (nur RAM) |
 | POST    | `/api/session/root`  | Body: `{ "rootPath": "..." }`. Erfolg **200** und gleiche JSON wie GET. Fehler **400** mit `{ "error": "..." }` (z. B. leerer Pfad, existiert nicht, ist eine Datei). |
+| GET     | `/api/browse`        | Query optional `path`: relativer Unterpfad zum Root (`/` in URLs). Leer oder fehlend = Root. Antwort `{ "entries": [ { "name", "relativePath", "isDirectory", "sizeBytes", "modifiedUtc" } ] }`. Ordner zuerst, dann Dateien, jeweils alphabetisch. Kein Root gesetzt / Pfad außerhalb des Roots / keine Ordner → **400** `{ "error": "..." }`. |
 
 ## Build / Typecheck
 
